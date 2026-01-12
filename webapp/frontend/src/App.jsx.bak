@@ -1,0 +1,698 @@
+import { Fragment, useEffect, useMemo, useState } from 'react';
+
+const REFRESH_INTERVAL_MS = 1000;
+
+const CARD_ADDRESSES = new Set([5016, 13021, 13022, 5600, 5743, 5744, 5745, 13049, 13050, 13051, 33046, 33047, 13052, 13000, 13073, 13086]);
+
+const CARD_TITLES = {
+  5016: 'PV Power',
+  13021: 'Battery Power',
+  13022: 'Battery SoC',
+  5600: 'Meter Power',
+  5743: 'Meter L1 Current',
+  5744: 'Meter L2 Current',
+  5745: 'Meter L3 Current',
+  13049: 'Grid Mode',
+  13050: 'Charge/Discharge',
+  13051: 'Power Level',
+  13073: 'Export Power Limit',
+  13086: 'Export Limit Enable',
+  33046: 'Max Charge',
+  33047: 'Max Discharge',
+  13052: 'Load'
+};
+
+const CARD_GROUP_CONFIGS = [
+  { key: 'equation', addresses: [], alwaysShow: true },
+  { key: 'export-limits', addresses: [13073, 13086] },
+  { key: 'row-one', addresses: [5600, 5016, 13051] },
+  { key: 'row-two', addresses: [13052, 13050], includeSolarRadiance: true },
+  { key: 'controls-line-one', addresses: [13049, 13021, 33046, 33047] },
+  { key: 'controls-line-two', addresses: [13022, 5743, 5744, 5745] }
+];
+
+const INVERTER_CORE_ADDRESSES = new Set([5000, 5007, 5010, 5011, 5012, 5013]);
+const BATTERY_RANGE_START = 13019;
+const BATTERY_RANGE_END = 13026;
+const CONTROL_ADDRESSES = new Set([13049, 13050, 13051, 33046, 33047, 13052]);
+const METER_GRID_ADDRESSES = new Set([5600, 5602, 5604, 5606, 5740, 5741, 5742, 5743, 5744, 5745]);
+const INPUT_ADDRESSES = [
+  13051,  // Battery Power Level
+  5016,   // PV Power
+  13052   // Load Power
+];
+
+const formatValue = (value, unit, address) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '--';
+  }
+  
+  // Special formatting for command register
+  if (address === 13050) {
+    const commands = { 170: 'Charge (0xAA)', 187: 'Discharge (0xBB)', 204: 'Stop (0xCC)' };
+    const command = commands[value];
+    return command || `${value} (Unknown)`;
+  }
+  
+  // Special formatting for grid mode
+  if (address === 13049) {
+    const modes = { 0: 'Self-consumption', 2: 'Forced', 3: 'External EMS', 4: 'VPP' };
+    const mode = modes[value];
+    return mode || `${value} (Unknown)`;
+  }
+  
+  // Special formatting for export limitation enable
+  if (address === 13086) {
+    const states = { 170: 'Enabled (0xAA)', 85: 'Disabled (0x55)' };
+    const state = states[value];
+    return state || `${value} (Unknown)`;
+  }
+  
+  const formatter = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: Math.abs(value) < 10 ? 2 : 1
+  });
+  return `${formatter.format(value)} ${unit}`.trim();
+};
+
+const categorize = (address) => {
+  if (INVERTER_CORE_ADDRESSES.has(address)) {
+    return 'Inverter Core';
+  }
+  if (address >= BATTERY_RANGE_START && address <= BATTERY_RANGE_END) {
+    return 'Battery';
+  }
+  if (CONTROL_ADDRESSES.has(address)) {
+    return 'Controls';
+  }
+  if (METER_GRID_ADDRESSES.has(address)) {
+    return 'Meter & Grid';
+  }
+  return 'Meter & Grid';
+};
+
+const groupRegisters = (registers) => {
+  return registers.reduce((groups, item) => {
+    const section = categorize(item.address);
+    if (!groups[section]) {
+      groups[section] = [];
+    }
+    groups[section].push(item);
+    return groups;
+  }, {});
+};
+
+const sortRegisters = (registers) => {
+  return [...registers].sort((a, b) => a.address - b.address);
+};
+
+const useRegisters = () => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [timestamp, setTimestamp] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    let timerId;
+
+    const load = async () => {
+      try {
+        const response = await fetch('/api/registers');
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+        const payload = await response.json();
+        if (isMounted) {
+          setData(sortRegisters(payload));
+          setTimestamp(new Date());
+          setError(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err.message || 'Unable to fetch data');
+          setLoading(false);
+        }
+      } finally {
+        if (isMounted) {
+          timerId = window.setTimeout(load, REFRESH_INTERVAL_MS);
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      isMounted = false;
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, []);
+
+  return { data, setData, loading, error, timestamp, setTimestamp };
+};
+
+const RegisterCard = ({ item, onWrite }) => {
+  const [inputValue, setInputValue] = useState(item.value ?? '');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const displayName = CARD_TITLES[item.address] ?? item.name;
+
+  useEffect(() => {
+    setInputValue(item.value ?? '');
+  }, [item.value]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const parsed = Number(inputValue);
+    if (Number.isNaN(parsed)) {
+      setError('Enter a numeric value');
+      return;
+    }
+
+    setPending(true);
+    setError('');
+    try {
+      await onWrite(item.address, parsed);
+    } catch (err) {
+      setError(err.message || 'Write failed');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="register-card">
+      <div className="register-title">
+        <span className="name">{displayName}</span>
+        <span className="value">{formatValue(item.value, item.unit, item.address)}</span>
+      </div>
+      <div className="register-description">{item.description}</div>
+      <div className="register-meta">
+        <span>Address {item.address}</span>
+        <span>{item.data_type}</span>
+      </div>
+      <div className="register-raw">Raw: {item.raw?.join(', ') || '--'}</div>
+      <form className="register-actions" onSubmit={handleSubmit}>
+        <input
+          type="number"
+          step="any"
+          value={inputValue}
+          onChange={(event) => setInputValue(event.target.value)}
+          disabled={pending}
+        />
+        <button type="submit" disabled={pending}>Set</button>
+        {error && <div className="form-error">{error}</div>}
+      </form>
+    </div>
+  );
+};
+
+const SolarRadianceCard = ({ value, inputValue, onInputChange, onSubmit, pending, error }) => (
+  <div className="register-card">
+    <div className="register-title">
+      <span className="name">Solar Radiance</span>
+      <span className="value">{Number.isFinite(value) ? `${value} W` : '--'}</span>
+    </div>
+    <div className="register-description">Synthetic irradiance power input</div>
+    <div className="register-meta">
+      <span>Fake Register</span>
+      <span>U16</span>
+    </div>
+    <div className="register-raw">Raw: --</div>
+    <form className="register-actions" onSubmit={onSubmit}>
+      <input
+        type="number"
+        step="any"
+        value={inputValue}
+        onChange={(event) => onInputChange(event.target.value)}
+        disabled={pending}
+      />
+      <button type="submit" disabled={pending}>Set</button>
+      {error && <div className="form-error">{error}</div>}
+    </form>
+  </div>
+);
+
+const RegisterRow = ({ item, onWrite }) => {
+  const [inputValue, setInputValue] = useState(item.value ?? '');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setInputValue(item.value ?? '');
+  }, [item.value]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const parsed = Number(inputValue);
+    if (Number.isNaN(parsed)) {
+      setError('Enter a numeric value');
+      return;
+    }
+
+    setPending(true);
+    setError('');
+    try {
+      await onWrite(item.address, parsed);
+    } catch (err) {
+      setError(err.message || 'Write failed');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <tr>
+      <td className="table-name">
+        <span className="table-primary">{item.name}</span>
+        {item.description && <span className="table-secondary">{item.description}</span>}
+      </td>
+      <td>{formatValue(item.value, item.unit, item.address)}</td>
+      <td>{item.unit || '--'}</td>
+      <td>{item.address}</td>
+      <td>{item.raw?.join(', ') || '--'}</td>
+      <td>
+        <form className="table-form" onSubmit={handleSubmit}>
+          <input
+            type="number"
+            step="any"
+            value={inputValue}
+            onChange={(event) => setInputValue(event.target.value)}
+            disabled={pending}
+          />
+          <button type="submit" disabled={pending}>Set</button>
+        </form>
+        {error && <div className="table-error">{error}</div>}
+      </td>
+    </tr>
+  );
+};
+
+const App = () => {
+  const { data, setData, loading, error, timestamp, setTimestamp } = useRegisters();
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [loadValue, setLoadValue] = useState('');
+  const [settingLoad, setSettingLoad] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [readingRange, setReadingRange] = useState(false);
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const [rangeResult, setRangeResult] = useState(null);
+  const [rangeError, setRangeError] = useState('');
+  const [solarRadiance, setSolarRadiance] = useState(0);
+  const [solarRadianceInput, setSolarRadianceInput] = useState('');
+  const [solarRadianceError, setSolarRadianceError] = useState('');
+  const [solarRadiancePending, setSolarRadiancePending] = useState(false);
+
+  const handleSolarRadianceSubmit = async (event) => {
+    event.preventDefault();
+    const parsed = Number(solarRadianceInput);
+    if (Number.isNaN(parsed)) {
+      setSolarRadianceError('Enter a numeric value');
+      return;
+    }
+
+    setSolarRadiancePending(true);
+    setSolarRadianceError('');
+    try {
+      const response = await fetch('/api/solar-radiance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: parsed })
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.detail || `Set solar radiance failed (${response.status})`);
+      }
+
+      const result = await response.json();
+      const storedValue = Number(result?.value ?? parsed);
+      setSolarRadiance(storedValue);
+      setSolarRadianceInput('');
+
+      const registersResponse = await fetch('/api/registers');
+      if (!registersResponse.ok) {
+        throw new Error(`Failed to reload registers (${registersResponse.status})`);
+      }
+      const payload = await registersResponse.json();
+      setData(sortRegisters(payload));
+      setTimestamp(new Date());
+    } catch (err) {
+      setSolarRadianceError(err.message || 'Setting solar radiance failed');
+    } finally {
+      setSolarRadiancePending(false);
+    }
+  };
+
+  const handleWrite = async (address, value) => {
+    const response = await fetch(`/api/registers/${address}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value })
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const message = payload?.detail || `Write failed with status ${response.status}`;
+      throw new Error(message);
+    }
+
+    // After writing, reload all registers so derived registers (battery, meter) update immediately
+    const registersResponse = await fetch('/api/registers');
+    if (!registersResponse.ok) {
+      throw new Error(`Failed to reload registers (${registersResponse.status})`);
+    }
+    const payload = await registersResponse.json();
+    setData(sortRegisters(payload));
+    setTimestamp(new Date());
+    return payload;
+  };
+
+  const cardItems = useMemo(
+    () => data.filter((item) => CARD_ADDRESSES.has(item.address)),
+    [data]
+  );
+
+  const cardGroups = useMemo(() => {
+    const lookup = new Map(cardItems.map((item) => [item.address, item]));
+    return CARD_GROUP_CONFIGS.map((config) => ({
+      ...config,
+      items: config.addresses.map((address) => lookup.get(address)).filter(Boolean)
+    })).filter((group) => (group.alwaysShow ? true : group.items.length > 0));
+  }, [cardItems]);
+
+  const computeEquation = () => {
+    const lookup = new Map(data.map((d) => [d.address, d.value]));
+    
+    // Energy conservation: ΔE(PCC) = LOAD + PV + BATT
+    // Sign convention:
+    // + = energy into site (import, consumption, charging)
+    // - = energy out of site (export, generation, discharging)
+    
+    const pv = -Number(lookup.get(5016) || 0);       // Negate: PV register is positive, but generation is energy OUT
+    const battAbs = Number(lookup.get(13021) || 0);  // Magnitude only (direction via flags)
+    const load = Number(lookup.get(13052) || 0);     // Always positive (consumption)
+    
+    // Determine battery status and signed value from flags register 13000
+    const battFlags = Number(lookup.get(13000) || 0);
+    let battStatus = 'Idle';
+    let batt = 0;
+    if (battFlags & 0x02) {           // Bit 1 (0x02) = charging
+      battStatus = 'Charging';
+      batt = battAbs;
+    } else if (battFlags & 0x04) {    // Bit 2 (0x04) = discharging
+      battStatus = 'Discharging';
+      batt = -battAbs;
+    }
+    
+    // Energy balance - simple sum (direction encoded in sign)
+    const total = load + pv + batt;
+    
+    return { pv, batt, load, total, battStatus };
+  };
+
+  const handleSetLoad = async () => {
+    const value = Number(loadValue);
+    if (Number.isNaN(value) || loadValue.trim() === '') {
+      setLoadError('Enter a numeric value');
+      return;
+    }
+    
+    setSettingLoad(true);
+    setLoadError('');
+    
+    try {
+      const response = await fetch('/api/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value })
+      });
+      
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.detail || `Set load failed (${response.status})`);
+      }
+      
+      // After setting load, reload all registers so derived registers update immediately
+      const registersResponse = await fetch('/api/registers');
+      if (!registersResponse.ok) {
+        throw new Error(`Failed to reload registers (${registersResponse.status})`);
+      }
+      const payload = await registersResponse.json();
+      setData(sortRegisters(payload));
+      setTimestamp(new Date());
+      setLoadValue('');
+    } catch (err) {
+      setLoadError(err.message || 'Setting load failed');
+    } finally {
+      setSettingLoad(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setResetting(true);
+    setResetError('');
+    try {
+      const response = await fetch('/api/reset', { method: 'POST' });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.detail || `Reset failed with status ${response.status}`);
+      }
+
+      const registersResponse = await fetch('/api/registers');
+      if (!registersResponse.ok) {
+        throw new Error(`Reload failed with status ${registersResponse.status}`);
+      }
+      const payload = await registersResponse.json();
+      setData(sortRegisters(payload));
+      setTimestamp(new Date());
+    } catch (err) {
+      setResetError(err.message || 'Reset failed');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleReadRange = async () => {
+    const start = parseInt(rangeStart, 10);
+    const end = parseInt(rangeEnd, 10);
+    
+    if (isNaN(start) || isNaN(end) || start < 0 || end < start) {
+      setRangeError('Invalid range: start and end must be numbers, start >= 0, end >= start');
+      return;
+    }
+
+    setReadingRange(true);
+    setRangeError('');
+    setRangeResult(null);
+    
+    try {
+      const response = await fetch('/api/read-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start, end })
+      });
+      
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.detail || `Read range failed with status ${response.status}`);
+      }
+      
+      const result = await response.json();
+      setRangeResult(result);
+    } catch (err) {
+      setRangeError(err.message || 'Read range failed');
+    } finally {
+      setReadingRange(false);
+    }
+  };
+
+  const tableSections = useMemo(() => {
+    const filtered = data.filter((item) => !CARD_ADDRESSES.has(item.address));
+    const grouped = groupRegisters(filtered);
+    Object.values(grouped).forEach((items) => items.sort((a, b) => a.address - b.address));
+    return grouped;
+  }, [data]);
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <h1>Inverter Dashboard</h1>
+        {timestamp && (
+          <div className="timestamp">Last updated: {timestamp.toLocaleTimeString()}</div>
+        )}
+        <button
+          type="button"
+          className="reset-button"
+          onClick={handleReset}
+          disabled={resetting}
+        >
+          {resetting ? 'Resetting…' : 'Reset to Defaults'}
+        </button>
+        <div className="load-control">
+          <input
+            type="number"
+            placeholder="Load (W)"
+            value={loadValue}
+            onChange={(e) => setLoadValue(e.target.value)}
+            disabled={settingLoad}
+            className="load-input"
+          />
+          <button
+            type="button"
+            className="load-button"
+            onClick={handleSetLoad}
+            disabled={settingLoad || loadValue.trim() === ''}
+          >
+            {settingLoad ? 'Setting...' : 'Set Load'}
+          </button>
+        </div>
+      </header>
+
+      {loadError && <div className="status error">{loadError}</div>}
+      {loading && <div className="status">Loading register data...</div>}
+      {error && !loading && <div className="status error">{error}</div>}
+      {resetError && <div className="status error">{resetError}</div>}
+
+      <section className="range-reader">
+        <h2>Register Range Reader</h2>
+        <div className="range-form">
+          <input
+            type="number"
+            placeholder="Start address"
+            value={rangeStart}
+            onChange={(e) => setRangeStart(e.target.value)}
+            disabled={readingRange}
+          />
+          <input
+            type="number"
+            placeholder="End address"
+            value={rangeEnd}
+            onChange={(e) => setRangeEnd(e.target.value)}
+            disabled={readingRange}
+          />
+          <button
+            type="button"
+            onClick={handleReadRange}
+            disabled={readingRange || !rangeStart || !rangeEnd}
+          >
+            {readingRange ? 'Reading...' : 'Read Range'}
+          </button>
+        </div>
+        {rangeError && <div className="status error">{rangeError}</div>}
+        {rangeResult && (
+          <div className="range-result">
+            <h3>Registers {rangeResult.start}-{rangeResult.end}</h3>
+            <div className="range-data">
+              <div>
+                <h4>Holding Registers:</h4>
+                <pre>{rangeResult.holding ? JSON.stringify(rangeResult.holding, null, 2) : 'Error reading'}</pre>
+              </div>
+              <div>
+                <h4>Input Registers:</h4>
+                <pre>{rangeResult.input ? JSON.stringify(rangeResult.input, null, 2) : 'Error reading'}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {!loading && !error && (
+        <>
+          {cardGroups.map((group) => (
+            <section key={group.key} className={`card-row card-row-${group.key}`}>
+              <div className={`card-row-grid card-row-grid-${group.key}`}>
+                {group.key === 'equation' && (
+                  <div className="equation-card-full">
+                    {(() => {
+                      const eq = computeEquation();
+                      const formatNumber = (value) => (Number.isFinite(value) ? `${Math.round(value)} W` : '--');
+                      return (
+                        <div className="equation-card">
+                          <div className="equation-heading">
+                            <h3>Power Flow Equation</h3>
+                            <div className="equation-line">ΔE(PCC) = LOAD + PV + BATT</div>
+                          </div>
+                          <div className="equation-values">
+                            <div className="equation-value">
+                              <span className="label">Load</span>
+                              <span className="value">{formatNumber(eq.load)}</span>
+                            </div>
+                            <div className="equation-value">
+                              <span className="label">PV</span>
+                              <span className="value">{formatNumber(eq.pv)}</span>
+                            </div>
+                            <div className="equation-value">
+                              <span className="label">Battery</span>
+                              <span className="value">
+                                {formatNumber(eq.batt)}
+                                {eq.battStatus && <span className="battery-status"> ({eq.battStatus})</span>}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="equation-total">
+                            <span className="label">Result</span>
+                            <span className="value">{formatNumber(eq.total)}</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+                {group.key !== 'equation' && (
+                  <>
+                    {group.items.map((item) => (
+                      <RegisterCard key={item.address} item={item} onWrite={handleWrite} />
+                    ))}
+                    {group.includeSolarRadiance && (
+                      <SolarRadianceCard
+                        key="solar-radiance"
+                        value={solarRadiance}
+                        inputValue={solarRadianceInput}
+                        onInputChange={setSolarRadianceInput}
+                        onSubmit={handleSolarRadianceSubmit}
+                        pending={solarRadiancePending}
+                        error={solarRadianceError}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
+          ))}
+
+          {Object.entries(tableSections).map(([section, items]) => (
+            <section key={section} className="register-section">
+              <h2>{section}</h2>
+              <div className="register-table-wrapper">
+                <table className="register-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Metric</th>
+                      <th scope="col">Value</th>
+                      <th scope="col">Unit</th>
+                      <th scope="col">Address</th>
+                      <th scope="col">Raw</th>
+                      <th scope="col">Set Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <RegisterRow key={item.address} item={item} onWrite={handleWrite} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))}
+        </>
+      )}
+    </div>
+  );
+};
+
+export default App;
