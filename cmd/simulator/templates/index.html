@@ -357,6 +357,7 @@
         let simulators = [];
         let selectedId = null;
         let refreshInterval = null;
+        let cachedProfiles = null; // Cache to prevent dropdown rebuild
 
         async function init() {
             await loadSimulators();
@@ -414,6 +415,7 @@
 
         async function selectSimulator(id) {
             selectedId = id;
+            cachedProfiles = null; // Reset cache for new simulator
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('simulatorView').style.display = 'block';
             renderSidebar();
@@ -431,16 +433,36 @@
             try {
                 const resp = await fetch(`/api/simulators/${selectedId}`);
                 const data = await resp.json();
-                document.getElementById('configSerial').value = data.serial;
-                document.getElementById('configSlaveId').value = data.slave_id;
+
+                // Only update inputs if they don't have focus
+                const serialInput = document.getElementById('configSerial');
+                const slaveInput = document.getElementById('configSlaveId');
+                if (document.activeElement !== serialInput) {
+                    serialInput.value = data.serial;
+                }
+                if (document.activeElement !== slaveInput) {
+                    slaveInput.value = data.slave_id;
+                }
                 document.getElementById('configModbusPort').textContent = data.modbus_port;
 
                 const profResp = await fetch(`/api/simulators/${selectedId}/profiles`);
                 const profData = await profResp.json();
                 const select = document.getElementById('configProfile');
-                select.innerHTML = profData.profiles.map(p =>
-                    `<option value="${p.name}" ${p.name === profData.active ? 'selected' : ''}>${p.name}</option>`
-                ).join('');
+
+                // Only rebuild dropdown if profiles list changed
+                const profileNames = profData.profiles.map(p => p.name).join(',');
+                if (cachedProfiles !== profileNames) {
+                    cachedProfiles = profileNames;
+                    select.innerHTML = profData.profiles.map(p =>
+                        `<option value="${p.name}">${p.name}</option>`
+                    ).join('');
+                }
+
+                // Only update selection if dropdown doesn't have focus and active is set
+                const activeProfile = profData.active || (profData.profiles[0]?.name || '');
+                if (document.activeElement !== select && select.value !== activeProfile) {
+                    select.value = activeProfile;
+                }
             } catch (e) {
                 console.error('Failed to load config:', e);
             }
@@ -547,8 +569,25 @@
                 const status = document.getElementById('automationStatus');
                 status.textContent = data.enabled ? 'Running' : 'Stopped';
                 status.className = `status-badge ${data.enabled ? 'running' : 'stopped'}`;
-                document.getElementById('timeMultiplier').value = data.time_multiplier || 1;
-                document.getElementById('simScenario').value = data.scenario || 'sunny';
+
+                // Only update dropdowns if they don't have focus
+                const timeSelect = document.getElementById('timeMultiplier');
+                const scenarioSelect = document.getElementById('simScenario');
+
+                if (document.activeElement !== timeSelect) {
+                    const newTimeValue = String(data.time_multiplier || 1);
+                    if (timeSelect.value !== newTimeValue) {
+                        timeSelect.value = newTimeValue;
+                    }
+                }
+
+                if (document.activeElement !== scenarioSelect) {
+                    const newScenario = data.scenario || 'sunny';
+                    if (scenarioSelect.value !== newScenario) {
+                        scenarioSelect.value = newScenario;
+                    }
+                }
+
                 if (data.simulated_time) {
                     document.getElementById('simulatedTime').textContent = new Date(data.simulated_time).toLocaleString();
                 }

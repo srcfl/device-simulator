@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
 
@@ -83,7 +84,7 @@ func (m *Manager) Get(name string) *Profile {
 	return m.profiles[name]
 }
 
-// List returns all profile names
+// List returns all profile names sorted alphabetically
 func (m *Manager) List() []ProfileInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -96,6 +97,12 @@ func (m *Manager) List() []ProfileInfo {
 			DeviceType:  p.DeviceType,
 		})
 	}
+
+	// Sort by name for consistent ordering
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Name < list[j].Name
+	})
+
 	return list
 }
 
