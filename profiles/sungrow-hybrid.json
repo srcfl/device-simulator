@@ -1,0 +1,48 @@
+{
+  "name": "sungrow-hybrid",
+  "description": "Sungrow SH Series Hybrid Inverter (5-10kW)",
+  "device_type": "sungrow",
+  "defaults": {
+    "5016": 0,
+    "13021": 0,
+    "13022": 78,
+    "5600": 0,
+    "13052": 500,
+    "13000": 0,
+    "13049": 0,
+    "13050": 204,
+    "13051": 0,
+    "13073": 10000,
+    "13086": 170,
+    "33046": 500,
+    "33047": 500,
+    "5241": 50,
+    "13036": 150000,
+    "13040": 180000,
+    "13045": 200000,
+    "13002": 220000,
+    "13026": 160000
+  },
+  "generators": {
+    "solar_radiance": {
+      "type": "daynight",
+      "config": {
+        "peak_power": 8000,
+        "sunrise_hour": 5.5,
+        "sunset_hour": 20.5,
+        "noise": 3
+      }
+    },
+    "load": {
+      "type": "schedule",
+      "config": {
+        "base_load": 400,
+        "schedule": [
+          {"hour_start": 6, "hour_end": 8, "load": 1800},
+          {"hour_start": 11, "hour_end": 14, "load": 800},
+          {"hour_start": 17, "hour_end": 23, "load": 2800}
+        ]
+      }
+    }
+  }
+}

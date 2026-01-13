@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Simulator - Don't Panic</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background: #16213e;
+            border-right: 1px solid #0f3460;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 1rem;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .sidebar-header h1 {
+            font-size: 1rem;
+            color: #00d9ff;
+        }
+
+        .sidebar-header p {
+            font-size: 0.7rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        .simulator-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.5rem;
+        }
+
+        .sim-item {
+            padding: 0.5rem 0.6rem;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 0.35rem;
+            transition: background 0.2s;
+            border: 1px solid transparent;
+        }
+
+        .sim-item:hover { background: rgba(0, 217, 255, 0.1); }
+        .sim-item.active { background: rgba(0, 217, 255, 0.2); border-color: #00d9ff; }
+
+        .sim-header { display: flex; justify-content: space-between; align-items: center; }
+        .sim-profile { font-weight: 600; font-size: 0.8rem; color: #00c864; }
+        .sim-profile.inactive { color: #666; font-style: italic; }
+        .sim-serial { font-size: 0.65rem; color: #888; }
+        .sim-ports { font-size: 0.65rem; color: #666; margin-top: 3px; }
+        .sim-stats { font-size: 0.7rem; color: #888; margin-top: 3px; display: flex; gap: 0.5rem; align-items: center; }
+        .sim-controls { margin-top: 4px; display: flex; gap: 0.3rem; }
+        .sim-btn {
+            padding: 0.2rem 0.5rem;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        .sim-btn.start { background: #00c864; color: #000; }
+        .sim-btn.stop { background: #ff4444; color: #fff; }
+        .sim-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .sim-mode {
+            display: inline-block;
+            padding: 0.1rem 0.35rem;
+            border-radius: 3px;
+            font-size: 0.6rem;
+            font-weight: 600;
+        }
+        .sim-mode.auto { background: rgba(0, 200, 100, 0.2); color: #00c864; }
+        .sim-mode.static { background: rgba(100, 100, 100, 0.2); color: #666; }
+
+        /* Main Content */
+        .main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+
+        .empty-state h3 { color: #00d9ff; margin-bottom: 0.5rem; }
+
+        /* Sections */
+        .section {
+            margin-bottom: 1.5rem;
+        }
+
+        .section-title {
+            font-size: 0.85rem;
+            color: #888;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Config Row */
+        .config-row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            background: #16213e;
+            padding: 1rem;
+            border-radius: 8px;
+            align-items: flex-end;
+        }
+
+        .config-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .config-item label {
+            font-size: 0.7rem;
+            color: #666;
+        }
+
+        .config-item input, .config-item select {
+            padding: 0.4rem 0.6rem;
+            background: #1a1a2e;
+            border: 1px solid #0f3460;
+            border-radius: 4px;
+            color: #eee;
+            font-size: 0.85rem;
+            min-width: 120px;
+        }
+
+        .config-item .value {
+            font-size: 0.9rem;
+            color: #00d9ff;
+            padding: 0.4rem 0;
+        }
+
+        /* Automation Row */
+        .auto-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            background: #16213e;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+        }
+
+        .btn {
+            padding: 0.4rem 0.8rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
+
+        .btn-start { background: #00c864; color: #000; }
+        .btn-stop { background: #ff4444; color: #fff; }
+
+        .status-badge {
+            padding: 0.25rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-badge.running { background: rgba(0, 200, 100, 0.2); color: #00c864; }
+        .status-badge.stopped { background: rgba(100, 100, 100, 0.2); color: #888; }
+
+        .sim-time { color: #00d9ff; font-size: 0.85rem; margin-left: auto; }
+
+        /* Registers Grid */
+        .register-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .register-card {
+            background: #16213e;
+            border-radius: 6px;
+            padding: 0.75rem;
+            border: 1px solid #0f3460;
+        }
+
+        .register-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.35rem;
+        }
+
+        .register-name { font-weight: 600; font-size: 0.8rem; }
+        .register-addr { font-size: 0.7rem; color: #666; }
+
+        .register-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #00d9ff;
+        }
+
+        .register-unit { font-size: 0.75rem; color: #888; margin-left: 0.2rem; }
+
+        .register-input {
+            display: flex;
+            gap: 0.35rem;
+            margin-top: 0.4rem;
+        }
+
+        .register-input input {
+            flex: 1;
+            padding: 0.3rem;
+            border: 1px solid #0f3460;
+            border-radius: 3px;
+            background: #1a1a2e;
+            color: #eee;
+            font-size: 0.8rem;
+            width: 60px;
+        }
+
+        .register-input button {
+            padding: 0.3rem 0.5rem;
+            background: #00d9ff;
+            color: #000;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        /* Logs */
+        .log-container {
+            background: #0d1117;
+            border-radius: 6px;
+            padding: 0.75rem;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.7rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            padding: 0.15rem 0;
+            border-bottom: 1px solid #21262d;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .log-time { color: #666; min-width: 60px; }
+        .log-op { min-width: 80px; }
+        .log-op.read { color: #58a6ff; }
+        .log-op.write { color: #f0883e; }
+        .log-addr { color: #8b949e; min-width: 45px; }
+        .log-values { color: #7ee787; }
+        .log-empty { color: #666; text-align: center; padding: 1rem; }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1>Device Simulator</h1>
+            <p>Mostly Harmless Modbus TCP</p>
+        </div>
+        <div class="simulator-list" id="simulatorList"></div>
+    </aside>
+
+    <main class="main">
+        <div id="emptyState" class="empty-state">
+            <h3>Don't Panic</h3>
+            <p>Select a simulator from the sidebar</p>
+        </div>
+
+        <div id="simulatorView" style="display: none;">
+            <!-- Config Section -->
+            <div class="section">
+                <div class="config-row">
+                    <div class="config-item">
+                        <label>Serial</label>
+                        <input type="text" id="configSerial" onchange="updateConfig()">
+                    </div>
+                    <div class="config-item">
+                        <label>Slave ID</label>
+                        <input type="number" id="configSlaveId" min="1" max="247" onchange="updateConfig()">
+                    </div>
+                    <div class="config-item">
+                        <label>Modbus Port</label>
+                        <div class="value" id="configModbusPort">5000</div>
+                    </div>
+                    <div class="config-item">
+                        <label>Profile</label>
+                        <select id="configProfile" onchange="applyProfile()"></select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Automation Section -->
+            <div class="section">
+                <div class="auto-row">
+                    <button class="btn btn-start" onclick="startAutomation()">Start</button>
+                    <button class="btn btn-stop" onclick="stopAutomation()">Stop</button>
+                    <span class="status-badge stopped" id="automationStatus">Stopped</span>
+                    <select id="simScenario" onchange="updateAutomationConfig()" style="padding: 0.3rem; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 4px; color: #eee; font-size: 0.8rem;">
+                        <option value="sunny">Sunny Day</option>
+                        <option value="cloudy">Cloudy Day</option>
+                        <option value="overcast">Overcast</option>
+                        <option value="rainy">Rainy Day</option>
+                        <option value="night">Night Mode</option>
+                        <option value="peak_load">Peak Load</option>
+                        <option value="battery_test">Battery Cycle</option>
+                    </select>
+                    <select id="timeMultiplier" onchange="updateAutomationConfig()" style="padding: 0.3rem; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 4px; color: #eee; font-size: 0.8rem;">
+                        <option value="1">1x Real-time</option>
+                        <option value="60">60x</option>
+                        <option value="360">360x</option>
+                        <option value="3600">3600x</option>
+                    </select>
+                    <span class="sim-time" id="simulatedTime"></span>
+                </div>
+            </div>
+
+            <!-- Registers Section -->
+            <div class="section">
+                <div class="section-title">Registers</div>
+                <div class="register-grid" id="registerGrid"></div>
+            </div>
+
+            <!-- Logs Section -->
+            <div class="section">
+                <div class="section-title">Modbus Log</div>
+                <div class="log-container" id="logContainer"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let simulators = [];
+        let selectedId = null;
+        let refreshInterval = null;
+
+        async function init() {
+            await loadSimulators();
+            setInterval(loadSimulators, 3000);
+        }
+
+        async function loadSimulators() {
+            try {
+                const resp = await fetch('/api/simulators');
+                simulators = await resp.json();
+                renderSidebar();
+            } catch (e) {
+                console.error('Failed to load simulators:', e);
+            }
+        }
+
+        function renderSidebar() {
+            const list = document.getElementById('simulatorList');
+            list.innerHTML = simulators.map(sim => {
+                const hasProfile = sim.profile && sim.profile !== '';
+                const profileClass = hasProfile ? '' : 'inactive';
+                const profileText = hasProfile ? sim.profile : 'no profile';
+                const modeClass = sim.automation ? 'auto' : 'static';
+                const modeText = sim.automation ? 'RUNNING' : 'STATIC';
+                return `
+                    <div class="sim-item ${selectedId === sim.id ? 'active' : ''}"
+                         onclick="selectSimulator(${sim.id})">
+                        <div class="sim-header">
+                            <span class="sim-profile ${profileClass}">${profileText}</span>
+                            <span class="sim-mode ${modeClass}">${modeText}</span>
+                        </div>
+                        <div class="sim-serial">${sim.serial} | Slave ${sim.slave_id}</div>
+                        <div class="sim-ports">Modbus :${sim.modbus_port}</div>
+                        <div class="sim-stats">
+                            PV ${sim.pv_power?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%
+                        </div>
+                        <div class="sim-controls" onclick="event.stopPropagation()">
+                            <button class="sim-btn start" ${sim.automation ? 'disabled' : ''} onclick="quickStart(${sim.id})">Start</button>
+                            <button class="sim-btn stop" ${!sim.automation ? 'disabled' : ''} onclick="quickStop(${sim.id})">Stop</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function quickStart(id) {
+            await fetch(`/api/simulators/${id}/automation/start`, { method: 'POST' });
+            await loadSimulators();
+        }
+
+        async function quickStop(id) {
+            await fetch(`/api/simulators/${id}/automation/stop`, { method: 'POST' });
+            await loadSimulators();
+        }
+
+        async function selectSimulator(id) {
+            selectedId = id;
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('simulatorView').style.display = 'block';
+            renderSidebar();
+            await loadAllData();
+            if (refreshInterval) clearInterval(refreshInterval);
+            refreshInterval = setInterval(loadAllData, 2000);
+        }
+
+        async function loadAllData() {
+            if (!selectedId) return;
+            await Promise.all([loadConfig(), loadRegisters(), loadLogs(), loadAutomation()]);
+        }
+
+        async function loadConfig() {
+            try {
+                const resp = await fetch(`/api/simulators/${selectedId}`);
+                const data = await resp.json();
+                document.getElementById('configSerial').value = data.serial;
+                document.getElementById('configSlaveId').value = data.slave_id;
+                document.getElementById('configModbusPort').textContent = data.modbus_port;
+
+                const profResp = await fetch(`/api/simulators/${selectedId}/profiles`);
+                const profData = await profResp.json();
+                const select = document.getElementById('configProfile');
+                select.innerHTML = profData.profiles.map(p =>
+                    `<option value="${p.name}" ${p.name === profData.active ? 'selected' : ''}>${p.name}</option>`
+                ).join('');
+            } catch (e) {
+                console.error('Failed to load config:', e);
+            }
+        }
+
+        async function updateConfig() {
+            const serial = document.getElementById('configSerial').value;
+            const slaveId = parseInt(document.getElementById('configSlaveId').value);
+            try {
+                await fetch(`/api/simulators/${selectedId}/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ serial, slave_id: slaveId })
+                });
+                await loadSimulators();
+            } catch (e) {
+                console.error('Failed to update config:', e);
+            }
+        }
+
+        async function applyProfile() {
+            const profile = document.getElementById('configProfile').value;
+            try {
+                await fetch(`/api/simulators/${selectedId}/profiles/${profile}/apply`, { method: 'POST' });
+                await loadRegisters();
+            } catch (e) {
+                console.error('Failed to apply profile:', e);
+            }
+        }
+
+        async function loadRegisters() {
+            try {
+                const resp = await fetch(`/api/simulators/${selectedId}/registers`);
+                const registers = await resp.json();
+                const grid = document.getElementById('registerGrid');
+                grid.innerHTML = registers.map(reg => `
+                    <div class="register-card">
+                        <div class="register-header">
+                            <span class="register-name">${reg.name}</span>
+                            <span class="register-addr">${reg.address}</span>
+                        </div>
+                        <div class="register-value">
+                            ${reg.value?.toFixed(reg.scale < 1 ? 1 : 0) || 0}<span class="register-unit">${reg.unit || ''}</span>
+                        </div>
+                        <div class="register-input">
+                            <input type="number" id="input-${reg.address}" placeholder="Set" step="any">
+                            <button onclick="writeRegister(${reg.address})">Set</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load registers:', e);
+            }
+        }
+
+        async function writeRegister(address) {
+            const input = document.getElementById(`input-${address}`);
+            const value = parseFloat(input.value);
+            if (isNaN(value)) return;
+            try {
+                await fetch(`/api/simulators/${selectedId}/registers/${address}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value })
+                });
+                input.value = '';
+                await loadRegisters();
+            } catch (e) {
+                console.error('Failed to write register:', e);
+            }
+        }
+
+        async function loadLogs() {
+            try {
+                const resp = await fetch(`/api/simulators/${selectedId}/logs?limit=50`);
+                const data = await resp.json();
+                const container = document.getElementById('logContainer');
+                const logs = data.logs || [];
+                if (!logs.length) {
+                    container.innerHTML = '<div class="log-empty">No Modbus activity yet</div>';
+                    return;
+                }
+                container.innerHTML = logs.reverse().map(log => {
+                    const time = new Date(log.timestamp).toLocaleTimeString();
+                    const opClass = log.operation.includes('read') ? 'read' : 'write';
+                    return `
+                        <div class="log-entry">
+                            <span class="log-time">${time}</span>
+                            <span class="log-op ${opClass}">${log.operation}</span>
+                            <span class="log-addr">${log.address}</span>
+                            <span class="log-values">${log.values?.join(', ') || `x${log.count}`}</span>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to load logs:', e);
+            }
+        }
+
+        async function loadAutomation() {
+            try {
+                const resp = await fetch(`/api/simulators/${selectedId}/automation`);
+                const data = await resp.json();
+                const status = document.getElementById('automationStatus');
+                status.textContent = data.enabled ? 'Running' : 'Stopped';
+                status.className = `status-badge ${data.enabled ? 'running' : 'stopped'}`;
+                document.getElementById('timeMultiplier').value = data.time_multiplier || 1;
+                document.getElementById('simScenario').value = data.scenario || 'sunny';
+                if (data.simulated_time) {
+                    document.getElementById('simulatedTime').textContent = new Date(data.simulated_time).toLocaleString();
+                }
+            } catch (e) {
+                console.error('Failed to load automation:', e);
+            }
+        }
+
+        async function startAutomation() {
+            await fetch(`/api/simulators/${selectedId}/automation/start`, { method: 'POST' });
+            await loadAutomation();
+        }
+
+        async function stopAutomation() {
+            await fetch(`/api/simulators/${selectedId}/automation/stop`, { method: 'POST' });
+            await loadAutomation();
+        }
+
+        async function updateAutomationConfig() {
+            const multiplier = parseInt(document.getElementById('timeMultiplier').value);
+            const scenario = document.getElementById('simScenario').value;
+            await fetch(`/api/simulators/${selectedId}/automation/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ time_multiplier: multiplier, scenario: scenario })
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>

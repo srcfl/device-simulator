@@ -1,0 +1,38 @@
+{
+  "name": "default",
+  "description": "Default inverter profile",
+  "device_type": "generic",
+  "defaults": {
+    "5016": 0,
+    "13021": 0,
+    "13022": 50,
+    "5600": 0,
+    "13052": 500,
+    "13049": 0,
+    "13050": 204,
+    "13073": 10000,
+    "33046": 500,
+    "33047": 500,
+    "5241": 50
+  },
+  "generators": {
+    "solar_radiance": {
+      "type": "daynight",
+      "config": {
+        "peak_power": 5000,
+        "sunrise_hour": 6,
+        "sunset_hour": 20
+      }
+    },
+    "load": {
+      "type": "schedule",
+      "config": {
+        "base_load": 500,
+        "schedule": [
+          {"hour_start": 7, "hour_end": 9, "load": 2000},
+          {"hour_start": 17, "hour_end": 22, "load": 3000}
+        ]
+      }
+    }
+  }
+}
