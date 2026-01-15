@@ -937,19 +937,23 @@
         /* Delete Button */
         .sim-delete {
             position: absolute;
-            top: 0.4rem;
+            bottom: 0.4rem;
             right: 0.4rem;
-            width: 18px;
-            height: 18px;
+            width: 20px;
+            height: 20px;
             padding: 0;
             background: transparent;
             border: none;
             color: #666;
-            font-size: 1rem;
+            font-size: 0.75rem;
             line-height: 1;
             cursor: pointer;
             opacity: 0;
-            transition: opacity 0.2s, color 0.2s;
+            transition: opacity 0.2s, color 0.2s, background 0.2s;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .sim-item {
@@ -962,6 +966,7 @@
 
         .sim-delete:hover {
             color: #ff4444;
+            background: rgba(255, 68, 68, 0.15);
         }
 
         /* Empty state for no simulators */
@@ -1046,6 +1051,7 @@
         let simulators = [];
         let selectedId = null;
         let selectedProtocol = null;
+        let selectedSerial = null;  // Track current serial for localStorage updates
         let refreshInterval = null;
         let cachedProfiles = null;
         let powerSliderDragging = false;
@@ -1060,8 +1066,217 @@
 
         let localIP = '--';
 
+        // ========== localStorage Persistence ==========
+        const STORAGE_KEY = 'device-simulator-configs';
+
+        function loadSavedConfigs() {
+            try {
+                const data = localStorage.getItem(STORAGE_KEY);
+                if (!data) return { version: 1, simulators: [] };
+                return JSON.parse(data);
+            } catch (e) {
+                console.error('Invalid localStorage data:', e);
+                return { version: 1, simulators: [] };
+            }
+        }
+
+        function saveConfigs(configs) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+            } catch (e) {
+                console.error('Failed to save to localStorage:', e);
+            }
+        }
+
+        function generateClientId() {
+            return 'sim-' + crypto.randomUUID();
+        }
+
+        function saveSimulatorConfig(config) {
+            const saved = loadSavedConfigs();
+            config.lastModified = new Date().toISOString();
+            if (!config.createdAt) config.createdAt = config.lastModified;
+            saved.simulators.push(config);
+            saveConfigs(saved);
+        }
+
+        function updateSavedConfig(serial, updates) {
+            const saved = loadSavedConfigs();
+            const config = saved.simulators.find(s => s.serial === serial);
+            if (config) {
+                Object.assign(config, updates);
+                config.lastModified = new Date().toISOString();
+                saveConfigs(saved);
+            }
+        }
+
+        function updateSavedConfigByOldSerial(oldSerial, newSerial, updates) {
+            const saved = loadSavedConfigs();
+            const config = saved.simulators.find(s => s.serial === oldSerial);
+            if (config) {
+                config.serial = newSerial;
+                Object.assign(config, updates);
+                config.lastModified = new Date().toISOString();
+                saveConfigs(saved);
+            }
+        }
+
+        function removeFromLocalStorage(serial) {
+            const saved = loadSavedConfigs();
+            saved.simulators = saved.simulators.filter(s => s.serial !== serial);
+            saveConfigs(saved);
+        }
+
+        async function restoreSimulators() {
+            const saved = loadSavedConfigs();
+            if (saved.simulators.length === 0) return;
+
+            console.log(`Restoring ${saved.simulators.length} simulators from localStorage...`);
+
+            // Fetch current server state
+            const resp = await fetch('/api/simulators');
+            const data = await resp.json();
+            const serverSims = Array.isArray(data) ? data : [];
+            const serverBySerial = new Map(serverSims.map(s => [s.serial, s]));
+
+            let restored = 0;
+            let created = 0;
+
+            for (const config of saved.simulators) {
+                const existing = serverBySerial.get(config.serial);
+
+                if (existing) {
+                    // Already exists on server, just apply config if needed
+                    restored++;
+                    console.log(`Simulator ${config.serial} already exists on server`);
+                } else {
+                    // Create simulator from saved config
+                    try {
+                        const resp = await fetch('/api/simulators', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ type: config.type })
+                        });
+
+                        if (resp.ok) {
+                            const newSim = await resp.json();
+                            created++;
+
+                            // Update serial if different from saved
+                            if (newSim.serial !== config.serial) {
+                                await fetch(`/api/simulators/${newSim.id}/config`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        serial: config.serial,
+                                        slave_id: config.slaveId || 1
+                                    })
+                                });
+                            } else if (config.slaveId) {
+                                await fetch(`/api/simulators/${newSim.id}/config`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        serial: config.serial,
+                                        slave_id: config.slaveId
+                                    })
+                                });
+                            }
+
+                            // Apply saved profile if set
+                            if (config.profile) {
+                                await fetch(`/api/simulators/${newSim.id}/profiles/${config.profile}/apply`, {
+                                    method: 'POST'
+                                });
+                            }
+
+                            // Apply automation config
+                            if (config.automation) {
+                                await fetch(`/api/simulators/${newSim.id}/automation/config`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        time_multiplier: config.automation.timeMultiplier || 1,
+                                        scenario: config.automation.scenario || 'sunny'
+                                    })
+                                });
+
+                                // Start automation if it was running
+                                if (config.automation.wasRunning) {
+                                    await fetch(`/api/simulators/${newSim.id}/automation/start`, {
+                                        method: 'POST'
+                                    });
+                                }
+                            }
+
+                            console.log(`Created simulator ${config.serial} (${config.type})`);
+                        }
+                    } catch (e) {
+                        console.error(`Failed to restore simulator ${config.serial}:`, e);
+                    }
+                }
+            }
+
+            console.log(`Restoration complete: ${restored} matched, ${created} created`);
+        }
+
+        async function syncWithServer(serverSims) {
+            // Reconcile localStorage with current server state
+            const saved = loadSavedConfigs();
+            const serverBySerial = new Map(serverSims.map(s => [s.serial, s]));
+            const savedBySerial = new Map(saved.simulators.map(s => [s.serial, s]));
+
+            // Add server simulators not in localStorage
+            for (const sim of serverSims) {
+                if (!savedBySerial.has(sim.serial)) {
+                    saved.simulators.push({
+                        clientId: generateClientId(),
+                        type: sim.category,
+                        serial: sim.serial,
+                        slaveId: sim.slave_id || 1,
+                        profile: sim.profile || null,
+                        automation: {
+                            wasRunning: sim.running || false,
+                            timeMultiplier: 1,
+                            scenario: 'sunny'
+                        },
+                        createdAt: new Date().toISOString(),
+                        lastModified: new Date().toISOString()
+                    });
+                }
+            }
+
+            // Remove localStorage entries for simulators no longer on server
+            // (but only if server has some simulators - otherwise it was a restart)
+            if (serverSims.length > 0) {
+                saved.simulators = saved.simulators.filter(s => serverBySerial.has(s.serial));
+            }
+
+            saveConfigs(saved);
+        }
+
+        // ========== End localStorage Persistence ==========
+
         async function init() {
             await loadSystemInfo();
+
+            // Check if server has any simulators
+            try {
+                const resp = await fetch('/api/simulators');
+                const data = await resp.json();
+                const serverSims = Array.isArray(data) ? data : [];
+
+                if (serverSims.length === 0) {
+                    // Server is empty - restore from localStorage
+                    await restoreSimulators();
+                } else {
+                    // Server has simulators - sync with localStorage
+                    await syncWithServer(serverSims);
+                }
+            } catch (e) {
+                console.error('Failed to check server simulators:', e);
+            }
+
             await loadSimulators();
             setInterval(loadSimulators, 3000);
         }
@@ -1071,7 +1286,8 @@
                 const resp = await fetch('/api/system');
                 const data = await resp.json();
                 localIP = data.localIP || '--';
-                document.getElementById('hostIP').textContent = localIP;
+                const hostIPEl = document.getElementById('hostIP');
+                if (hostIPEl) hostIPEl.textContent = localIP;
             } catch (e) {
                 console.error('Failed to load system info:', e);
             }
@@ -1080,7 +1296,8 @@
         async function loadSimulators() {
             try {
                 const resp = await fetch('/api/simulators');
-                simulators = await resp.json();
+                const data = await resp.json();
+                simulators = Array.isArray(data) ? data : [];
                 renderSidebar();
             } catch (e) {
                 console.error('Failed to load simulators:', e);
@@ -1148,7 +1365,7 @@
             return `
                 <div class="sim-item ${selectedId === sim.id ? 'active' : ''}"
                      onclick="selectSimulator(${sim.id}, '${sim.protocol}')">
-                    <button class="sim-delete" onclick="event.stopPropagation(); deleteSimulatorConfirm(${sim.id}, '${sim.serial}')" title="Delete">×</button>
+                    <button class="sim-delete" onclick="event.stopPropagation(); deleteSimulatorConfirm(${sim.id}, '${sim.serial}')" title="Delete"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
                     <div class="sim-header">
                         <span class="sim-profile ${profileClass}">${profileText}</span>
                         <span class="protocol-badge ${sim.protocol}">${sim.protocol}</span>
@@ -1175,6 +1392,20 @@
         async function toggleSimRunning(id, currentState) {
             const endpoint = currentState ? 'stop' : 'start';
             await fetch(`/api/simulators/${id}/automation/${endpoint}`, { method: 'POST' });
+
+            // Update localStorage with running state
+            const sim = simulators.find(s => s.id === id);
+            if (sim) {
+                const saved = loadSavedConfigs();
+                const config = saved.simulators.find(s => s.serial === sim.serial);
+                if (config) {
+                    if (!config.automation) config.automation = {};
+                    config.automation.wasRunning = !currentState;
+                    config.lastModified = new Date().toISOString();
+                    saveConfigs(saved);
+                }
+            }
+
             await loadSimulators();
         }
 
@@ -1195,6 +1426,23 @@
                     alert('Failed to create simulator: ' + err);
                     return;
                 }
+
+                const newSim = await resp.json();
+
+                // Save to localStorage
+                saveSimulatorConfig({
+                    clientId: generateClientId(),
+                    type: type,
+                    serial: newSim.serial,
+                    slaveId: newSim.slave_id || 1,
+                    profile: newSim.profile || null,
+                    automation: {
+                        wasRunning: false,
+                        timeMultiplier: 1,
+                        scenario: 'sunny'
+                    }
+                });
+
                 document.getElementById('addMenu').classList.remove('show');
                 await loadSimulators();
             } catch (e) {
@@ -1214,6 +1462,10 @@
                     alert('Failed to delete simulator: ' + err);
                     return;
                 }
+
+                // Remove from localStorage
+                removeFromLocalStorage(serial);
+
                 // If we deleted the selected simulator, clear selection
                 if (selectedId === id) {
                     selectedId = null;
@@ -1230,6 +1482,9 @@
         async function selectSimulator(id, protocol) {
             selectedId = id;
             selectedProtocol = protocol;
+            // Find and track current serial for localStorage updates
+            const sim = simulators.find(s => s.id === id);
+            selectedSerial = sim ? sim.serial : null;
             cachedProfiles = null;
             configRowBuilt = false;  // Reset so config row gets rebuilt for new simulator
             controlsRowBuilt = false;
@@ -1317,6 +1572,19 @@
             const isRunning = toggle?.classList.contains('on');
             const endpoint = isRunning ? 'stop' : 'start';
             await fetch(`/api/simulators/${selectedId}/automation/${endpoint}`, { method: 'POST' });
+
+            // Update localStorage with running state
+            if (selectedSerial) {
+                const saved = loadSavedConfigs();
+                const config = saved.simulators.find(s => s.serial === selectedSerial);
+                if (config) {
+                    if (!config.automation) config.automation = {};
+                    config.automation.wasRunning = !isRunning;
+                    config.lastModified = new Date().toISOString();
+                    saveConfigs(saved);
+                }
+            }
+
             await loadAllData();
             await loadSimulators();
         }
@@ -1624,6 +1892,8 @@
                     if (clients.length === 0) {
                         container.innerHTML = '<div class="log-empty">No clients connected</div>';
                     } else {
+                        // Sort clients alphabetically by ID
+                        clients.sort((a, b) => a.id.localeCompare(b.id));
                         container.innerHTML = clients.map(client => `
                             <div class="client-box">
                                 <div class="client-id">${escapeHtml(client.id)}</div>
@@ -2020,6 +2290,15 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ serial, slave_id: slaveId })
                 });
+
+                // Update localStorage (handle serial change)
+                if (selectedSerial && serial !== selectedSerial) {
+                    updateSavedConfigByOldSerial(selectedSerial, serial, { slaveId });
+                    selectedSerial = serial;  // Update tracked serial
+                } else if (selectedSerial) {
+                    updateSavedConfig(selectedSerial, { slaveId });
+                }
+
                 await loadSimulators();
             } catch (e) {
                 console.error('Failed to update config:', e);
@@ -2030,6 +2309,12 @@
             const profile = document.getElementById('configProfile').value;
             try {
                 await fetch(`/api/simulators/${selectedId}/profiles/${profile}/apply`, { method: 'POST' });
+
+                // Update localStorage
+                if (selectedSerial) {
+                    updateSavedConfig(selectedSerial, { profile });
+                }
+
                 await loadState();
             } catch (e) {
                 console.error('Failed to apply profile:', e);
@@ -2044,6 +2329,19 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ time_multiplier: multiplier, scenario: scenario })
             });
+
+            // Update localStorage
+            if (selectedSerial) {
+                const saved = loadSavedConfigs();
+                const config = saved.simulators.find(s => s.serial === selectedSerial);
+                if (config) {
+                    if (!config.automation) config.automation = {};
+                    config.automation.timeMultiplier = multiplier;
+                    config.automation.scenario = scenario;
+                    config.lastModified = new Date().toISOString();
+                    saveConfigs(saved);
+                }
+            }
         }
 
         // V2X specific controls
