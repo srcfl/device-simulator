@@ -1064,7 +1064,8 @@
             ocpp_charger: { name: 'OCPP Chargers', icon: '🔌', collapsed: false }
         };
 
-        let localIP = '--';
+        // Use the hostname from the browser URL - this is what users need to connect to services
+        let localIP = window.location.hostname || '--';
 
         // ========== localStorage Persistence ==========
         const STORAGE_KEY = 'device-simulator-configs';
@@ -1258,7 +1259,11 @@
         // ========== End localStorage Persistence ==========
 
         async function init() {
-            await loadSystemInfo();
+            // Set the host IP immediately from browser location
+            const hostIPEl = document.getElementById('hostIP');
+            if (hostIPEl) {
+                hostIPEl.textContent = localIP;
+            }
 
             // Check if server has any simulators
             try {
@@ -1279,18 +1284,6 @@
 
             await loadSimulators();
             setInterval(loadSimulators, 3000);
-        }
-
-        async function loadSystemInfo() {
-            try {
-                const resp = await fetch('/api/system');
-                const data = await resp.json();
-                localIP = data.localIP || '--';
-                const hostIPEl = document.getElementById('hostIP');
-                if (hostIPEl) hostIPEl.textContent = localIP;
-            } catch (e) {
-                console.error('Failed to load system info:', e);
-            }
         }
 
         async function loadSimulators() {
