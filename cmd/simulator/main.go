@@ -376,9 +376,21 @@ func getLocalIP() string {
 	if hostIP := os.Getenv("HOST_IP"); hostIP != "" {
 		return hostIP
 	}
+
+	// Try to detect the outbound IP by making a UDP "connection" to an external address
+	// This doesn't actually send any packets, just determines which local IP would be used
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err == nil {
+		defer conn.Close()
+		if localAddr, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+			return localAddr.IP.String()
+		}
+	}
+
+	// Fallback to detecting local interface IP
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return "unknown"
+		return ""
 	}
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
@@ -387,13 +399,28 @@ func getLocalIP() string {
 			}
 		}
 	}
-	return "unknown"
+	return ""
 }
 
 func handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// Try to get the host from the request (what the browser actually used)
+	host := r.Host
+	// Remove port if present
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+
+	// Use request host if it's an IP, otherwise fall back to getLocalIP()
+	ip := host
+	if net.ParseIP(host) == nil {
+		// Not a valid IP (probably "localhost"), use detected IP
+		ip = getLocalIP()
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"localIP": getLocalIP(),
+		"localIP": ip,
 	})
 }
 

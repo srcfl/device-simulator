@@ -228,9 +228,29 @@
             font-family: monospace;
             font-size: 0.9rem;
             color: #00d9ff;
-            height: 32px;
+        }
+
+        .copy-btn {
+            background: transparent;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            padding: 4px;
+            margin-left: 6px;
+            border-radius: 4px;
             display: flex;
             align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            color: #00d9ff;
+            background: rgba(0, 217, 255, 0.1);
+        }
+
+        .copy-btn.copied {
+            color: #4ade80;
         }
 
         /* Automation Row */
@@ -1286,6 +1306,27 @@
             setInterval(loadSimulators, 3000);
         }
 
+        async function copyIP() {
+            try {
+                await navigator.clipboard.writeText(localIP);
+                const btn = document.querySelector('.copy-btn');
+                const copyIcon = btn?.querySelector('.copy-icon');
+                const checkIcon = btn?.querySelector('.check-icon');
+                if (btn && copyIcon && checkIcon) {
+                    btn.classList.add('copied');
+                    copyIcon.style.display = 'none';
+                    checkIcon.style.display = 'block';
+                    setTimeout(() => {
+                        btn.classList.remove('copied');
+                        copyIcon.style.display = 'block';
+                        checkIcon.style.display = 'none';
+                    }, 1500);
+                }
+            } catch (e) {
+                console.error('Failed to copy IP:', e);
+            }
+        }
+
         async function loadSimulators() {
             try {
                 const resp = await fetch('/api/simulators');
@@ -1638,7 +1679,18 @@
             html += `
                 <div class="config-item" style="margin-left: auto;">
                     <label>Host IP</label>
-                    <span id="hostIP" class="host-ip">${localIP}</span>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span id="hostIP" class="host-ip">${localIP}</span>
+                        <button class="copy-btn" onclick="copyIP()" title="Copy IP">
+                            <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="config-item">
                     <label>Simulation</label>
