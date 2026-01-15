@@ -6,7 +6,7 @@ services:
     ports:
       - "80:80"               # Web dashboard
       - "5100-5104:5100-5104" # Modbus TCP servers (inverters)
-      - "1883-1885:1883-1885" # MQTT brokers (V2X chargers)
+      - "11883-11885:1883-1885" # MQTT brokers (V2X chargers) - host ports offset to avoid conflict with local mosquitto
       - "9000-9001:9000-9001" # OCPP WebSocket servers (OCPP chargers)
     environment:
       - NUM_INVERTERS=5
