@@ -1352,7 +1352,9 @@
                     stats = `PV ${sim.pv_power?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`;
                     break;
                 case 'mqtt':
-                    portInfo = `MQTT :${sim.port}`;
+                    // Host port is offset by 10000 to avoid conflict with local mosquitto
+                    const mqttHostPort = sim.port + 10000;
+                    portInfo = `MQTT :${mqttHostPort}`;
                     stats = `${sim.session_state || 'IDLE'} | ${sim.power_ac?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`;
                     break;
                 case 'ocpp':
@@ -1610,10 +1612,12 @@
                     </div>
                 `;
             } else if (data.protocol === 'mqtt') {
+                // Host port is offset by 10000 to avoid conflict with local mosquitto
+                const mqttHostPort = data.port + 10000;
                 html += `
                     <div class="config-item">
                         <label>MQTT Port</label>
-                        <div class="value">${data.port}</div>
+                        <div class="value">${mqttHostPort}</div>
                     </div>
                 `;
             } else if (data.protocol === 'ocpp') {
