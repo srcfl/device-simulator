@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,7 +18,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/srcfl/device-simulator/internal/device"
 	"github.com/srcfl/device-simulator/internal/modbus"
+	"github.com/srcfl/device-simulator/internal/mqtt"
+	"github.com/srcfl/device-simulator/internal/ocpp"
 	"github.com/srcfl/device-simulator/internal/profiles"
 )
 
@@ -26,13 +30,19 @@ var templatesFS embed.FS
 
 // Simulator represents a single simulator instance
 type Simulator struct {
-	ID              int              `json:"id"`
-	Serial          string           `json:"serial"`
-	SlaveID         uint8            `json:"slave_id"`
-	ModbusPort      int              `json:"modbus_port"`
-	Server          *modbus.Server   `json:"-"`
-	ProfilesManager *profiles.Manager `json:"-"`
-	Automation      *AutomationState `json:"-"`
+	ID              int                   `json:"id"`
+	Serial          string                `json:"serial"`
+	Protocol        string                `json:"protocol"`
+	Category        string                `json:"category"`
+	SlaveID         uint8                 `json:"slave_id,omitempty"`
+	Port            int                   `json:"port"`
+	Running         bool                  `json:"running"`
+	Server          *modbus.Server        `json:"-"`
+	MQTTServer      *mqtt.Server          `json:"-"`
+	OCPPServer      *ocpp.Server          `json:"-"`
+	Device          device.DeviceServer   `json:"-"`
+	ProfilesManager *profiles.Manager     `json:"-"`
+	Automation      *AutomationState      `json:"-"`
 	mu              sync.RWMutex
 }
 
@@ -47,26 +57,86 @@ type AutomationState struct {
 	stopChan       chan struct{}
 }
 
+// PortAllocator manages dynamic port allocation for simulators
+type PortAllocator struct {
+	mu             sync.Mutex
+	modbusBase     int
+	mqttBase       int
+	ocppBase       int
+	allocatedPorts map[int]bool
+}
+
+func NewPortAllocator(modbusBase, mqttBase, ocppBase int) *PortAllocator {
+	return &PortAllocator{
+		modbusBase:     modbusBase,
+		mqttBase:       mqttBase,
+		ocppBase:       ocppBase,
+		allocatedPorts: make(map[int]bool),
+	}
+}
+
+func (p *PortAllocator) Allocate(protocol string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var base int
+	switch protocol {
+	case "modbus":
+		base = p.modbusBase
+	case "mqtt":
+		base = p.mqttBase
+	case "ocpp":
+		base = p.ocppBase
+	default:
+		return 0
+	}
+
+	// Find next available port starting from base
+	for port := base; port < base+1000; port++ {
+		if !p.allocatedPorts[port] {
+			p.allocatedPorts[port] = true
+			return port
+		}
+	}
+	return 0 // No available port
+}
+
+func (p *PortAllocator) Release(port int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.allocatedPorts, port)
+}
+
 var (
-	simulators    []*Simulator
-	simulatorsMu  sync.RWMutex
+	simulators      []*Simulator
+	simulatorsMu    sync.RWMutex
+	nextSimulatorID int
+	nextIDMu        sync.Mutex
+	portAllocator   *PortAllocator
 )
 
 func main() {
-	numInstances := flag.Int("instances", 10, "Number of simulator instances")
+	// Base port configuration
 	modbusBasePort := flag.Int("modbus-base", 5000, "Base port for Modbus servers")
+	mqttBasePort := flag.Int("mqtt-base", 1883, "Base port for MQTT brokers")
+	ocppBasePort := flag.Int("ocpp-base", 9000, "Base port for OCPP servers")
 	httpPort := flag.Int("http", 8080, "HTTP server port")
 	flag.Parse()
 
 	// Environment variable overrides
-	if env := os.Getenv("NUM_INSTANCES"); env != "" {
-		if n, err := strconv.Atoi(env); err == nil {
-			*numInstances = n
-		}
-	}
 	if env := os.Getenv("MODBUS_BASE_PORT"); env != "" {
 		if n, err := strconv.Atoi(env); err == nil {
 			*modbusBasePort = n
+		}
+	}
+	if env := os.Getenv("MQTT_BASE_PORT"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			*mqttBasePort = n
+		}
+	}
+	if env := os.Getenv("OCPP_BASE_PORT"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			*ocppBasePort = n
 		}
 	}
 	if env := os.Getenv("HTTP_PORT"); env != "" {
@@ -76,58 +146,20 @@ func main() {
 	}
 
 	log.Printf("Starting Device Simulator")
-	log.Printf("Instances: %d", *numInstances)
-	log.Printf("Modbus ports: %d-%d", *modbusBasePort, *modbusBasePort+*numInstances-1)
 	log.Printf("HTTP port: %d", *httpPort)
+	log.Printf("Port ranges: Modbus %d+, MQTT %d+, OCPP %d+", *modbusBasePort, *mqttBasePort, *ocppBasePort)
 
-	// Create simulators
-	simulators = make([]*Simulator, *numInstances)
-	for i := 0; i < *numInstances; i++ {
-		serial := fmt.Sprintf("INVSIM%02d", i)
-		modbusPort := *modbusBasePort + i
+	// Initialize port allocator
+	portAllocator = NewPortAllocator(*modbusBasePort, *mqttBasePort, *ocppBasePort)
 
-		server := modbus.NewServer(65535)
-		server.SetSerialNumber(serial)
-		server.InitDefaults()
-
-		pm := profiles.NewManager("profiles")
-		pm.InitEmbedded()
-		pm.LoadAll()
-
-		simulators[i] = &Simulator{
-			ID:              i + 1,
-			Serial:          serial,
-			SlaveID:         1, // Default slave ID
-			ModbusPort:      modbusPort,
-			Server:          server,
-			ProfilesManager: pm,
-			Automation: &AutomationState{
-				TimeMultiplier: 1.0,
-				SimulatedTime:  time.Now(),
-				Scenario:       "sunny",
-			},
-		}
-	}
-
-	// Start Modbus servers
-	for _, sim := range simulators {
-		go func(s *Simulator) {
-			addr := fmt.Sprintf(":%d", s.ModbusPort)
-			log.Printf("[%s] Starting Modbus server on %s (slave ID: %d)", s.Serial, addr, s.SlaveID)
-			if err := s.Server.Listen(addr); err != nil {
-				log.Printf("[%s] Modbus listen error: %v", s.Serial, err)
-				return
-			}
-			if err := s.Server.Serve(); err != nil {
-				log.Printf("[%s] Modbus serve error: %v", s.Serial, err)
-			}
-		}(sim)
-	}
+	// Initialize empty simulator list
+	simulators = make([]*Simulator, 0)
+	nextSimulatorID = 1
 
 	// Start HTTP server
 	go startHTTPServer(*httpPort)
 
-	log.Println("All servers started. Press Ctrl+C to stop.")
+	log.Println("Ready. Use the web UI to create simulators.")
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
@@ -135,9 +167,186 @@ func main() {
 	<-sigCh
 
 	log.Println("Shutting down...")
+	simulatorsMu.RLock()
 	for _, sim := range simulators {
-		sim.Server.Close()
+		stopSimulatorServer(sim)
 	}
+	simulatorsMu.RUnlock()
+}
+
+// createSimulator creates a new simulator of the given type
+func createSimulator(simType string) (*Simulator, error) {
+	var protocol, category string
+	switch simType {
+	case "inverter":
+		protocol = "modbus"
+		category = "inverter"
+	case "v2x_charger":
+		protocol = "mqtt"
+		category = "v2x_charger"
+	case "ocpp_charger":
+		protocol = "ocpp"
+		category = "ocpp_charger"
+	default:
+		return nil, fmt.Errorf("unknown simulator type: %s", simType)
+	}
+
+	port := portAllocator.Allocate(protocol)
+	if port == 0 {
+		return nil, fmt.Errorf("no available port for %s", protocol)
+	}
+
+	nextIDMu.Lock()
+	id := nextSimulatorID
+	nextSimulatorID++
+	nextIDMu.Unlock()
+
+	pm := profiles.NewManager("profiles")
+	pm.InitEmbedded()
+	pm.LoadAll()
+
+	// Set default profile for the protocol
+	availableProfiles := pm.ListByProtocol(protocol)
+	if len(availableProfiles) > 0 {
+		pm.SetActive(availableProfiles[0].Name)
+	}
+
+	sim := &Simulator{
+		ID:              id,
+		Protocol:        protocol,
+		Category:        category,
+		Port:            port,
+		Running:         false,
+		ProfilesManager: pm,
+		Automation: &AutomationState{
+			TimeMultiplier: 1.0,
+			SimulatedTime:  time.Now(),
+			Scenario:       "sunny",
+		},
+	}
+
+	// Create protocol-specific server
+	switch protocol {
+	case "modbus":
+		serial := fmt.Sprintf("INVSIM%02d", id)
+		sim.Serial = serial
+		sim.SlaveID = 1
+		server := modbus.NewServer(65535)
+		server.SetSerialNumber(serial)
+		server.InitDefaults()
+		sim.Server = server
+
+	case "mqtt":
+		mqttServer := mqtt.NewServer(id, port)
+		sim.Serial = mqttServer.SerialNumber()
+		sim.MQTTServer = mqttServer
+		sim.Device = mqttServer
+		sim.Automation.Scenario = "idle"
+
+	case "ocpp":
+		ocppServer := ocpp.NewServer(id, port, "SimulatorCo", "SimCharger-22", 2, 22.0)
+		sim.Serial = ocppServer.SerialNumber()
+		sim.OCPPServer = ocppServer
+		sim.Device = ocppServer
+		sim.Automation.Scenario = "idle"
+	}
+
+	simulatorsMu.Lock()
+	simulators = append(simulators, sim)
+	simulatorsMu.Unlock()
+
+	log.Printf("[%s] Created %s simulator on port %d", sim.Serial, simType, port)
+	return sim, nil
+}
+
+// deleteSimulator removes a simulator
+func deleteSimulator(id int) error {
+	simulatorsMu.Lock()
+	defer simulatorsMu.Unlock()
+
+	for i, sim := range simulators {
+		if sim.ID == id {
+			// Stop server if running
+			stopSimulatorServer(sim)
+			// Release port
+			portAllocator.Release(sim.Port)
+			// Remove from slice
+			simulators = append(simulators[:i], simulators[i+1:]...)
+			log.Printf("[%s] Deleted simulator", sim.Serial)
+			return nil
+		}
+	}
+	return fmt.Errorf("simulator %d not found", id)
+}
+
+// startSimulatorServer starts the protocol server for a simulator
+func startSimulatorServer(sim *Simulator) error {
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	if sim.Running {
+		return nil // Already running
+	}
+
+	var err error
+	switch sim.Protocol {
+	case "modbus":
+		addr := fmt.Sprintf(":%d", sim.Port)
+		if err = sim.Server.Listen(addr); err != nil {
+			return fmt.Errorf("modbus listen error: %v", err)
+		}
+		go func() {
+			if serveErr := sim.Server.Serve(); serveErr != nil {
+				log.Printf("[%s] Modbus serve error: %v", sim.Serial, serveErr)
+			}
+		}()
+		log.Printf("[%s] Started Modbus server on %s", sim.Serial, addr)
+
+	case "mqtt":
+		if err = sim.MQTTServer.Start(); err != nil {
+			return fmt.Errorf("mqtt start error: %v", err)
+		}
+		log.Printf("[%s] Started MQTT broker on port %d", sim.Serial, sim.Port)
+
+	case "ocpp":
+		if err = sim.OCPPServer.Start(); err != nil {
+			return fmt.Errorf("ocpp start error: %v", err)
+		}
+		log.Printf("[%s] Started OCPP server on port %d", sim.Serial, sim.Port)
+	}
+
+	sim.Running = true
+	return nil
+}
+
+// stopSimulatorServer stops the protocol server for a simulator
+func stopSimulatorServer(sim *Simulator) {
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	if !sim.Running {
+		return
+	}
+
+	// Stop automation if running
+	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
+		close(sim.Automation.stopChan)
+		sim.Automation.Enabled = false
+	}
+
+	switch sim.Protocol {
+	case "modbus":
+		sim.Server.Close()
+		log.Printf("[%s] Stopped Modbus server", sim.Serial)
+	case "mqtt":
+		sim.MQTTServer.Stop()
+		log.Printf("[%s] Stopped MQTT broker", sim.Serial)
+	case "ocpp":
+		sim.OCPPServer.Stop()
+		log.Printf("[%s] Stopped OCPP server", sim.Serial)
+	}
+
+	sim.Running = false
 }
 
 func startHTTPServer(port int) {
@@ -145,6 +354,9 @@ func startHTTPServer(port int) {
 
 	// Dashboard
 	mux.HandleFunc("/", handleDashboard)
+
+	// System info
+	mux.HandleFunc("/api/system", handleSystemInfo)
 
 	// Simulator list
 	mux.HandleFunc("/api/simulators", handleSimulatorsList)
@@ -157,6 +369,32 @@ func startHTTPServer(port int) {
 	if err := http.ListenAndServe(addr, corsMiddleware(mux)); err != nil {
 		log.Printf("HTTP server error: %v", err)
 	}
+}
+
+// getLocalIP returns the local IP address (from HOST_IP env var or auto-detected)
+func getLocalIP() string {
+	if hostIP := os.Getenv("HOST_IP"); hostIP != "" {
+		return hostIP
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "unknown"
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return "unknown"
+}
+
+func handleSystemInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"localIP": getLocalIP(),
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -190,28 +428,92 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSimulatorsList(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
+	switch r.Method {
+	case "GET":
+		handleSimulatorsListGet(w, r)
+	case "POST":
+		handleSimulatorsCreate(w, r)
+	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleSimulatorsCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type string `json:"type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	sim, err := createSimulator(req.Type)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":       sim.ID,
+		"serial":   sim.Serial,
+		"protocol": sim.Protocol,
+		"category": sim.Category,
+		"port":     sim.Port,
+		"running":  sim.Running,
+	})
+}
+
+func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
+	// Optional filtering by protocol or category
+	protocolFilter := r.URL.Query().Get("protocol")
+	categoryFilter := r.URL.Query().Get("category")
+
 	simulatorsMu.RLock()
-	list := make([]map[string]interface{}, len(simulators))
-	for i, sim := range simulators {
-		sim.mu.RLock()
-		list[i] = map[string]interface{}{
-			"id":          sim.ID,
-			"serial":      sim.Serial,
-			"slave_id":    sim.SlaveID,
-			"modbus_port": sim.ModbusPort,
-			"pv_power":    getRegisterValue(sim.Server, 5016),
-			"soc":         getRegisterValue(sim.Server, 13022),
-			"load":        getRegisterValue(sim.Server, 13007),
-			"meter":       getRegisterValue(sim.Server, 13009),
-			"automation":  sim.Automation.Enabled,
-			"profile":     sim.ProfilesManager.GetActiveName(),
+	var list []map[string]interface{}
+	for _, sim := range simulators {
+		// Apply filters
+		if protocolFilter != "" && sim.Protocol != protocolFilter {
+			continue
 		}
+		if categoryFilter != "" && sim.Category != categoryFilter {
+			continue
+		}
+
+		sim.mu.RLock()
+		entry := map[string]interface{}{
+			"id":         sim.ID,
+			"serial":     sim.Serial,
+			"protocol":   sim.Protocol,
+			"category":   sim.Category,
+			"port":       sim.Port,
+			"running":    sim.Running,
+			"automation": sim.Automation.Enabled,
+			"profile":    sim.ProfilesManager.GetActiveName(),
+		}
+
+		// Add protocol-specific fields
+		switch sim.Protocol {
+		case "modbus":
+			entry["slave_id"] = sim.SlaveID
+			entry["pv_power"] = getRegisterValue(sim.Server, 5016)
+			entry["soc"] = getRegisterValue(sim.Server, 13022)
+			entry["load"] = getRegisterValue(sim.Server, 13007)
+			entry["meter"] = getRegisterValue(sim.Server, 13009)
+		case "mqtt":
+			state := sim.MQTTServer.GetState()
+			entry["session_state"] = state["sessionState"]
+			entry["power_ac"] = state["powerAc"]
+			entry["soc"] = state["soc"]
+			entry["ev_connected"] = state["evConnected"]
+		case "ocpp":
+			state := sim.OCPPServer.GetState()
+			entry["connected"] = state["connected"]
+			entry["connectors"] = state["connectors"]
+		}
+
 		sim.mu.RUnlock()
+		list = append(list, entry)
 	}
 	simulatorsMu.RUnlock()
 
@@ -235,15 +537,27 @@ func handleSimulatorAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle DELETE before checking if simulator exists (for idempotency)
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	// DELETE /api/simulators/{id}
+	if r.Method == "DELETE" && action == "" {
+		if err := deleteSimulator(simID); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+		return
+	}
+
 	sim := getSimulator(simID)
 	if sim == nil {
 		http.Error(w, "Simulator not found", http.StatusNotFound)
 		return
-	}
-
-	action := ""
-	if len(parts) > 1 {
-		action = parts[1]
 	}
 
 	switch {
@@ -273,6 +587,14 @@ func handleSimulatorAPI(w http.ResponseWriter, r *http.Request) {
 		handleAutomationConfig(w, r, sim)
 	case action == "reset":
 		handleReset(w, r, sim)
+	case action == "state":
+		handleState(w, r, sim)
+	case action == "clients":
+		handleClients(w, r, sim)
+	case action == "wakeup":
+		handleWakeUp(w, r, sim)
+	case action == "power":
+		handlePower(w, r, sim)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}
@@ -292,20 +614,33 @@ func getSimulator(id int) *Simulator {
 func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 	sim.mu.RLock()
 	status := map[string]interface{}{
-		"id":          sim.ID,
-		"serial":      sim.Serial,
-		"slave_id":    sim.SlaveID,
-		"modbus_port": sim.ModbusPort,
-		"pv_power":    getRegisterValue(sim.Server, 5016),
-		"soc":         getRegisterValue(sim.Server, 13022),
-		"load":        getRegisterValue(sim.Server, 13007),
-		"meter":       getRegisterValue(sim.Server, 13009),
-		"frequency":   getRegisterValue(sim.Server, 5241),
+		"id":       sim.ID,
+		"serial":   sim.Serial,
+		"protocol": sim.Protocol,
+		"category": sim.Category,
+		"port":     sim.Port,
+		"running":  sim.Running,
 		"automation": map[string]interface{}{
 			"enabled":         sim.Automation.Enabled,
 			"time_multiplier": sim.Automation.TimeMultiplier,
 			"simulated_time":  sim.Automation.SimulatedTime,
+			"scenario":        sim.Automation.Scenario,
 		},
+	}
+
+	// Add protocol-specific status
+	switch sim.Protocol {
+	case "modbus":
+		status["slave_id"] = sim.SlaveID
+		status["pv_power"] = getRegisterValue(sim.Server, 5016)
+		status["soc"] = getRegisterValue(sim.Server, 13022)
+		status["load"] = getRegisterValue(sim.Server, 13007)
+		status["meter"] = getRegisterValue(sim.Server, 13009)
+		status["frequency"] = getRegisterValue(sim.Server, 5241)
+	case "mqtt":
+		status["state"] = sim.MQTTServer.GetState()
+	case "ocpp":
+		status["state"] = sim.OCPPServer.GetState()
 	}
 	sim.mu.RUnlock()
 
@@ -330,14 +665,30 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 	}
 
 	sim.mu.Lock()
-	if config.SlaveID != nil {
+	if config.SlaveID != nil && sim.Protocol == "modbus" {
 		sim.SlaveID = *config.SlaveID
 		log.Printf("[%s] Slave ID changed to %d", sim.Serial, sim.SlaveID)
 	}
 	if config.Serial != nil {
+		oldSerial := sim.Serial
 		sim.Serial = *config.Serial
-		sim.Server.SetSerialNumber(*config.Serial)
-		log.Printf("[%s] Serial changed", sim.Serial)
+		// Update protocol-specific serial (takes effect immediately for stopped servers,
+		// or after restart for running servers)
+		switch sim.Protocol {
+		case "modbus":
+			if sim.Server != nil {
+				sim.Server.SetSerialNumber(*config.Serial)
+			}
+		case "mqtt":
+			if sim.MQTTServer != nil {
+				sim.MQTTServer.SetSerialNumber(*config.Serial)
+			}
+		case "ocpp":
+			if sim.OCPPServer != nil {
+				sim.OCPPServer.SetSerialNumber(*config.Serial)
+			}
+		}
+		log.Printf("[%s] Serial changed from %s", sim.Serial, oldSerial)
 	}
 	sim.mu.Unlock()
 
@@ -447,13 +798,23 @@ func handleLogs(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 		}
 	}
 
-	logs := sim.Server.GetLogs(limit)
+	var logs interface{}
+	switch sim.Protocol {
+	case "modbus":
+		logs = sim.Server.GetLogs(limit)
+	case "mqtt":
+		logs = sim.MQTTServer.GetLogs(limit)
+	case "ocpp":
+		logs = sim.OCPPServer.GetLogs(limit)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"logs": logs})
 }
 
 func handleProfiles(w http.ResponseWriter, r *http.Request, sim *Simulator) {
-	list := sim.ProfilesManager.List()
+	// Filter profiles by the simulator's protocol
+	list := sim.ProfilesManager.ListByProtocol(sim.Protocol)
 	active := sim.ProfilesManager.GetActiveName()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -521,6 +882,13 @@ func handleAutomationStart(w http.ResponseWriter, r *http.Request, sim *Simulato
 		return
 	}
 
+	// Start the server first
+	if err := startSimulatorServer(sim); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Then start automation
 	sim.Automation.mu.Lock()
 	if !sim.Automation.Enabled {
 		sim.Automation.Enabled = true
@@ -540,12 +908,16 @@ func handleAutomationStop(w http.ResponseWriter, r *http.Request, sim *Simulator
 		return
 	}
 
+	// Stop automation first
 	sim.Automation.mu.Lock()
 	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
 		close(sim.Automation.stopChan)
 		sim.Automation.Enabled = false
 	}
 	sim.Automation.mu.Unlock()
+
+	// Then stop the server
+	stopSimulatorServer(sim)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
@@ -596,6 +968,115 @@ func handleReset(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
 }
 
+func handleState(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Key   string      `json:"key"`
+		Value interface{} `json:"value"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var err error
+	switch sim.Protocol {
+	case "mqtt":
+		err = sim.MQTTServer.SetValue(req.Key, req.Value)
+	case "ocpp":
+		err = sim.OCPPServer.SetValue(req.Key, req.Value)
+	default:
+		http.Error(w, "State changes not supported for this protocol", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+func handleClients(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if sim.Protocol != "mqtt" {
+		http.Error(w, "Clients endpoint only available for MQTT devices", http.StatusBadRequest)
+		return
+	}
+
+	clients := sim.MQTTServer.GetClients()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"clients": clients,
+		"count":   len(clients),
+	})
+}
+
+func handleWakeUp(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if sim.Protocol != "mqtt" {
+		http.Error(w, "WakeUp endpoint only available for MQTT devices", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Wake bool `json:"wake"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	sim.MQTTServer.WakeUp(req.Wake)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "ok",
+		"session_state": sim.MQTTServer.GetState()["sessionState"],
+	})
+}
+
+func handlePower(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if sim.Protocol != "mqtt" {
+		http.Error(w, "Power endpoint only available for MQTT devices", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Power float64 `json:"power"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	sim.MQTTServer.SetTargetPower(req.Power)
+
+	state := sim.MQTTServer.GetState()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "ok",
+		"power_ac": state["powerAc"],
+	})
+}
+
 func runAutomationLoop(sim *Simulator) {
 	log.Printf("[%s] Automation started", sim.Serial)
 
@@ -623,6 +1104,21 @@ func runAutomationLoop(sim *Simulator) {
 }
 
 func generateValues(sim *Simulator, simTime time.Time) {
+	// Handle different protocols
+	switch sim.Protocol {
+	case "mqtt":
+		if sim.MQTTServer != nil {
+			sim.MQTTServer.GenerateValues(simTime)
+		}
+		return
+	case "ocpp":
+		if sim.OCPPServer != nil {
+			sim.OCPPServer.GenerateValues(simTime)
+		}
+		return
+	}
+
+	// Modbus inverter simulation
 	hour := float64(simTime.Hour()) + float64(simTime.Minute())/60.0
 
 	sim.Automation.mu.RLock()

@@ -15,15 +15,44 @@ type GeneratorConfig struct {
 	Config map[string]interface{} `json:"config,omitempty"`
 }
 
+// MQTTConfig holds MQTT-specific profile configuration
+type MQTTConfig struct {
+	BaseTopic         string                 `json:"base_topic"`
+	PublishIntervalMs int                    `json:"publish_interval_ms,omitempty"`
+	Defaults          map[string]interface{} `json:"defaults,omitempty"`
+}
+
+// OCPPConfig holds OCPP-specific profile configuration
+type OCPPConfig struct {
+	Version       string            `json:"version"` // "1.6" or "2.0.1"
+	Vendor        string            `json:"vendor"`
+	Model         string            `json:"model"`
+	NumConnectors int               `json:"num_connectors"`
+	MaxPowerKW    float64           `json:"max_power_kw"`
+	Configuration map[string]string `json:"configuration,omitempty"`
+	DefaultStatus string            `json:"default_status,omitempty"`
+}
+
 // Profile defines a device simulation profile
 type Profile struct {
 	Name        string                     `json:"name"`
 	Description string                     `json:"description"`
+	Protocol    string                     `json:"protocol"`             // modbus, mqtt, ocpp
 	DeviceType  string                     `json:"device_type"`
-	Categories  []string                   `json:"categories,omitempty"`  // pv, battery, meter, grid, control
-	EVCCRef     string                     `json:"evcc_ref,omitempty"`    // Link to EVCC template
-	Defaults    map[uint16]float64         `json:"defaults,omitempty"`
-	Generators  map[string]GeneratorConfig `json:"generators,omitempty"`
+	Categories  []string                   `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
+	EVCCRef     string                     `json:"evcc_ref,omitempty"`   // Link to EVCC template
+
+	// Modbus-specific
+	Defaults map[uint16]float64 `json:"defaults,omitempty"`
+
+	// MQTT-specific (V2X chargers)
+	MQTTConfig *MQTTConfig `json:"mqtt_config,omitempty"`
+
+	// OCPP-specific
+	OCPPConfig *OCPPConfig `json:"ocpp_config,omitempty"`
+
+	// Generators work across all protocols
+	Generators map[string]GeneratorConfig `json:"generators,omitempty"`
 }
 
 // Manager handles profile loading and storage
@@ -94,6 +123,7 @@ func (m *Manager) List() []ProfileInfo {
 		list = append(list, ProfileInfo{
 			Name:        p.Name,
 			Description: p.Description,
+			Protocol:    p.Protocol,
 			DeviceType:  p.DeviceType,
 		})
 	}
@@ -106,10 +136,37 @@ func (m *Manager) List() []ProfileInfo {
 	return list
 }
 
+// ListByProtocol returns profiles filtered by protocol
+func (m *Manager) ListByProtocol(protocol string) []ProfileInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var list []ProfileInfo
+	for _, p := range m.profiles {
+		// Match exact protocol, or include profiles with empty protocol for modbus (backwards compatibility)
+		matches := p.Protocol == protocol || (protocol == "modbus" && p.Protocol == "")
+		if matches {
+			list = append(list, ProfileInfo{
+				Name:        p.Name,
+				Description: p.Description,
+				Protocol:    p.Protocol,
+				DeviceType:  p.DeviceType,
+			})
+		}
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Name < list[j].Name
+	})
+
+	return list
+}
+
 // ProfileInfo is a summary of a profile
 type ProfileInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Protocol    string `json:"protocol"`
 	DeviceType  string `json:"device_type"`
 }
 
@@ -167,6 +224,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"sungrow-hybrid": {
 		Name:        "sungrow-hybrid",
 		Description: "Sungrow SH Series Hybrid Inverter",
+		Protocol:    "modbus",
 		DeviceType:  "sungrow",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sungrow-hybrid.yaml",
@@ -206,6 +264,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"solis-hybrid": {
 		Name:        "solis-hybrid",
 		Description: "Solis Hybrid Inverter",
+		Protocol:    "modbus",
 		DeviceType:  "solis",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
@@ -221,6 +280,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"solaredge": {
 		Name:        "solaredge",
 		Description: "SolarEdge Inverter with StorEdge",
+		Protocol:    "modbus",
 		DeviceType:  "solaredge",
 		Categories:  []string{"pv", "battery", "meter", "grid"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/solaredge.yaml",
@@ -233,6 +293,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"sma-tripower": {
 		Name:        "sma-tripower",
 		Description: "SMA Sunny Tripower Inverter",
+		Protocol:    "modbus",
 		DeviceType:  "sma",
 		Categories:  []string{"pv", "meter", "grid"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sma-tripower.yaml",
@@ -245,6 +306,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"huawei-sun2000": {
 		Name:        "huawei-sun2000",
 		Description: "Huawei SUN2000 Hybrid Inverter",
+		Protocol:    "modbus",
 		DeviceType:  "huawei",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/huawei-sun2000.yaml",
@@ -259,6 +321,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"fronius-gen24": {
 		Name:        "fronius-gen24",
 		Description: "Fronius GEN24 Plus Hybrid",
+		Protocol:    "modbus",
 		DeviceType:  "fronius",
 		Categories:  []string{"pv", "battery", "meter", "grid"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/fronius.yaml",
@@ -271,6 +334,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"deye-hybrid": {
 		Name:        "deye-hybrid",
 		Description: "Deye Hybrid Inverter",
+		Protocol:    "modbus",
 		DeviceType:  "deye",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
@@ -284,6 +348,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"pixii-powershaper": {
 		Name:        "pixii-powershaper",
 		Description: "Pixii PowerShaper 2 (Battery Only)",
+		Protocol:    "modbus",
 		DeviceType:  "pixii",
 		Categories:  []string{"battery", "meter", "control"},
 		Defaults: map[uint16]float64{
@@ -295,6 +360,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"ferroamp-energyhub": {
 		Name:        "ferroamp-energyhub",
 		Description: "FerroAmp EnergyHub",
+		Protocol:    "modbus",
 		DeviceType:  "ferroamp",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
@@ -307,6 +373,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"sdm630": {
 		Name:        "sdm630",
 		Description: "Eastron SDM630 Energy Meter (Meter Only)",
+		Protocol:    "modbus",
 		DeviceType:  "sdm630",
 		Categories:  []string{"meter"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sdm.yaml",
@@ -328,6 +395,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"residential-5kw": {
 		Name:        "residential-5kw",
 		Description: "Typical 5kW Residential System",
+		Protocol:    "modbus",
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
@@ -364,6 +432,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	"commercial-50kw": {
 		Name:        "commercial-50kw",
 		Description: "50kW Commercial System",
+		Protocol:    "modbus",
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
@@ -398,9 +467,67 @@ var EmbeddedProfiles = map[string]*Profile{
 	"default": {
 		Name:        "default",
 		Description: "Default profile (all registers)",
+		Protocol:    "modbus",
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults:    map[uint16]float64{},
+	},
+
+	// V2X Charger profiles (MQTT)
+	"ambibox": {
+		Name:        "ambibox",
+		Description: "Ambibox V2X Bidirectional Charger",
+		Protocol:    "mqtt",
+		DeviceType:  "ambibox",
+		Categories:  []string{"ev", "v2x", "bidirectional"},
+		MQTTConfig: &MQTTConfig{
+			BaseTopic:         "device/evCharger/0",
+			PublishIntervalMs: 1000,
+			Defaults: map[string]interface{}{
+				"sessionState":       "IDLE",
+				"controlMode":        "CONTROLLABLE",
+				"evConnected":        false,
+				"chargeProtocol":     "CCS",
+				"powerAc":            float64(0),
+				"powerDc":            float64(0),
+				"currentAc1":         float64(0),
+				"currentAc2":         float64(0),
+				"currentAc3":         float64(0),
+				"voltageAc1":         float64(230),
+				"voltageAc2":         float64(230),
+				"voltageAc3":         float64(230),
+				"frequency":          float64(50),
+				"soc":                float64(50),
+				"chargePowerMax":     float64(11000),
+				"dischargePowerMax":  float64(11000),
+				"chargePowerMin":     float64(1400),
+				"dischargePowerMin":  float64(1400),
+				"energyAcImport":     float64(0),
+				"energyAcExport":     float64(0),
+			},
+		},
+	},
+
+	// OCPP Charger profiles
+	"ocpp-charger": {
+		Name:        "ocpp-charger",
+		Description: "Generic OCPP 1.6 EV Charger",
+		Protocol:    "ocpp",
+		DeviceType:  "ocpp-charger",
+		Categories:  []string{"ev", "charger"},
+		OCPPConfig: &OCPPConfig{
+			Version:       "1.6",
+			Vendor:        "SimulatorCo",
+			Model:         "SimCharger-22",
+			NumConnectors: 2,
+			MaxPowerKW:    22,
+			Configuration: map[string]string{
+				"HeartbeatInterval":        "60",
+				"MeterValueSampleInterval": "30",
+				"NumberOfConnectors":       "2",
+			},
+			DefaultStatus: "Available",
+		},
 	},
 }
 
