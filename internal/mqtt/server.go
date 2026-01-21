@@ -16,16 +16,19 @@ import (
 
 // Server represents an MQTT broker with V2X charger simulation
 type Server struct {
-	mu           sync.RWMutex
-	id           int
-	serialNumber string
-	broker       *mqtt.Server
-	state        *V2XState
-	logs         []device.LogEntry
-	maxLogs      int
-	port         int
-	running      bool
-	stopChan     chan struct{}
+	mu                sync.RWMutex
+	id                int
+	serialNumber      string
+	broker            *mqtt.Server
+	state             *V2XState
+	logs              []device.LogEntry
+	maxLogs           int
+	port              int
+	running           bool
+	stopChan          chan struct{}
+	lowPowerTimer     *time.Timer
+	lowPowerThreshold float64 // Power threshold for auto-pause (W)
+	lowPowerTimeout   time.Duration
 }
 
 // V2XState holds the V2X charger state (matches Ambibox MQTT structure)
@@ -87,13 +90,15 @@ type V2XState struct {
 // NewServer creates a new MQTT server for V2X charger simulation
 func NewServer(id int, port int) *Server {
 	return &Server{
-		id:           id,
-		serialNumber: fmt.Sprintf("V2XSIM%02d", id),
-		port:         port,
-		maxLogs:      500,
-		logs:         make([]device.LogEntry, 0),
-		state:        newDefaultState(),
-		stopChan:     make(chan struct{}),
+		id:                id,
+		serialNumber:      fmt.Sprintf("V2XSIM%02d", id),
+		port:              port,
+		maxLogs:           500,
+		logs:              make([]device.LogEntry, 0),
+		state:             newDefaultState(),
+		stopChan:          make(chan struct{}),
+		lowPowerThreshold: 1000, // Auto-pause if |power| < 1000W
+		lowPowerTimeout:   time.Minute,
 	}
 }
 
@@ -320,15 +325,17 @@ func (s *Server) publishState() {
 }
 
 // handleMessage processes incoming MQTT messages
-func (s *Server) handleMessage(topic string, payload []byte) {
+func (s *Server) handleMessage(topic string, payload []byte, clientID string, clientAddr string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	payloadStr := string(payload)
 
 	s.addLog("message", map[string]interface{}{
-		"topic":   topic,
-		"payload": payloadStr,
+		"topic":      topic,
+		"payload":    payloadStr,
+		"client_id":  clientID,
+		"client_addr": clientAddr,
 	})
 
 	switch topic {
@@ -365,12 +372,24 @@ func (s *Server) handleMessage(topic string, payload []byte) {
 				if s.state.SessionState == "PAUSED" {
 					s.state.SessionState = "CHARGE_LOOP"
 				}
-				// Invert sign: positive targetPower = charging (negative powerAc)
-				s.state.PowerAc = -power
-				s.state.PowerDc = -power * 0.95 // DC power with efficiency loss
+				// No conversion: negative = charging, positive = discharging
+				s.state.PowerAc = power
+				s.state.PowerDc = power * 0.95
 				s.updateCurrents()
+
+				// Manage low power timeout
+				absPower := power
+				if absPower < 0 {
+					absPower = -absPower
+				}
+				if absPower < s.lowPowerThreshold {
+					s.startLowPowerTimeout()
+				} else {
+					s.cancelLowPowerTimeout()
+				}
 			} else {
 				// Transition back to PAUSED when power is zero
+				s.cancelLowPowerTimeout()
 				if s.state.SessionState == "CHARGE_LOOP" {
 					s.state.SessionState = "PAUSED"
 				}
@@ -392,12 +411,24 @@ func (s *Server) handleMessage(topic string, payload []byte) {
 				if s.state.SessionState == "PAUSED" {
 					s.state.SessionState = "CHARGE_LOOP"
 				}
-				// In limitable mode, set power to the limit
-				s.state.PowerAc = -limit
-				s.state.PowerDc = -limit * 0.95
+				// No conversion: negative = charging, positive = discharging
+				s.state.PowerAc = limit
+				s.state.PowerDc = limit * 0.95
 				s.updateCurrents()
+
+				// Manage low power timeout
+				absLimit := limit
+				if absLimit < 0 {
+					absLimit = -absLimit
+				}
+				if absLimit < s.lowPowerThreshold {
+					s.startLowPowerTimeout()
+				} else {
+					s.cancelLowPowerTimeout()
+				}
 			} else {
 				// Transition back to PAUSED when limit is zero
+				s.cancelLowPowerTimeout()
 				if s.state.SessionState == "CHARGE_LOOP" {
 					s.state.SessionState = "PAUSED"
 				}
@@ -409,20 +440,72 @@ func (s *Server) handleMessage(topic string, payload []byte) {
 	}
 }
 
-// wakeUpCharger transitions charger to ready state (PAUSED)
-// CHARGE_LOOP is only entered when power is actually commanded
+// wakeUpCharger transitions charger to CHARGE_LOOP with 200W charging
+// This matches the physical Ambibox behavior when wakeUp is received
 func (s *Server) wakeUpCharger() {
-	if s.state.SessionState == "IDLE" && s.state.EVConnected {
-		s.state.SessionState = "PAUSED"
+	// Only wake if EV is connected and not already in CHARGE_LOOP
+	if s.state.EVConnected && s.state.SessionState != "CHARGE_LOOP" {
+		s.state.SessionState = "CHARGE_LOOP"
+		// Start charging with 200W (negative = charging)
+		s.state.RequestedTargetPower = -200
+		s.state.TargetPower = -200
+		s.state.PowerAc = -200
+		s.state.PowerDc = -200 * 0.95
+		s.updateCurrents()
+		// Start the low power timeout
+		s.startLowPowerTimeout()
 	}
 }
 
 // sleepCharger transitions charger to idle state
 func (s *Server) sleepCharger() {
+	s.cancelLowPowerTimeout()
 	s.state.SessionState = "IDLE"
 	s.state.PowerAc = 0
 	s.state.PowerDc = 0
+	s.state.RequestedTargetPower = 0
+	s.state.TargetPower = 0
 	s.updateCurrents()
+}
+
+// startLowPowerTimeout starts a timer that will transition to PAUSED after timeout
+// if the power stays below the threshold. Call this when entering low-power CHARGE_LOOP.
+func (s *Server) startLowPowerTimeout() {
+	s.cancelLowPowerTimeout()
+
+	s.lowPowerTimer = time.AfterFunc(s.lowPowerTimeout, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		// Only auto-pause if still in CHARGE_LOOP with low power
+		if s.state.SessionState == "CHARGE_LOOP" {
+			absPower := s.state.RequestedTargetPower
+			if absPower < 0 {
+				absPower = -absPower
+			}
+			if absPower < s.lowPowerThreshold {
+				s.state.SessionState = "PAUSED"
+				s.state.PowerAc = 0
+				s.state.PowerDc = 0
+				s.state.RequestedTargetPower = 0
+				s.state.TargetPower = 0
+				s.updateCurrents()
+
+				s.addLog("auto-pause", map[string]interface{}{
+					"reason":       "low power timeout",
+					"previousPower": absPower,
+				})
+			}
+		}
+	})
+}
+
+// cancelLowPowerTimeout cancels any pending low power timeout
+func (s *Server) cancelLowPowerTimeout() {
+	if s.lowPowerTimer != nil {
+		s.lowPowerTimer.Stop()
+		s.lowPowerTimer = nil
+	}
 }
 
 // updateCurrents calculates phase currents from power
@@ -652,7 +735,7 @@ func (h *MessageHook) Provides(b byte) bool {
 func (h *MessageHook) OnPublished(cl *mqtt.Client, pk packets.Packet) {
 	// Only process messages from external clients (not our own publishes)
 	if cl.ID != "inline" {
-		h.server.handleMessage(pk.TopicName, pk.Payload)
+		h.server.handleMessage(pk.TopicName, pk.Payload, cl.ID, cl.Net.Remote)
 	}
 }
 
@@ -708,6 +791,7 @@ func (s *Server) WakeUp(wake bool) {
 }
 
 // SetTargetPower sets the charging/discharging power
+// Convention: negative power = charging, positive power = discharging
 func (s *Server) SetTargetPower(power float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -723,13 +807,25 @@ func (s *Server) SetTargetPower(power float64) {
 				s.state.SessionState = "CHARGE_LOOP"
 			}
 			if s.state.ControlMode == "CONTROLLABLE" {
-				// Invert sign: positive targetPower = charging (negative powerAc)
-				s.state.PowerAc = -power
-				s.state.PowerDc = -power * 0.95 // DC power with efficiency loss
+				// No conversion: negative = charging, positive = discharging
+				s.state.PowerAc = power
+				s.state.PowerDc = power * 0.95
 				s.updateCurrents()
+			}
+
+			// Manage low power timeout
+			absPower := power
+			if absPower < 0 {
+				absPower = -absPower
+			}
+			if absPower < s.lowPowerThreshold {
+				s.startLowPowerTimeout()
+			} else {
+				s.cancelLowPowerTimeout()
 			}
 		} else {
 			// Transition back to PAUSED when power is zero
+			s.cancelLowPowerTimeout()
 			if s.state.SessionState == "CHARGE_LOOP" {
 				s.state.SessionState = "PAUSED"
 			}
