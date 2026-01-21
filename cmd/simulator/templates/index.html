@@ -107,8 +107,66 @@
             </template>
         </div>
 
-        <!-- Add Simulator -->
-        <div style="padding: 0.5rem;">
+        <!-- Sites Section -->
+        <div class="simulator-list" style="border-top: 1px solid var(--border-color); margin-top: 0.5rem; padding-top: 0.5rem;">
+            <div class="category-section">
+                <div class="category-header">
+                    <span class="category-icon">🏠</span>
+                    <span class="category-name">Sites</span>
+                    <span class="category-count" x-text="$store.site.sites.length"></span>
+                </div>
+                <div class="category-items">
+                    <template x-if="$store.site.sites.length === 0">
+                        <div class="no-simulators" style="padding: 0.5rem; font-size: 0.75rem;">No sites yet.<br>Click "+ Add Site" below.</div>
+                    </template>
+                    <template x-for="site in $store.site.sites" :key="site.id">
+                        <div class="sim-item"
+                             :class="{ 'active': $store.site.selectedId === site.id }"
+                             @click="$store.site.selectSite(site.id)">
+
+                            <button class="sim-delete"
+                                    @click.stop="$store.site.deleteSite(site.id)"
+                                    title="Delete">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                </svg>
+                            </button>
+
+                            <div class="sim-header">
+                                <span class="sim-profile" :class="{ 'inactive': !site.enabled }"
+                                      x-text="site.enabled ? 'aggregating' : 'disabled'"></span>
+                                <span class="protocol-badge modbus">site</span>
+                            </div>
+                            <div class="sim-serial" x-text="site.name"></div>
+                            <div class="sim-ports">
+                                <span x-text="`${(site.simulator_ids || []).length} devices`"></span>
+                            </div>
+                            <div class="sim-stats">
+                                <template x-if="site.meter_power !== undefined">
+                                    <span :style="site.meter_power >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
+                                          x-text="`${site.meter_power >= 0 ? 'Import' : 'Export'} ${Math.abs(site.meter_power).toFixed(0)}W`"></span>
+                                </template>
+                                <template x-if="site.meter_power === undefined">
+                                    <span>No meter</span>
+                                </template>
+                            </div>
+                            <div class="sim-toggle" @click.stop>
+                                <div class="sim-toggle-track"
+                                     :class="{ 'on': site.enabled }"
+                                     @click="$store.site.selectSite(site.id); $store.site.toggleEnabled()">
+                                    <div class="sim-toggle-thumb"></div>
+                                </div>
+                                <span class="sim-toggle-label" :class="{ 'on': site.enabled }"
+                                      x-text="site.enabled ? 'Active' : 'Inactive'"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Simulator / Site -->
+        <div style="padding: 0.5rem;" x-data="{ showSiteDialog: false, siteName: '', siteMeter: '', siteBaseLoad: 1000 }">
             <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Simulator</button>
             <div class="add-menu" :class="{ 'show': $store.app.addMenuOpen }">
                 <div class="add-menu-title">Select Type</div>
@@ -116,16 +174,200 @@
                 <button class="add-menu-btn" @click="$store.app.addSimulator('v2x_charger')">🔋 V2X Charger (MQTT)</button>
                 <button class="add-menu-btn" @click="$store.app.addSimulator('ocpp_charger')">🔌 OCPP Charger</button>
             </div>
+            <button class="add-simulator-btn" style="margin-top: 0.25rem;" @click="showSiteDialog = true">+ Add Site</button>
+
+            <!-- Add Site Dialog -->
+            <div x-show="showSiteDialog" class="add-menu show" style="position: relative; margin-top: 0.5rem;">
+                <div class="add-menu-title">Create Site</div>
+                <div style="padding: 0.5rem;">
+                    <label style="font-size: 0.7rem; color: var(--text-muted);">Name</label>
+                    <input type="text" x-model="siteName" placeholder="Site name"
+                           style="width: 100%; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); margin-bottom: 0.5rem;">
+
+                    <label style="font-size: 0.7rem; color: var(--text-muted);">Meter (Modbus device)</label>
+                    <select x-model="siteMeter"
+                            style="width: 100%; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); margin-bottom: 0.5rem;">
+                        <option value="">Select meter...</option>
+                        <template x-for="sim in $store.app.simulators.filter(s => s.protocol === 'modbus')" :key="sim.id">
+                            <option :value="sim.id" x-text="`${sim.serial} (:${sim.port})`"></option>
+                        </template>
+                    </select>
+
+                    <label style="font-size: 0.7rem; color: var(--text-muted);">Base Load (W)</label>
+                    <input type="number" x-model="siteBaseLoad" min="0" max="10000" step="100"
+                           style="width: 100%; padding: 4px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); margin-bottom: 0.5rem;">
+
+                    <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                        <button class="add-menu-btn" style="flex: 1;"
+                                @click="showSiteDialog = false; siteName = ''; siteMeter = ''; siteBaseLoad = 1000;">Cancel</button>
+                        <button class="add-menu-btn" style="flex: 1; background: var(--color-primary); color: white;"
+                                @click="(async () => {
+                                    if (!siteMeter) { alert('Please select a meter'); return; }
+                                    try {
+                                        await $store.site.createSite(siteName || 'New Site', parseInt(siteMeter), [], parseFloat(siteBaseLoad) || 1000);
+                                        showSiteDialog = false; siteName = ''; siteMeter = ''; siteBaseLoad = 1000;
+                                    } catch(e) { alert('Error: ' + e.message); }
+                                })()">Create</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main">
         <!-- Empty State -->
-        <template x-if="!$store.app.selectedId">
+        <template x-if="!$store.app.selectedId && !$store.site.selectedId">
             <div class="empty-state">
                 <h3>Don't Panic</h3>
-                <p>Click "+ Add Simulator" to create a device</p>
+                <p>Click "+ Add Simulator" to create a device or "+ Add Site" to create an aggregation site</p>
+            </div>
+        </template>
+
+        <!-- Site View -->
+        <template x-if="$store.site.selectedId && $store.site.data">
+            <div x-data="siteView()">
+                <!-- Site Config Section -->
+                <div class="section">
+                    <div class="config-row">
+                        <div class="config-item">
+                            <label>Name</label>
+                            <input type="text"
+                                   :value="$store.site.data?.name || ''"
+                                   @change="$store.site.updateConfig({ name: $event.target.value })">
+                        </div>
+
+                        <div class="config-item">
+                            <label>Meter (Modbus)</label>
+                            <select @change="changeMeter(parseInt($event.target.value))">
+                                <option value="0">Select meter...</option>
+                                <template x-for="sim in $store.site.getModbusSimulators()" :key="sim.id">
+                                    <option :value="sim.id"
+                                            :selected="sim.id === $store.site.data?.meter_id"
+                                            x-text="`${sim.serial} (:${sim.port})`"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div class="config-item">
+                            <label>Base Load (W)</label>
+                            <input type="number" min="0" max="10000" step="100"
+                                   :value="$store.site.data?.base_load_w || 0"
+                                   @change="$store.site.updateConfig({ base_load_w: parseFloat($event.target.value) })">
+                        </div>
+
+                        <div class="config-item" style="margin-left: auto;">
+                            <label>Aggregation</label>
+                            <div class="toggle-switch" style="height: 32px;">
+                                <div class="toggle-switch-track"
+                                     :class="{ 'on': $store.site.data?.enabled }"
+                                     @click="$store.site.toggleEnabled()">
+                                    <div class="toggle-switch-thumb"></div>
+                                </div>
+                                <span class="toggle-switch-status"
+                                      :class="$store.site.data?.enabled ? 'running' : 'stopped'"
+                                      x-text="$store.site.data?.enabled ? 'Active' : 'Inactive'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Meter Reading Section -->
+                <div class="section">
+                    <div class="section-title">Site Energy Balance</div>
+                    <div class="state-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
+                        <div class="state-card highlight">
+                            <div class="state-label">Meter Reading</div>
+                            <div class="state-value"
+                                 :style="meterPower >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
+                                 x-text="formatMeterPower()"></div>
+                        </div>
+                        <div class="state-card">
+                            <div class="state-label">Base Load</div>
+                            <div class="state-value" x-text="`${($store.site.data?.base_load_w || 0).toFixed(0)} W`"></div>
+                        </div>
+                        <div class="state-card">
+                            <div class="state-label">Total Power</div>
+                            <div class="state-value" x-text="`${($store.site.data?.total_power || 0).toFixed(0)} W`"></div>
+                        </div>
+                        <div class="state-card">
+                            <div class="state-label">Devices</div>
+                            <div class="state-value" x-text="($store.site.data?.simulator_ids || []).length"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Member Devices Section -->
+                <div class="section">
+                    <div class="section-title" style="display: flex; align-items: center; justify-content: space-between;">
+                        <span>Member Devices</span>
+                        <div x-data="{ showAddSim: false }" style="position: relative;">
+                            <button class="btn btn-action" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;"
+                                    @click="showAddSim = !showAddSim">+ Add Device</button>
+                            <div x-show="showAddSim" @click.away="showAddSim = false"
+                                 style="position: absolute; right: 0; top: 100%; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.5rem; min-width: 200px; z-index: 100;">
+                                <template x-for="sim in getAvailableToAdd()" :key="sim.id">
+                                    <div style="padding: 0.25rem 0.5rem; cursor: pointer; font-size: 0.75rem;"
+                                         @click="addDevice(sim.id); showAddSim = false"
+                                         class="add-menu-btn">
+                                        <span x-text="`${sim.serial} (${sim.protocol})`"></span>
+                                    </div>
+                                </template>
+                                <template x-if="getAvailableToAdd().length === 0">
+                                    <div style="padding: 0.25rem; color: var(--text-muted); font-size: 0.75rem;">No available devices</div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="state-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <template x-if="($store.site.data?.simulator_ids || []).length === 0">
+                            <div style="color: var(--text-muted); padding: 1rem;">No devices added yet. Click "+ Add Device" to add simulators.</div>
+                        </template>
+                        <template x-for="simId in ($store.site.data?.simulator_ids || [])" :key="simId">
+                            <div class="state-card" style="position: relative;">
+                                <button class="sim-delete" style="position: absolute; top: 0.25rem; right: 0.25rem;"
+                                        @click="removeDevice(simId)" title="Remove from site">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                </button>
+                                <div class="state-label" style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span x-text="getSimInfo(simId).serial"></span>
+                                    <span class="protocol-badge" :class="getSimInfo(simId).protocol"
+                                          x-text="getSimInfo(simId).protocol" style="font-size: 0.6rem;"></span>
+                                    <template x-if="simId === $store.site.data?.meter_id">
+                                        <span style="font-size: 0.6rem; color: var(--color-primary);">(meter)</span>
+                                    </template>
+                                </div>
+                                <div class="state-value"
+                                     :style="getPowerContribution(simId) >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
+                                     x-text="formatPowerContribution(simId)"></div>
+                                <div style="font-size: 0.65rem; color: var(--text-muted);"
+                                     x-text="getSimInfo(simId).running ? 'Running' : 'Stopped'"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Power Balance Explanation -->
+                <div class="section">
+                    <div class="section-title">Power Balance Calculation</div>
+                    <div style="font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem; background: var(--bg-primary); border-radius: 4px;">
+                        <p style="margin: 0 0 0.5rem 0;"><strong>Formula:</strong> Meter = Base Load + Sum(Device Contributions)</p>
+                        <p style="margin: 0 0 0.5rem 0;">
+                            <strong>Sign convention:</strong><br>
+                            • Positive = consuming/importing power (charging, loads)<br>
+                            • Negative = generating/exporting power (solar, V2G discharge)
+                        </p>
+                        <p style="margin: 0;">
+                            <strong>Per protocol:</strong><br>
+                            • Modbus (inverter): load - pv + battery (battery: +charging, -discharging)<br>
+                            • MQTT (V2X): -powerAc (charging is negative internally, so we invert)<br>
+                            • OCPP: totalPower (always positive consumption)
+                        </p>
+                    </div>
+                </div>
             </div>
         </template>
 

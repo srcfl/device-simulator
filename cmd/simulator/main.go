@@ -108,12 +108,29 @@ func (p *PortAllocator) Release(port int) {
 	delete(p.allocatedPorts, port)
 }
 
+// Site represents a group of simulators with aggregated energy metering
+type Site struct {
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	MeterID      int    `json:"meter_id"`      // Simulator ID acting as site meter
+	SimulatorIDs []int  `json:"simulator_ids"` // Member simulators
+	BaseLoadW    float64 `json:"base_load_w"`  // Configurable 0-10kW
+	Enabled      bool   `json:"enabled"`       // Aggregation enabled
+	mu           sync.RWMutex
+	stopChan     chan struct{}
+}
+
 var (
 	simulators      []*Simulator
 	simulatorsMu    sync.RWMutex
 	nextSimulatorID int
 	nextIDMu        sync.Mutex
 	portAllocator   *PortAllocator
+
+	// Site management
+	sites      []*Site
+	sitesMu    sync.RWMutex
+	nextSiteID int = 1
 )
 
 func main() {
@@ -289,6 +306,8 @@ func deleteSimulator(id int) error {
 			// Remove from slice
 			simulators = append(simulators[:i], simulators[i+1:]...)
 			log.Printf("[%s] Deleted simulator", sim.Serial)
+			// Remove from any sites (do this after releasing simulatorsMu)
+			go removeSimulatorFromSites(id)
 			return nil
 		}
 	}
@@ -383,6 +402,10 @@ func startHTTPServer(port int) {
 
 	// Simulator-specific endpoints
 	mux.HandleFunc("/api/simulators/", handleSimulatorAPI)
+
+	// Site endpoints
+	mux.HandleFunc("/api/sites", handleSitesList)
+	mux.HandleFunc("/api/sites/", handleSiteAPI)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("HTTP server listening on %s", addr)
@@ -1161,6 +1184,387 @@ func handleDebugMeterValues(w http.ResponseWriter, r *http.Request, sim *Simulat
 	json.NewEncoder(w).Encode(debug)
 }
 
+// Site API handlers
+
+func handleSitesList(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		handleSitesListGet(w, r)
+	case "POST":
+		handleSitesCreate(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
+	sitesMu.RLock()
+	var list []map[string]interface{}
+	for _, site := range sites {
+		site.mu.RLock()
+		entry := map[string]interface{}{
+			"id":            site.ID,
+			"name":          site.Name,
+			"meter_id":      site.MeterID,
+			"simulator_ids": site.SimulatorIDs,
+			"base_load_w":   site.BaseLoadW,
+			"enabled":       site.Enabled,
+		}
+
+		// Add current meter reading if meter is valid
+		if meterSim := getSimulator(site.MeterID); meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
+			entry["meter_power"] = getRegisterValue(meterSim.Server, 5600)
+		}
+
+		site.mu.RUnlock()
+		list = append(list, entry)
+	}
+	sitesMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
+
+func handleSitesCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name         string  `json:"name"`
+		MeterID      int     `json:"meter_id"`
+		SimulatorIDs []int   `json:"simulator_ids"`
+		BaseLoadW    float64 `json:"base_load_w"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("Site %d", nextSiteID)
+	}
+
+	site, err := createSite(req.Name, req.MeterID, req.SimulatorIDs, req.BaseLoadW)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":            site.ID,
+		"name":          site.Name,
+		"meter_id":      site.MeterID,
+		"simulator_ids": site.SimulatorIDs,
+		"base_load_w":   site.BaseLoadW,
+		"enabled":       site.Enabled,
+	})
+}
+
+func handleSiteAPI(w http.ResponseWriter, r *http.Request) {
+	// Parse: /api/sites/{id}/{action}
+	path := strings.TrimPrefix(r.URL.Path, "/api/sites/")
+	parts := strings.SplitN(path, "/", 2)
+
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Site ID required", http.StatusBadRequest)
+		return
+	}
+
+	siteID, err := strconv.Atoi(parts[0])
+	if err != nil {
+		http.Error(w, "Invalid site ID", http.StatusBadRequest)
+		return
+	}
+
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	// DELETE /api/sites/{id}
+	if r.Method == "DELETE" && action == "" {
+		if err := deleteSite(siteID); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+		return
+	}
+
+	site := getSite(siteID)
+	if site == nil {
+		http.Error(w, "Site not found", http.StatusNotFound)
+		return
+	}
+
+	switch {
+	case action == "" || action == "status":
+		handleSiteStatus(w, r, site)
+	case action == "config":
+		handleSiteConfig(w, r, site)
+	case action == "meter":
+		handleSiteMeter(w, r, site)
+	case action == "simulators":
+		handleSiteSimulators(w, r, site)
+	case strings.HasPrefix(action, "simulators/"):
+		simIDStr := strings.TrimPrefix(action, "simulators/")
+		handleSiteSimulator(w, r, site, simIDStr)
+	case action == "enable":
+		handleSiteEnable(w, r, site)
+	case action == "disable":
+		handleSiteDisable(w, r, site)
+	default:
+		http.Error(w, "Unknown action", http.StatusNotFound)
+	}
+}
+
+func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
+	site.mu.RLock()
+	status := map[string]interface{}{
+		"id":            site.ID,
+		"name":          site.Name,
+		"meter_id":      site.MeterID,
+		"simulator_ids": site.SimulatorIDs,
+		"base_load_w":   site.BaseLoadW,
+		"enabled":       site.Enabled,
+	}
+
+	// Add current meter reading if meter is valid
+	if meterSim := getSimulator(site.MeterID); meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
+		status["meter_power"] = getRegisterValue(meterSim.Server, 5600)
+	}
+
+	// Add power contributions from each simulator
+	powerContributions := make(map[int]float64)
+	for _, simID := range site.SimulatorIDs {
+		if simID == site.MeterID {
+			continue // Skip meter
+		}
+		sim := getSimulator(simID)
+		if sim != nil {
+			powerContributions[simID] = getPowerContribution(sim)
+		}
+	}
+	status["power_contributions"] = powerContributions
+	status["total_power"] = site.BaseLoadW + sumPowerContributions(powerContributions)
+
+	site.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+func sumPowerContributions(contributions map[int]float64) float64 {
+	var total float64
+	for _, power := range contributions {
+		total += power
+	}
+	return total
+}
+
+func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var config struct {
+		Name      *string  `json:"name"`
+		BaseLoadW *float64 `json:"base_load_w"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	site.mu.Lock()
+	if config.Name != nil {
+		site.Name = *config.Name
+	}
+	if config.BaseLoadW != nil {
+		if *config.BaseLoadW < 0 || *config.BaseLoadW > 10000 {
+			site.mu.Unlock()
+			http.Error(w, "Base load must be between 0 and 10000 W", http.StatusBadRequest)
+			return
+		}
+		site.BaseLoadW = *config.BaseLoadW
+	}
+	site.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+func handleSiteMeter(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		MeterID int `json:"meter_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate meter exists and is Modbus
+	meterSim := getSimulator(req.MeterID)
+	if meterSim == nil {
+		http.Error(w, "Meter simulator not found", http.StatusBadRequest)
+		return
+	}
+	if meterSim.Protocol != "modbus" {
+		http.Error(w, "Meter must be a Modbus simulator", http.StatusBadRequest)
+		return
+	}
+
+	site.mu.Lock()
+	site.MeterID = req.MeterID
+	site.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+func handleSiteSimulators(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SimulatorID int `json:"simulator_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate simulator exists
+	sim := getSimulator(req.SimulatorID)
+	if sim == nil {
+		http.Error(w, "Simulator not found", http.StatusBadRequest)
+		return
+	}
+
+	// Check if already in this site
+	site.mu.Lock()
+	for _, id := range site.SimulatorIDs {
+		if id == req.SimulatorID {
+			site.mu.Unlock()
+			http.Error(w, "Simulator already in site", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Check if in another site
+	sitesMu.RLock()
+	for _, otherSite := range sites {
+		if otherSite.ID == site.ID {
+			continue
+		}
+		otherSite.mu.RLock()
+		for _, id := range otherSite.SimulatorIDs {
+			if id == req.SimulatorID {
+				otherSite.mu.RUnlock()
+				sitesMu.RUnlock()
+				site.mu.Unlock()
+				http.Error(w, fmt.Sprintf("Simulator already in site %d", otherSite.ID), http.StatusBadRequest)
+				return
+			}
+		}
+		otherSite.mu.RUnlock()
+	}
+	sitesMu.RUnlock()
+
+	site.SimulatorIDs = append(site.SimulatorIDs, req.SimulatorID)
+	site.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "added"})
+}
+
+func handleSiteSimulator(w http.ResponseWriter, r *http.Request, site *Site, simIDStr string) {
+	if r.Method != "DELETE" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	simID, err := strconv.Atoi(simIDStr)
+	if err != nil {
+		http.Error(w, "Invalid simulator ID", http.StatusBadRequest)
+		return
+	}
+
+	site.mu.Lock()
+	found := false
+	newSimIDs := make([]int, 0, len(site.SimulatorIDs))
+	for _, id := range site.SimulatorIDs {
+		if id == simID {
+			found = true
+		} else {
+			newSimIDs = append(newSimIDs, id)
+		}
+	}
+
+	if !found {
+		site.mu.Unlock()
+		http.Error(w, "Simulator not in site", http.StatusNotFound)
+		return
+	}
+
+	site.SimulatorIDs = newSimIDs
+	site.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "removed"})
+}
+
+func handleSiteEnable(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate meter is set and running
+	site.mu.RLock()
+	meterID := site.MeterID
+	site.mu.RUnlock()
+
+	if meterID == 0 {
+		http.Error(w, "No meter configured for site", http.StatusBadRequest)
+		return
+	}
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil || meterSim.Protocol != "modbus" {
+		http.Error(w, "Invalid meter simulator", http.StatusBadRequest)
+		return
+	}
+
+	startSiteAggregation(site)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "enabled"})
+}
+
+func handleSiteDisable(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stopSiteAggregation(site)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "disabled"})
+}
+
 func runAutomationLoop(sim *Simulator) {
 	log.Printf("[%s] Automation started", sim.Serial)
 
@@ -1315,4 +1719,251 @@ func getRegisterValue(server *modbus.Server, address uint16) float64 {
 	}
 	val, _ := server.ReadRegisterValue(def)
 	return val
+}
+
+// Site aggregation functions
+
+// getPowerContribution returns the power contribution from a simulator
+// Positive = consuming power, Negative = generating power
+func getPowerContribution(sim *Simulator) float64 {
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+
+	switch sim.Protocol {
+	case "modbus":
+		if sim.Server == nil {
+			return 0
+		}
+		// For inverters: load - pv + battery
+		// battery: positive = charging (consuming), negative = discharging (generating)
+		load := getRegisterValue(sim.Server, 13052)      // Load power
+		pv := getRegisterValue(sim.Server, 5016)         // PV power
+		battery := getRegisterValue(sim.Server, 13021)   // Battery power
+		return load - pv + battery
+
+	case "mqtt":
+		if sim.MQTTServer == nil {
+			return 0
+		}
+		state := sim.MQTTServer.GetState()
+		// V2X powerAc: negative = charging (consuming), positive = V2G (generating)
+		// We invert the sign so positive = consuming
+		powerAc, ok := state["powerAc"].(float64)
+		if !ok {
+			return 0
+		}
+		return -powerAc
+
+	case "ocpp":
+		if sim.OCPPServer == nil {
+			return 0
+		}
+		state := sim.OCPPServer.GetState()
+		// OCPP totalPower is always positive (consumption)
+		if connectors, ok := state["connectors"].([]map[string]interface{}); ok {
+			var totalPower float64
+			for _, conn := range connectors {
+				if power, ok := conn["currentPower"].(float64); ok {
+					totalPower += power
+				}
+			}
+			return totalPower
+		}
+		return 0
+	}
+
+	return 0
+}
+
+// startSiteAggregation starts the aggregation loop for a site
+func startSiteAggregation(site *Site) {
+	site.mu.Lock()
+	if site.Enabled {
+		site.mu.Unlock()
+		return // Already running
+	}
+	site.Enabled = true
+	site.stopChan = make(chan struct{})
+	stopChan := site.stopChan
+	site.mu.Unlock()
+
+	log.Printf("[Site %d] Aggregation started", site.ID)
+
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopChan:
+				log.Printf("[Site %d] Aggregation stopped", site.ID)
+				return
+			case <-ticker.C:
+				calculateAndUpdateMeter(site)
+			}
+		}
+	}()
+}
+
+// stopSiteAggregation stops the aggregation loop for a site
+func stopSiteAggregation(site *Site) {
+	site.mu.Lock()
+	defer site.mu.Unlock()
+
+	if !site.Enabled {
+		return
+	}
+
+	if site.stopChan != nil {
+		close(site.stopChan)
+	}
+	site.Enabled = false
+}
+
+// calculateAndUpdateMeter calculates total power and updates the meter
+func calculateAndUpdateMeter(site *Site) {
+	site.mu.RLock()
+	meterID := site.MeterID
+	simIDs := make([]int, len(site.SimulatorIDs))
+	copy(simIDs, site.SimulatorIDs)
+	baseLoad := site.BaseLoadW
+	site.mu.RUnlock()
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil || meterSim.Protocol != "modbus" {
+		return
+	}
+
+	meterSim.mu.RLock()
+	if !meterSim.Running || meterSim.Server == nil {
+		meterSim.mu.RUnlock()
+		return
+	}
+	meterSim.mu.RUnlock()
+
+	totalPower := baseLoad // Start with base load
+
+	for _, simID := range simIDs {
+		// Skip meter simulator to avoid double-counting its own power
+		if simID == meterID {
+			continue
+		}
+		sim := getSimulator(simID)
+		if sim == nil {
+			continue
+		}
+		totalPower += getPowerContribution(sim)
+	}
+
+	// Write to meter register 5600 (positive=import, negative=export)
+	if meterDef := modbus.RegisterLookup[5600]; meterDef != nil {
+		meterSim.Server.WriteRegisterValue(meterDef, totalPower)
+	}
+}
+
+// getSite returns a site by ID
+func getSite(id int) *Site {
+	sitesMu.RLock()
+	defer sitesMu.RUnlock()
+	for _, site := range sites {
+		if site.ID == id {
+			return site
+		}
+	}
+	return nil
+}
+
+// createSite creates a new site
+func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64) (*Site, error) {
+	// Validate meter exists and is Modbus
+	meterSim := getSimulator(meterID)
+	if meterSim == nil {
+		return nil, fmt.Errorf("meter simulator %d not found", meterID)
+	}
+	if meterSim.Protocol != "modbus" {
+		return nil, fmt.Errorf("meter must be a Modbus simulator")
+	}
+
+	// Validate simulators exist
+	for _, simID := range simulatorIDs {
+		if getSimulator(simID) == nil {
+			return nil, fmt.Errorf("simulator %d not found", simID)
+		}
+	}
+
+	// Check simulators aren't already in another site
+	sitesMu.RLock()
+	for _, existingSite := range sites {
+		for _, simID := range simulatorIDs {
+			for _, existingSimID := range existingSite.SimulatorIDs {
+				if simID == existingSimID {
+					sitesMu.RUnlock()
+					return nil, fmt.Errorf("simulator %d is already in site %d", simID, existingSite.ID)
+				}
+			}
+		}
+	}
+	sitesMu.RUnlock()
+
+	sitesMu.Lock()
+	id := nextSiteID
+	nextSiteID++
+
+	site := &Site{
+		ID:           id,
+		Name:         name,
+		MeterID:      meterID,
+		SimulatorIDs: simulatorIDs,
+		BaseLoadW:    baseLoadW,
+		Enabled:      false,
+	}
+	sites = append(sites, site)
+	sitesMu.Unlock()
+
+	log.Printf("[Site %d] Created site '%s' with meter %d", id, name, meterID)
+	return site, nil
+}
+
+// deleteSite removes a site
+func deleteSite(id int) error {
+	sitesMu.Lock()
+	defer sitesMu.Unlock()
+
+	for i, site := range sites {
+		if site.ID == id {
+			stopSiteAggregation(site)
+			sites = append(sites[:i], sites[i+1:]...)
+			log.Printf("[Site %d] Deleted", id)
+			return nil
+		}
+	}
+	return fmt.Errorf("site %d not found", id)
+}
+
+// removeSimulatorFromSites removes a simulator from all sites
+func removeSimulatorFromSites(simID int) {
+	sitesMu.Lock()
+	defer sitesMu.Unlock()
+
+	for _, site := range sites {
+		site.mu.Lock()
+		// Check if this simulator is the meter
+		if site.MeterID == simID {
+			if site.Enabled && site.stopChan != nil {
+				close(site.stopChan)
+				site.Enabled = false
+			}
+			site.MeterID = 0 // Invalidate meter
+		}
+
+		// Remove from simulator IDs
+		newSimIDs := make([]int, 0, len(site.SimulatorIDs))
+		for _, id := range site.SimulatorIDs {
+			if id != simID {
+				newSimIDs = append(newSimIDs, id)
+			}
+		}
+		site.SimulatorIDs = newSimIDs
+		site.mu.Unlock()
+	}
 }
