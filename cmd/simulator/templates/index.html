@@ -4,3016 +4,560 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Device Simulator - Don't Panic</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a2e;
-            color: #eee;
-            height: 100vh;
-            display: flex;
-        }
-
-        /* Sidebar */
-        .sidebar {
-            width: 260px;
-            background: #16213e;
-            border-right: 1px solid #0f3460;
-            display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-        }
-
-        .sidebar-header {
-            padding: 1rem;
-            border-bottom: 1px solid #0f3460;
-        }
-
-        .sidebar-header h1 {
-            font-size: 1rem;
-            color: #00d9ff;
-        }
-
-        .sidebar-header p {
-            font-size: 0.7rem;
-            color: #666;
-            margin-top: 0.25rem;
-        }
-
-        .simulator-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 0.5rem;
-        }
-
-        /* Category sections */
-        .category-section {
-            margin-bottom: 0.75rem;
-        }
-
-        .category-header {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem;
-            background: rgba(0, 217, 255, 0.05);
-            border-radius: 6px;
-            cursor: pointer;
-            margin-bottom: 0.35rem;
-        }
-
-        .category-header:hover {
-            background: rgba(0, 217, 255, 0.1);
-        }
-
-        .category-icon {
-            font-size: 1rem;
-        }
-
-        .category-name {
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .category-count {
-            font-size: 0.65rem;
-            color: #00d9ff;
-            background: rgba(0, 217, 255, 0.1);
-            padding: 0.1rem 0.4rem;
-            border-radius: 10px;
-            margin-left: auto;
-        }
-
-        .category-items {
-            padding-left: 0.5rem;
-        }
-
-        .category-items.collapsed {
-            display: none;
-        }
-
-        .sim-item {
-            padding: 0.5rem 0.6rem;
-            border-radius: 6px;
-            cursor: pointer;
-            margin-bottom: 0.35rem;
-            transition: background 0.2s;
-            border: 1px solid transparent;
-        }
-
-        .sim-item:hover { background: rgba(0, 217, 255, 0.1); }
-        .sim-item.active { background: rgba(0, 217, 255, 0.2); border-color: #00d9ff; }
-
-        .sim-header { display: flex; justify-content: space-between; align-items: center; }
-        .sim-profile { font-weight: 600; font-size: 0.8rem; color: #00c864; }
-        .sim-profile.inactive { color: #666; font-style: italic; }
-        .sim-serial { font-size: 0.65rem; color: #888; }
-        .sim-ports { font-size: 0.65rem; color: #666; margin-top: 3px; }
-        .sim-stats { font-size: 0.7rem; color: #888; margin-top: 3px; display: flex; gap: 0.5rem; align-items: center; }
-        .sim-mode {
-            display: inline-block;
-            padding: 0.1rem 0.35rem;
-            border-radius: 3px;
-            font-size: 0.6rem;
-            font-weight: 600;
-        }
-        .sim-mode.auto { background: rgba(0, 200, 100, 0.2); color: #00c864; }
-        .sim-mode.static { background: rgba(100, 100, 100, 0.2); color: #666; }
-
-        /* Protocol badges */
-        .protocol-badge {
-            font-size: 0.55rem;
-            padding: 0.1rem 0.3rem;
-            border-radius: 2px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        .protocol-badge.modbus { background: #3b82f6; color: #fff; }
-        .protocol-badge.mqtt { background: #8b5cf6; color: #fff; }
-        .protocol-badge.ocpp { background: #f59e0b; color: #000; }
-
-        /* Status indicators */
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-        .status-dot.idle { background: #666; }
-        .status-dot.charging { background: #00c864; }
-        .status-dot.connected { background: #00d9ff; }
-        .status-dot.available { background: #00c864; }
-        .status-dot.occupied { background: #f59e0b; }
-
-        /* Main Content */
-        .main {
-            flex: 1;
-            overflow-y: auto;
-            padding: 1.5rem;
-        }
-
-        .empty-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            color: #666;
-        }
-
-        .empty-state h3 { color: #00d9ff; margin-bottom: 0.5rem; }
-
-        /* Sections */
-        .section {
-            margin-bottom: 1.5rem;
-        }
-
-        .section-title {
-            font-size: 0.85rem;
-            color: #888;
-            margin-bottom: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        /* Config Row */
-        .config-row {
-            display: flex;
-            gap: 1.5rem;
-            flex-wrap: wrap;
-            background: #16213e;
-            padding: 0.75rem 1rem;
-            border-radius: 8px;
-            align-items: center;
-        }
-
-        .config-item {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-
-        .config-item label {
-            font-size: 0.65rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .config-item input, .config-item select {
-            padding: 0.4rem 0.6rem;
-            background: #1a1a2e;
-            border: 1px solid #0f3460;
-            border-radius: 4px;
-            color: #eee;
-            font-size: 0.85rem;
-            min-width: 120px;
-            height: 32px;
-            box-sizing: border-box;
-        }
-
-        .config-item .value {
-            font-size: 0.9rem;
-            color: #00d9ff;
-            height: 32px;
-            display: flex;
-            align-items: center;
-        }
-
-        .config-item .host-ip {
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: #00d9ff;
-        }
-
-        .copy-btn {
-            background: transparent;
-            border: none;
-            color: #888;
-            cursor: pointer;
-            padding: 4px;
-            margin-left: 6px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-        }
-
-        .copy-btn:hover {
-            color: #00d9ff;
-            background: rgba(0, 217, 255, 0.1);
-        }
-
-        .copy-btn.copied {
-            color: #4ade80;
-        }
-
-        /* Automation Row */
-        .auto-row {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-            background: #16213e;
-            padding: 0.75rem 1rem;
-            border-radius: 8px;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            padding: 0.4rem 0.8rem;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.8rem;
-        }
-
-        .btn-action { background: #00d9ff; color: #000; }
-
-        .status-badge {
-            padding: 0.25rem 0.6rem;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .status-badge.running { background: rgba(0, 200, 100, 0.2); color: #00c864; }
-        .status-badge.stopped { background: rgba(100, 100, 100, 0.2); color: #888; }
-        .status-badge.idle { background: rgba(100, 100, 100, 0.2); color: #888; }
-        .status-badge.paused { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-        .status-badge.charge_loop { background: rgba(0, 200, 100, 0.2); color: #00c864; }
-
-        .sim-time {
-            color: #00d9ff;
-            font-size: 0.85rem;
-            margin-left: auto;
-            padding: 0.3rem 0.6rem;
-            background: rgba(0, 217, 255, 0.1);
-            border-radius: 4px;
-            font-family: 'Monaco', 'Consolas', monospace;
-        }
-
-        /* Registers Grid */
-        .register-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 0.75rem;
-        }
-
-        .register-card {
-            background: #16213e;
-            border-radius: 6px;
-            padding: 0.75rem;
-            border: 1px solid #0f3460;
-        }
-
-        .register-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 0.35rem;
-        }
-
-        .register-name { font-weight: 600; font-size: 0.8rem; }
-        .register-addr { font-size: 0.7rem; color: #666; }
-
-        .register-value {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: #00d9ff;
-        }
-
-        .register-unit { font-size: 0.75rem; color: #888; margin-left: 0.2rem; }
-
-        .register-input {
-            display: flex;
-            gap: 0.35rem;
-            margin-top: 0.4rem;
-        }
-
-        .register-input input {
-            flex: 1;
-            padding: 0.3rem;
-            border: 1px solid #0f3460;
-            border-radius: 3px;
-            background: #1a1a2e;
-            color: #eee;
-            font-size: 0.8rem;
-            width: 60px;
-        }
-
-        .register-input button {
-            padding: 0.3rem 0.5rem;
-            background: #00d9ff;
-            color: #000;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.75rem;
-        }
-
-        /* State cards for MQTT/OCPP */
-        .state-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 0.75rem;
-        }
-
-        .state-card {
-            background: #16213e;
-            border-radius: 6px;
-            padding: 0.75rem;
-            border: 1px solid #0f3460;
-        }
-
-        .state-card.highlight {
-            border-color: #00d9ff;
-        }
-
-        .state-label {
-            font-size: 0.7rem;
-            color: #666;
-            margin-bottom: 0.25rem;
-        }
-
-        .state-value {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #00d9ff;
-        }
-
-        .state-value.positive { color: #00c864; }
-        .state-value.negative { color: #ff4444; }
-
-        /* Connector cards for OCPP */
-        .connector-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 0.75rem;
-        }
-
-        .connector-card {
-            background: #16213e;
-            border-radius: 6px;
-            padding: 1rem;
-            border: 1px solid #0f3460;
-        }
-
-        .connector-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-
-        .connector-id {
-            font-weight: 700;
-            font-size: 1rem;
-        }
-
-        .connector-status {
-            padding: 0.2rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.7rem;
-            font-weight: 600;
-        }
-
-        .connector-status.available { background: rgba(0, 200, 100, 0.2); color: #00c864; }
-        .connector-status.preparing { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-        .connector-status.charging { background: rgba(0, 217, 255, 0.2); color: #00d9ff; }
-        .connector-status.finishing { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
-
-        .connector-details {
-            font-size: 0.8rem;
-            color: #888;
-        }
-
-        /* Logs */
-        .log-container {
-            background: #0d1117;
-            border-radius: 6px;
-            padding: 0.75rem;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.7rem;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .log-container.ocpp-log {
-            max-height: 350px;
-        }
-
-        .log-entry {
-            padding: 0.15rem 0;
-            border-bottom: 1px solid #21262d;
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .log-time { color: #666; min-width: 60px; }
-        .log-op { min-width: 80px; }
-        .log-op.read { color: #58a6ff; }
-        .log-op.write { color: #f0883e; }
-        .log-op.message { color: #8b5cf6; }
-        .log-op.connect { color: #00c864; }
-        .log-addr { color: #8b949e; min-width: 45px; }
-        .log-values { color: #7ee787; word-break: break-all; }
-        .log-empty { color: #666; text-align: center; padding: 1rem; }
-
-        /* MQTT Clients */
-        .clients-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-        }
-        .client-box {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 0.75rem;
-            min-width: 200px;
-            flex: 1;
-            max-width: 300px;
-        }
-        .client-box .client-id {
-            font-weight: 600;
-            color: #58a6ff;
-            font-size: 0.85rem;
-            margin-bottom: 0.5rem;
-            word-break: break-all;
-        }
-        .client-box .client-detail {
-            font-size: 0.75rem;
-            color: #8b949e;
-            display: flex;
-            justify-content: space-between;
-            padding: 0.15rem 0;
-        }
-        .client-box .client-detail .label { color: #666; }
-        .client-box .client-detail .value { color: #c9d1d9; }
-
-        /* Debug Panel (for OCPP) */
-        .debug-panel {
-            background: #16213e;
-            border-radius: 8px;
-            padding: 1rem;
-        }
-
-        .debug-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 0.75rem;
-            margin-bottom: 1rem;
-        }
-
-        .debug-card {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 0.75rem;
-        }
-
-        .debug-card-title {
-            font-size: 0.75rem;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 0.5rem;
-        }
-
-        .debug-values {
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 0.85rem;
-        }
-
-        .debug-value-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.2rem 0;
-            color: #00d9ff;
-        }
-
-        .debug-value-row span:first-child {
-            color: #888;
-        }
-
-        .debug-json-section {
-            margin-top: 1rem;
-        }
-
-        .debug-expected {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 0.75rem;
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 0.75rem;
-            color: #7ee787;
-        }
-
-        .debug-expected .debug-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.15rem 0;
-        }
-
-        .debug-expected .debug-row .key {
-            color: #58a6ff;
-        }
-
-        .debug-expected .debug-row .value {
-            color: #7ee787;
-        }
-
-        .debug-expected .debug-row .note {
-            color: #f59e0b;
-            font-style: italic;
-        }
-
-        .debug-json {
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 0.75rem;
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 0.7rem;
-            color: #c9d1d9;
-            overflow-x: auto;
-            max-height: 300px;
-            margin: 0;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-
-        /* Controls row for V2X */
-        .controls-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-
-        .controls-two-column {
-            display: flex;
-            gap: 1rem;
-            width: 100%;
-        }
-
-        .controls-column-left {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            flex: 1;
-        }
-
-        .controls-column-right {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            flex: 1;
-        }
-
-        .controls-row {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            background: rgba(15, 52, 96, 0.3);
-            padding: 0.5rem 0.75rem;
-            border-radius: 6px;
-            border: 1px solid rgba(15, 52, 96, 0.5);
-        }
-
-        .control-group.vertical {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 0.25rem;
-        }
-
-        .control-group-label {
-            font-size: 0.7rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-right: 0.25rem;
-        }
-
-        .control-group.vertical .control-group-label {
-            margin-right: 0;
-            margin-bottom: 0.25rem;
-        }
-
-        .control-input {
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-        }
-
-        .control-input label {
-            font-size: 0.75rem;
-            color: #888;
-        }
-
-        .control-input input, .control-input select,
-        .control-group input, .control-group select {
-            padding: 0.4rem 0.5rem;
-            background: #1a1a2e;
-            border: 1px solid #0f3460;
-            border-radius: 4px;
-            color: #eee;
-            font-size: 0.8rem;
-        }
-
-        .control-input input, .control-group input[type="number"] {
-            width: 80px;
-        }
-
-        .toggle-btn {
-            padding: 0.5rem 1rem;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.75rem;
-            transition: all 0.2s ease;
-            min-width: 100px;
-        }
-
-        .toggle-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }
-
-        .toggle-btn.on { background: linear-gradient(135deg, #00c864, #00a050); color: #000; }
-        .toggle-btn.off { background: linear-gradient(135deg, #555, #444); color: #fff; }
-
-        .quick-btn {
-            padding: 0.5rem 0.75rem;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.75rem;
-            transition: all 0.2s ease;
-        }
-
-        .quick-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }
-
-        .quick-btn.charge { background: linear-gradient(135deg, #00c864, #00a050); color: #000; }
-        .quick-btn.discharge { background: linear-gradient(135deg, #f59e0b, #d97706); color: #000; }
-        .quick-btn.stop { background: linear-gradient(135deg, #666, #555); color: #fff; }
-        .quick-btn.set { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; }
-
-        .clients-badge {
-            font-size: 0.75rem;
-            color: #888;
-            padding: 0.3rem 0.6rem;
-            background: rgba(15, 52, 96, 0.3);
-            border-radius: 4px;
-            margin-left: auto;
-        }
-
-        /* Power Slider */
-        .power-slider-container {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            width: 100%;
-        }
-
-        .power-slider-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.7rem;
-            color: #666;
-        }
-
-        .power-slider-track {
-            position: relative;
-            height: 32px;
-            background: linear-gradient(to right,
-                rgba(245, 158, 11, 0.3) 0%,
-                rgba(245, 158, 11, 0.3) 50%,
-                rgba(0, 200, 100, 0.3) 50%,
-                rgba(0, 200, 100, 0.3) 100%);
-            border-radius: 6px;
-            border: 1px solid rgba(15, 52, 96, 0.5);
-        }
-
-        .power-slider-center {
-            position: absolute;
-            left: 50%;
-            top: 0;
-            bottom: 0;
-            width: 2px;
-            background: #666;
-            transform: translateX(-50%);
-        }
-
-        .power-slider-input {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            -webkit-appearance: none;
-            appearance: none;
-            background: transparent;
-            cursor: pointer;
-            margin: 0;
-        }
-
-        .power-slider-input::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 28px;
-            background: linear-gradient(135deg, #fff, #ddd);
-            border-radius: 4px;
-            border: 2px solid #888;
-            cursor: grab;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-
-        .power-slider-input::-webkit-slider-thumb:active {
-            cursor: grabbing;
-            border-color: #00d9ff;
-        }
-
-        .power-slider-input::-moz-range-thumb {
-            width: 20px;
-            height: 28px;
-            background: linear-gradient(135deg, #fff, #ddd);
-            border-radius: 4px;
-            border: 2px solid #888;
-            cursor: grab;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-
-        .power-slider-value {
-            text-align: center;
-            font-size: 1.1rem;
-            font-weight: 600;
-            font-family: 'Monaco', 'Consolas', monospace;
-        }
-
-        .power-slider-value.charging { color: #00c864; }
-        .power-slider-value.discharging { color: #f59e0b; }
-        .power-slider-value.stopped { color: #888; }
-        .power-slider-value.disabled { color: #555; font-style: italic; }
-
-        .power-slider-input:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        /* SoC Slider */
-        .soc-slider-container {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            width: 100%;
-        }
-
-        .soc-slider-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.7rem;
-            color: #666;
-        }
-
-        .soc-slider-track {
-            position: relative;
-            height: 32px;
-            background: linear-gradient(to right,
-                rgba(239, 68, 68, 0.3) 0%,
-                rgba(245, 158, 11, 0.3) 25%,
-                rgba(0, 200, 100, 0.3) 50%,
-                rgba(0, 200, 100, 0.3) 100%);
-            border-radius: 6px;
-            border: 1px solid rgba(15, 52, 96, 0.5);
-        }
-
-        .soc-slider-input {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            -webkit-appearance: none;
-            appearance: none;
-            background: transparent;
-            cursor: pointer;
-            margin: 0;
-        }
-
-        .soc-slider-input::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 28px;
-            background: linear-gradient(135deg, #fff, #ddd);
-            border-radius: 4px;
-            border: 2px solid #888;
-            cursor: grab;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-
-        .soc-slider-input::-webkit-slider-thumb:active {
-            cursor: grabbing;
-            border-color: #00d9ff;
-        }
-
-        .soc-slider-input::-moz-range-thumb {
-            width: 20px;
-            height: 28px;
-            background: linear-gradient(135deg, #fff, #ddd);
-            border-radius: 4px;
-            border: 2px solid #888;
-            cursor: grab;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-
-        .soc-slider-value {
-            text-align: center;
-            font-size: 1.1rem;
-            font-weight: 600;
-            font-family: 'Monaco', 'Consolas', monospace;
-        }
-
-        .soc-slider-value.low { color: #ef4444; }
-        .soc-slider-value.medium { color: #f59e0b; }
-        .soc-slider-value.high { color: #00c864; }
-
-        /* Toggle Switch */
-        .toggle-switch {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .toggle-switch-label {
-            font-size: 0.7rem;
-            color: #666;
-        }
-
-        .toggle-switch-track {
-            position: relative;
-            width: 44px;
-            height: 24px;
-            background: #444;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .toggle-switch-track.on {
-            background: #00c864;
-        }
-
-        .toggle-switch-track .toggle-switch-thumb {
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 20px;
-            height: 20px;
-            background: #fff;
-            border-radius: 50%;
-            transition: transform 0.2s;
-        }
-
-        .toggle-switch-track.on .toggle-switch-thumb {
-            transform: translateX(20px);
-        }
-
-        .toggle-switch-status {
-            font-size: 0.75rem;
-            font-weight: 600;
-            min-width: 55px;
-        }
-
-        .toggle-switch-status.running { color: #00c864; }
-        .toggle-switch-status.stopped { color: #888; }
-
-        /* Sidebar toggle */
-        .sim-toggle {
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-            margin-top: 4px;
-        }
-
-        .sim-toggle-track {
-            position: relative;
-            width: 32px;
-            height: 16px;
-            background: #444;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .sim-toggle-track.on {
-            background: #00c864;
-        }
-
-        .sim-toggle-track .sim-toggle-thumb {
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 12px;
-            height: 12px;
-            background: #fff;
-            border-radius: 50%;
-            transition: transform 0.2s;
-        }
-
-        .sim-toggle-track.on .sim-toggle-thumb {
-            transform: translateX(16px);
-        }
-
-        .sim-toggle-label {
-            font-size: 0.6rem;
-            color: #888;
-        }
-
-        .sim-toggle-label.on { color: #00c864; }
-
-        /* Add Simulator Button */
-        .add-simulator-btn {
-            width: 100%;
-            padding: 0.6rem;
-            margin-top: 0.5rem;
-            background: rgba(0, 217, 255, 0.1);
-            border: 1px dashed #0f3460;
-            border-radius: 6px;
-            color: #00d9ff;
-            font-size: 0.8rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .add-simulator-btn:hover {
-            background: rgba(0, 217, 255, 0.2);
-            border-style: solid;
-        }
-
-        /* Add Menu */
-        .add-menu {
-            display: none;
-            padding: 0.5rem;
-            background: #16213e;
-            border: 1px solid #0f3460;
-            border-radius: 6px;
-            margin-top: 0.5rem;
-        }
-
-        .add-menu.show {
-            display: block;
-        }
-
-        .add-menu-title {
-            font-size: 0.7rem;
-            color: #666;
-            margin-bottom: 0.5rem;
-            text-transform: uppercase;
-        }
-
-        .add-menu-btn {
-            display: block;
-            width: 100%;
-            padding: 0.5rem;
-            margin-bottom: 0.35rem;
-            background: #1a1a2e;
-            border: 1px solid #0f3460;
-            border-radius: 4px;
-            color: #eee;
-            font-size: 0.8rem;
-            cursor: pointer;
-            text-align: left;
-            transition: all 0.2s;
-        }
-
-        .add-menu-btn:hover {
-            background: rgba(0, 217, 255, 0.1);
-            border-color: #00d9ff;
-        }
-
-        .add-menu-btn:last-child {
-            margin-bottom: 0;
-        }
-
-        /* Delete Button */
-        .sim-delete {
-            position: absolute;
-            bottom: 0.4rem;
-            right: 0.4rem;
-            width: 20px;
-            height: 20px;
-            padding: 0;
-            background: transparent;
-            border: none;
-            color: #666;
-            font-size: 0.75rem;
-            line-height: 1;
-            cursor: pointer;
-            opacity: 0;
-            transition: opacity 0.2s, color 0.2s, background 0.2s;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .sim-item {
-            position: relative;
-        }
-
-        .sim-item:hover .sim-delete {
-            opacity: 1;
-        }
-
-        .sim-delete:hover {
-            color: #ff4444;
-            background: rgba(255, 68, 68, 0.15);
-        }
-
-        /* Empty state for no simulators */
-        .no-simulators {
-            padding: 1rem;
-            text-align: center;
-            color: #666;
-            font-size: 0.8rem;
-        }
-    </style>
+    <!-- CSS Modules -->
+    <link rel="stylesheet" href="/static/css/variables.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/layout.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    <link rel="stylesheet" href="/static/css/protocols/modbus.css">
+    <link rel="stylesheet" href="/static/css/protocols/mqtt.css">
+    <link rel="stylesheet" href="/static/css/protocols/ocpp.css">
+
+    <!-- Application Scripts (must load before Alpine) -->
+    <script src="/static/js/stores.js"></script>
+    <script src="/static/js/components.js"></script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
-<body>
+<body x-data x-init="$store.app.init()">
+    <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
             <h1>Device Simulator</h1>
             <p>Multi-Protocol Energy Devices</p>
         </div>
-        <div class="simulator-list" id="simulatorList"></div>
+
+        <!-- Simulator List -->
+        <div class="simulator-list" id="simulatorList">
+            <template x-if="$store.app.simulators.length === 0">
+                <div class="no-simulators">No simulators yet.<br>Click "+ Add Simulator" below.</div>
+            </template>
+
+            <template x-for="[cat, sims] in Object.entries($store.app.getGroupedSimulators())" :key="cat">
+                <template x-if="sims.length > 0">
+                    <div class="category-section">
+                        <div class="category-header" @click="$store.app.toggleCategory(cat)">
+                            <span class="category-icon" x-text="$store.app.categories[cat].icon"></span>
+                            <span class="category-name" x-text="$store.app.categories[cat].name"></span>
+                            <span class="category-count" x-text="sims.length"></span>
+                        </div>
+                        <div class="category-items" :class="{ 'collapsed': $store.app.categories[cat].collapsed }">
+                            <template x-for="sim in sims" :key="sim.id">
+                                <div class="sim-item"
+                                     :class="{ 'active': $store.app.selectedId === sim.id }"
+                                     @click="$store.app.selectSimulator(sim.id, sim.protocol)">
+
+                                    <button class="sim-delete"
+                                            @click.stop="$store.app.deleteSimulator(sim.id, sim.serial)"
+                                            title="Delete">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                        </svg>
+                                    </button>
+
+                                    <div class="sim-header">
+                                        <span class="sim-profile" :class="{ 'inactive': !sim.profile }"
+                                              x-text="sim.profile || 'no profile'"></span>
+                                        <span class="protocol-badge" :class="sim.protocol" x-text="sim.protocol"></span>
+                                    </div>
+                                    <div class="sim-serial" x-text="sim.serial"></div>
+                                    <div class="sim-ports">
+                                        <template x-if="sim.protocol === 'modbus'">
+                                            <span x-text="`Modbus :${sim.port} | Slave ${sim.slave_id}`"></span>
+                                        </template>
+                                        <template x-if="sim.protocol === 'mqtt'">
+                                            <span x-text="`MQTT :${sim.port + 10000}`"></span>
+                                        </template>
+                                        <template x-if="sim.protocol === 'ocpp'">
+                                            <span x-text="`WS :${sim.port}`"></span>
+                                        </template>
+                                    </div>
+                                    <div class="sim-stats">
+                                        <template x-if="sim.running">
+                                            <template x-if="sim.protocol === 'modbus'">
+                                                <span x-text="`PV ${sim.pv_power?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`"></span>
+                                            </template>
+                                            <template x-if="sim.protocol === 'mqtt'">
+                                                <span x-text="`${sim.session_state || 'IDLE'} | ${sim.power_ac?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`"></span>
+                                            </template>
+                                            <template x-if="sim.protocol === 'ocpp'">
+                                                <span x-text="`${sim.connected ? 'Connected' : 'Disconnected'} | [${sim.connectors?.slice(1).map(c => c.status[0]).join('') || '?'}]`"></span>
+                                            </template>
+                                        </template>
+                                        <template x-if="!sim.running">
+                                            <span>Stopped</span>
+                                        </template>
+                                    </div>
+                                    <div class="sim-toggle" @click.stop>
+                                        <div class="sim-toggle-track"
+                                             :class="{ 'on': sim.running }"
+                                             @click="$store.app.toggleSimRunning(sim.id, sim.running)">
+                                            <div class="sim-toggle-thumb"></div>
+                                        </div>
+                                        <span class="sim-toggle-label" :class="{ 'on': sim.running }"
+                                              x-text="sim.running ? 'Running' : 'Stopped'"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </template>
+        </div>
+
+        <!-- Add Simulator -->
         <div style="padding: 0.5rem;">
-            <button class="add-simulator-btn" onclick="toggleAddMenu()">+ Add Simulator</button>
-            <div class="add-menu" id="addMenu">
+            <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Simulator</button>
+            <div class="add-menu" :class="{ 'show': $store.app.addMenuOpen }">
                 <div class="add-menu-title">Select Type</div>
-                <button class="add-menu-btn" onclick="addSimulator('inverter')">⚡ Inverter (Modbus)</button>
-                <button class="add-menu-btn" onclick="addSimulator('v2x_charger')">🔋 V2X Charger (MQTT)</button>
-                <button class="add-menu-btn" onclick="addSimulator('ocpp_charger')">🔌 OCPP Charger</button>
+                <button class="add-menu-btn" @click="$store.app.addSimulator('inverter')">⚡ Inverter (Modbus)</button>
+                <button class="add-menu-btn" @click="$store.app.addSimulator('v2x_charger')">🔋 V2X Charger (MQTT)</button>
+                <button class="add-menu-btn" @click="$store.app.addSimulator('ocpp_charger')">🔌 OCPP Charger</button>
             </div>
         </div>
     </aside>
 
+    <!-- Main Content -->
     <main class="main">
-        <div id="emptyState" class="empty-state">
-            <h3>Don't Panic</h3>
-            <p>Click "+ Add Simulator" to create a device</p>
-        </div>
-
-        <div id="simulatorView" style="display: none;">
-            <!-- Config Section -->
-            <div class="section" id="configSection">
-                <div class="config-row" id="configRow"></div>
+        <!-- Empty State -->
+        <template x-if="!$store.app.selectedId">
+            <div class="empty-state">
+                <h3>Don't Panic</h3>
+                <p>Click "+ Add Simulator" to create a device</p>
             </div>
+        </template>
 
-            <!-- Controls Section (protocol-specific) -->
-            <div class="section" id="controlsSection">
-                <div class="auto-row" id="controlsRow"></div>
-            </div>
+        <!-- Simulator View -->
+        <template x-if="$store.app.selectedId">
+            <div>
+                <!-- Config Section -->
+                <div class="section">
+                    <div class="config-row" x-data="configRow()">
+                        <!-- Serial -->
+                        <div class="config-item">
+                            <label>Serial</label>
+                            <input type="text"
+                                   :value="$store.simulator.data?.serial || ''"
+                                   @change="updateSerial($event.target.value)">
+                        </div>
 
-            <!-- State Section (for MQTT/OCPP) -->
-            <div class="section" id="stateSection" style="display: none;">
-                <div class="section-title" id="stateTitle">State</div>
-                <div class="state-grid" id="stateGrid"></div>
-            </div>
+                        <!-- Modbus: Slave ID & Port -->
+                        <template x-if="$store.app.selectedProtocol === 'modbus'">
+                            <div class="config-item">
+                                <label>Slave ID</label>
+                                <input type="number" min="1" max="247"
+                                       :value="$store.simulator.data?.slave_id || 1"
+                                       @change="updateSlaveId(parseInt($event.target.value))">
+                            </div>
+                        </template>
+                        <template x-if="$store.app.selectedProtocol === 'modbus'">
+                            <div class="config-item">
+                                <label>Modbus Port</label>
+                                <div class="value" x-text="$store.simulator.data?.port"></div>
+                            </div>
+                        </template>
 
-            <!-- Connectors Section (for OCPP) -->
-            <div class="section" id="connectorsSection" style="display: none;">
-                <div class="section-title">Connectors</div>
-                <div class="connector-grid" id="connectorGrid"></div>
-            </div>
+                        <!-- MQTT: Port -->
+                        <template x-if="$store.app.selectedProtocol === 'mqtt'">
+                            <div class="config-item">
+                                <label>MQTT Port</label>
+                                <div class="value" x-text="($store.simulator.data?.port || 0) + 10000"></div>
+                            </div>
+                        </template>
 
-            <!-- Debug Section (for OCPP) -->
-            <div class="section" id="debugSection" style="display: none;">
-                <div class="section-title" style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span>MeterValues Debug</span>
-                    <button class="btn btn-action" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;" onclick="loadDebugMeterValues()">Refresh</button>
-                </div>
-                <div class="debug-panel" id="debugPanel">
-                    <div class="debug-grid">
-                        <div class="debug-card">
-                            <div class="debug-card-title">3-Phase Voltages</div>
-                            <div class="debug-values">
-                                <div class="debug-value-row"><span>L1:</span> <span id="debugVoltageL1">--</span> V</div>
-                                <div class="debug-value-row"><span>L2:</span> <span id="debugVoltageL2">--</span> V</div>
-                                <div class="debug-value-row"><span>L3:</span> <span id="debugVoltageL3">--</span> V</div>
+                        <!-- OCPP: URL & Connection -->
+                        <template x-if="$store.app.selectedProtocol === 'ocpp'">
+                            <div class="config-item" style="flex: 2;">
+                                <label>OCPP URL</label>
+                                <input type="text" placeholder="ws://host:port/path"
+                                       :value="$store.simulator.data?.ocpp_url || ''"
+                                       @input="onOCPPUrlInput($event)"
+                                       style="flex: 1; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                            </div>
+                        </template>
+                        <template x-if="$store.app.selectedProtocol === 'ocpp'">
+                            <div class="config-item">
+                                <label>Connection</label>
+                                <div class="value"
+                                     :style="$store.simulator.data?.state?.connected ? 'color: var(--color-primary);' : 'color: var(--text-muted);'"
+                                     x-text="$store.simulator.data?.state?.connected ? 'Connected' : 'Disconnected'"></div>
+                            </div>
+                        </template>
+
+                        <!-- Profile Selector -->
+                        <div class="config-item">
+                            <label>Profile</label>
+                            <select @change="$store.simulator.applyProfile($event.target.value)">
+                                <template x-for="profile in $store.simulator.profiles" :key="profile.name">
+                                    <option :value="profile.name"
+                                            :selected="profile.name === $store.simulator.activeProfile"
+                                            x-text="profile.name"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <!-- Host IP -->
+                        <div class="config-item" style="margin-left: auto;">
+                            <label>Host IP</label>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span class="host-ip" x-text="$store.app.localIP"></span>
+                                <button class="copy-btn" @click="$store.app.copyIP()" title="Copy IP">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                </button>
                             </div>
                         </div>
-                        <div class="debug-card">
-                            <div class="debug-card-title">3-Phase Currents</div>
-                            <div class="debug-values">
-                                <div class="debug-value-row"><span>L1:</span> <span id="debugCurrentL1">--</span> A</div>
-                                <div class="debug-value-row"><span>L2:</span> <span id="debugCurrentL2">--</span> A</div>
-                                <div class="debug-value-row"><span>L3:</span> <span id="debugCurrentL3">--</span> A</div>
+
+                        <!-- Simulation Toggle -->
+                        <div class="config-item">
+                            <label>Simulation</label>
+                            <div class="toggle-switch" style="height: 32px;">
+                                <div class="toggle-switch-track"
+                                     :class="{ 'on': $store.simulator.data?.running }"
+                                     @click="$store.simulator.toggleAutomation()">
+                                    <div class="toggle-switch-thumb"></div>
+                                </div>
+                                <span class="toggle-switch-status"
+                                      :class="$store.simulator.data?.running ? 'running' : 'stopped'"
+                                      x-text="$store.simulator.data?.running ? 'Running' : 'Stopped'"></span>
                             </div>
                         </div>
-                        <div class="debug-card">
-                            <div class="debug-card-title">Power & Energy</div>
-                            <div class="debug-values">
-                                <div class="debug-value-row"><span>Power:</span> <span id="debugPowerW">--</span> W</div>
-                                <div class="debug-value-row"><span>Energy:</span> <span id="debugEnergyWh">--</span> Wh</div>
+                    </div>
+                </div>
+
+                <!-- Controls Section -->
+                <div class="section">
+                    <!-- Modbus Controls -->
+                    <template x-if="$store.app.selectedProtocol === 'modbus'">
+                        <div class="auto-row" x-data="modbusControls()">
+                            <div class="controls-panel">
+                                <div class="controls-row">
+                                    <div class="control-group">
+                                        <span class="control-group-label">Scenario</span>
+                                        <select x-model="scenario" @change="updateConfig()">
+                                            <template x-for="s in scenarios" :key="s.value">
+                                                <option :value="s.value" x-text="s.label"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <div class="control-group">
+                                        <span class="control-group-label">Speed</span>
+                                        <select x-model="timeMultiplier" @change="updateConfig()">
+                                            <template x-for="sp in speeds" :key="sp.value">
+                                                <option :value="sp.value" x-text="sp.label"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <span class="sim-time" x-text="simulatedTime"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- MQTT Controls -->
+                    <template x-if="$store.app.selectedProtocol === 'mqtt'">
+                        <div class="auto-row" x-data="mqttControls()">
+                            <div class="controls-two-column">
+                                <div class="controls-column-left">
+                                    <div class="control-group">
+                                        <span class="control-group-label">EV Connected</span>
+                                        <div class="toggle-switch">
+                                            <div class="toggle-switch-track"
+                                                 :class="{ 'on': evConnected }"
+                                                 @click="toggleEVConnected()">
+                                                <div class="toggle-switch-thumb"></div>
+                                            </div>
+                                            <span class="toggle-switch-status"
+                                                  :class="evConnected ? 'running' : 'stopped'"
+                                                  x-text="evConnected ? 'Yes' : 'No'"></span>
+                                        </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <span class="control-group-label">Awake</span>
+                                        <div class="toggle-switch">
+                                            <div class="toggle-switch-track"
+                                                 :class="{ 'on': isAwake }"
+                                                 @click="toggleWakeUp()">
+                                                <div class="toggle-switch-thumb"></div>
+                                            </div>
+                                            <span class="toggle-switch-status"
+                                                  :class="isAwake ? 'running' : 'stopped'"
+                                                  x-text="isAwake ? 'Yes' : 'No'"></span>
+                                        </div>
+                                    </div>
+                                    <div class="control-group">
+                                        <span class="control-group-label">Mode</span>
+                                        <select x-model="controlMode" @change="setControlMode()">
+                                            <option value="CONTROLLABLE">Controllable</option>
+                                            <option value="LIMITABLE">Limitable</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="controls-column-right">
+                                    <div class="control-group vertical">
+                                        <span class="control-group-label">Power Control</span>
+                                        <div class="power-slider-container">
+                                            <div class="power-slider-labels">
+                                                <span x-text="`-${(maxDischarge / 1000).toFixed(0)} kW`"></span>
+                                                <span>0</span>
+                                                <span x-text="`${(maxCharge / 1000).toFixed(0)} kW`"></span>
+                                            </div>
+                                            <div class="power-slider-track">
+                                                <div class="power-slider-center"></div>
+                                                <input type="range" class="power-slider-input"
+                                                       :min="-maxDischarge" :max="maxCharge"
+                                                       :value="powerSliderValue" step="100"
+                                                       @input="onPowerInput($event)"
+                                                       @change="onPowerChange($event)">
+                                            </div>
+                                            <div :class="powerDisplayClass" x-text="powerDisplayValue"></div>
+                                        </div>
+                                    </div>
+                                    <div class="control-group vertical">
+                                        <span class="control-group-label">Battery State of Charge</span>
+                                        <div class="soc-slider-container">
+                                            <div class="soc-slider-labels">
+                                                <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+                                            </div>
+                                            <div class="soc-slider-track">
+                                                <input type="range" class="soc-slider-input"
+                                                       min="0" max="100" :value="socSliderValue" step="1"
+                                                       @input="onSocInput($event)"
+                                                       @change="onSocChange($event)">
+                                            </div>
+                                            <div :class="socDisplayClass" x-text="`${Math.round(socSliderValue)}%`"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- OCPP Controls -->
+                    <template x-if="$store.app.selectedProtocol === 'ocpp'">
+                        <div class="auto-row" x-data="ocppControls()">
+                            <div class="controls-two-column">
+                                <div class="controls-column-left">
+                                    <div class="control-group">
+                                        <span class="control-group-label">EV Connected</span>
+                                        <div class="toggle-switch">
+                                            <div class="toggle-switch-track"
+                                                 :class="{ 'on': evConnected }"
+                                                 @click="toggleEVConnected()">
+                                                <div class="toggle-switch-thumb"></div>
+                                            </div>
+                                            <span class="toggle-switch-status"
+                                                  :class="evConnected ? 'running' : 'stopped'"
+                                                  x-text="evConnected ? 'Yes' : 'No'"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="controls-column-right">
+                                    <div class="control-group vertical">
+                                        <span class="control-group-label">Charging Power (drag to start charging)</span>
+                                        <div class="power-slider-container">
+                                            <div class="power-slider-labels">
+                                                <span>0 (off)</span>
+                                                <span x-text="maxPowerLabel"></span>
+                                            </div>
+                                            <div class="power-slider-track" style="background: linear-gradient(to right, rgba(100, 100, 100, 0.3) 0%, rgba(0, 200, 100, 0.3) 100%);">
+                                                <input type="range" class="power-slider-input"
+                                                       min="0" :max="maxPower"
+                                                       :value="powerSliderValue" step="100"
+                                                       :disabled="!evConnected"
+                                                       @input="onPowerInput($event)"
+                                                       @change="onPowerChange($event)">
+                                            </div>
+                                            <div :class="powerDisplayClass" x-text="powerDisplayValue"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- State Section (MQTT/OCPP) -->
+                <template x-if="$store.app.selectedProtocol !== 'modbus'">
+                    <div class="section" x-data="$store.app.selectedProtocol === 'mqtt' ? mqttState() : ocppState()">
+                        <div class="section-title" x-text="$store.app.selectedProtocol === 'mqtt' ? 'V2X Charger State' : 'OCPP Charger State'"></div>
+                        <div class="state-grid">
+                            <template x-for="card in stateCards" :key="card.label">
+                                <div class="state-card" :class="{ 'highlight': card.highlight }">
+                                    <div class="state-label" x-text="card.label"></div>
+                                    <div class="state-value"
+                                         :class="card.colorClass || ''"
+                                         :style="card.colorStyle || ''"
+                                         x-text="card.value"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Connectors Section (OCPP) -->
+                <template x-if="$store.app.selectedProtocol === 'ocpp'">
+                    <div class="section" x-data="ocppState()">
+                        <div class="section-title">Connectors</div>
+                        <div class="connector-grid">
+                            <template x-for="conn in connectors" :key="conn.id">
+                                <div class="connector-card">
+                                    <div class="connector-header">
+                                        <span class="connector-id" x-text="`Connector ${conn.id}`"></span>
+                                        <span class="connector-status"
+                                              :class="conn.status?.toLowerCase()"
+                                              x-text="conn.status"></span>
+                                    </div>
+                                    <div class="connector-details">
+                                        <span x-text="`Power: ${(conn.currentPower || 0).toFixed(0)} W`"></span><br>
+                                        <span x-text="`Energy: ${(conn.energyWh || 0).toFixed(0)} Wh`"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Debug Section (OCPP) -->
+                <template x-if="$store.app.selectedProtocol === 'ocpp'">
+                    <div class="section" x-data="ocppDebug()">
+                        <div class="section-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>MeterValues Debug</span>
+                            <button class="btn btn-action" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;" @click="refresh()">Refresh</button>
+                        </div>
+                        <div class="debug-panel">
+                            <div class="debug-grid">
+                                <div class="debug-card">
+                                    <div class="debug-card-title">3-Phase Voltages</div>
+                                    <div class="debug-values">
+                                        <div class="debug-value-row"><span>L1:</span> <span x-text="formatVoltage('voltage_L1')"></span> V</div>
+                                        <div class="debug-value-row"><span>L2:</span> <span x-text="formatVoltage('voltage_L2')"></span> V</div>
+                                        <div class="debug-value-row"><span>L3:</span> <span x-text="formatVoltage('voltage_L3')"></span> V</div>
+                                    </div>
+                                </div>
+                                <div class="debug-card">
+                                    <div class="debug-card-title">3-Phase Currents</div>
+                                    <div class="debug-values">
+                                        <div class="debug-value-row"><span>L1:</span> <span x-text="formatCurrent('current_L1')"></span> A</div>
+                                        <div class="debug-value-row"><span>L2:</span> <span x-text="formatCurrent('current_L2')"></span> A</div>
+                                        <div class="debug-value-row"><span>L3:</span> <span x-text="formatCurrent('current_L3')"></span> A</div>
+                                    </div>
+                                </div>
+                                <div class="debug-card">
+                                    <div class="debug-card-title">Power & Energy</div>
+                                    <div class="debug-values">
+                                        <div class="debug-value-row"><span>Power:</span> <span x-text="formatPower()"></span> W</div>
+                                        <div class="debug-value-row"><span>Energy:</span> <span x-text="formatEnergy()"></span> Wh</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="debug-json-section">
+                                <div class="debug-card-title" style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                                    Sample MeterValues JSON
+                                    <button class="copy-btn" :class="{ 'copied': copySuccess }" @click="copyJson()" title="Copy JSON to clipboard">
+                                        <svg x-show="!copySuccess" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                        </svg>
+                                        <svg x-show="copySuccess" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <polyline points="20 6 9 17 4 12"></polyline>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <pre class="debug-json" x-text="sampleJson"></pre>
                             </div>
                         </div>
                     </div>
-                    <div class="debug-json-section">
-                        <div class="debug-card-title" style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                            Sample MeterValues JSON
-                            <button class="copy-btn" id="copyDebugJsonBtn" onclick="copyDebugJson()" title="Copy JSON to clipboard">
-                                <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                </svg>
-                                <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </button>
-                        </div>
-                        <pre class="debug-json" id="debugSampleJson"></pre>
-                    </div>
-                </div>
-            </div>
+                </template>
 
-            <!-- Registers Section (for Modbus) -->
-            <div class="section" id="registersSection" style="display: none;">
-                <div class="section-title">Registers</div>
-                <div class="register-grid" id="registerGrid"></div>
-            </div>
-
-            <!-- Logs Section -->
-            <div class="section">
-                <div class="section-title" style="display: flex; align-items: center; justify-content: space-between;">
-                    <span id="logTitle">Log</span>
-                    <button class="copy-btn" id="copyLogsBtn" onclick="copyLogs()" title="Copy logs to clipboard">
-                        <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                    </button>
-                </div>
-                <div class="log-container" id="logContainer"></div>
-            </div>
-
-            <!-- MQTT Clients Section -->
-            <div class="section" id="clientsSection" style="display: none;">
-                <div class="section-title">Connected Clients <span id="clientCount" style="color: #666; font-weight: normal;">(0)</span></div>
-                <div id="clientsContainer" class="clients-container">
-                    <div class="log-empty">No clients connected</div>
-                </div>
-            </div>
-        </div>
-    </main>
-
-    <script>
-        let simulators = [];
-        let selectedId = null;
-        let selectedProtocol = null;
-        let selectedSerial = null;  // Track current serial for localStorage updates
-        let refreshInterval = null;
-        let cachedProfiles = null;
-        let powerSliderDragging = false;
-        let socSliderDragging = false;
-        const SNAP_THRESHOLD = 500; // Snap to zero if within 500W
-
-        const categories = {
-            inverter: { name: 'Inverters', icon: '⚡', collapsed: false },
-            v2x_charger: { name: 'V2X Chargers', icon: '🔋', collapsed: false },
-            ocpp_charger: { name: 'OCPP Chargers', icon: '🔌', collapsed: false }
-        };
-
-        // Use the hostname from the browser URL - this is what users need to connect to services
-        let localIP = window.location.hostname || '--';
-
-        // ========== localStorage Persistence ==========
-        const STORAGE_KEY = 'device-simulator-configs';
-
-        function loadSavedConfigs() {
-            try {
-                const data = localStorage.getItem(STORAGE_KEY);
-                if (!data) return { version: 1, simulators: [] };
-                return JSON.parse(data);
-            } catch (e) {
-                console.error('Invalid localStorage data:', e);
-                return { version: 1, simulators: [] };
-            }
-        }
-
-        function saveConfigs(configs) {
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
-            } catch (e) {
-                console.error('Failed to save to localStorage:', e);
-            }
-        }
-
-        function generateClientId() {
-            return 'sim-' + crypto.randomUUID();
-        }
-
-        function saveSimulatorConfig(config) {
-            const saved = loadSavedConfigs();
-            config.lastModified = new Date().toISOString();
-            if (!config.createdAt) config.createdAt = config.lastModified;
-            saved.simulators.push(config);
-            saveConfigs(saved);
-        }
-
-        function updateSavedConfig(serial, updates) {
-            const saved = loadSavedConfigs();
-            const config = saved.simulators.find(s => s.serial === serial);
-            if (config) {
-                Object.assign(config, updates);
-                config.lastModified = new Date().toISOString();
-                saveConfigs(saved);
-            }
-        }
-
-        function updateSavedConfigByOldSerial(oldSerial, newSerial, updates) {
-            const saved = loadSavedConfigs();
-            const config = saved.simulators.find(s => s.serial === oldSerial);
-            if (config) {
-                config.serial = newSerial;
-                Object.assign(config, updates);
-                config.lastModified = new Date().toISOString();
-                saveConfigs(saved);
-            }
-        }
-
-        function removeFromLocalStorage(serial) {
-            const saved = loadSavedConfigs();
-            saved.simulators = saved.simulators.filter(s => s.serial !== serial);
-            saveConfigs(saved);
-        }
-
-        async function restoreSimulators() {
-            const saved = loadSavedConfigs();
-            if (saved.simulators.length === 0) return;
-
-            console.log(`Restoring ${saved.simulators.length} simulators from localStorage...`);
-
-            // Fetch current server state
-            const resp = await fetch('/api/simulators');
-            const data = await resp.json();
-            const serverSims = Array.isArray(data) ? data : [];
-            const serverBySerial = new Map(serverSims.map(s => [s.serial, s]));
-
-            let restored = 0;
-            let created = 0;
-
-            for (const config of saved.simulators) {
-                const existing = serverBySerial.get(config.serial);
-
-                if (existing) {
-                    // Already exists on server, apply saved config if needed
-                    restored++;
-                    console.log(`Simulator ${config.serial} already exists on server`);
-
-                    // Apply saved OCPP URL if set and not already configured
-                    if (config.ocppUrl && config.type === 'ocpp_charger') {
-                        try {
-                            await fetch(`/api/simulators/${existing.id}/config`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ ocpp_url: config.ocppUrl })
-                            });
-                            console.log(`Applied saved OCPP URL to ${config.serial}`);
-                        } catch (e) {
-                            console.error(`Failed to apply OCPP URL to ${config.serial}:`, e);
-                        }
-                    }
-                } else {
-                    // Create simulator from saved config
-                    try {
-                        const resp = await fetch('/api/simulators', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ type: config.type })
-                        });
-
-                        if (resp.ok) {
-                            const newSim = await resp.json();
-                            created++;
-
-                            // Update serial if different from saved
-                            if (newSim.serial !== config.serial) {
-                                await fetch(`/api/simulators/${newSim.id}/config`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        serial: config.serial,
-                                        slave_id: config.slaveId || 1
-                                    })
-                                });
-                            } else if (config.slaveId) {
-                                await fetch(`/api/simulators/${newSim.id}/config`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        serial: config.serial,
-                                        slave_id: config.slaveId
-                                    })
-                                });
-                            }
-
-                            // Apply saved profile if set
-                            if (config.profile) {
-                                await fetch(`/api/simulators/${newSim.id}/profiles/${config.profile}/apply`, {
-                                    method: 'POST'
-                                });
-                            }
-
-                            // Apply saved OCPP URL if set
-                            if (config.ocppUrl && config.type === 'ocpp_charger') {
-                                await fetch(`/api/simulators/${newSim.id}/config`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ ocpp_url: config.ocppUrl })
-                                });
-                            }
-
-                            // Apply automation config
-                            if (config.automation) {
-                                await fetch(`/api/simulators/${newSim.id}/automation/config`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        time_multiplier: config.automation.timeMultiplier || 1,
-                                        scenario: config.automation.scenario || 'sunny'
-                                    })
-                                });
-
-                                // Start automation if it was running
-                                if (config.automation.wasRunning) {
-                                    await fetch(`/api/simulators/${newSim.id}/automation/start`, {
-                                        method: 'POST'
-                                    });
-                                }
-                            }
-
-                            console.log(`Created simulator ${config.serial} (${config.type})`);
-                        }
-                    } catch (e) {
-                        console.error(`Failed to restore simulator ${config.serial}:`, e);
-                    }
-                }
-            }
-
-            console.log(`Restoration complete: ${restored} matched, ${created} created`);
-        }
-
-        async function syncWithServer(serverSims) {
-            // Reconcile localStorage with current server state
-            const saved = loadSavedConfigs();
-            const serverBySerial = new Map(serverSims.map(s => [s.serial, s]));
-            const savedBySerial = new Map(saved.simulators.map(s => [s.serial, s]));
-
-            // Add server simulators not in localStorage
-            for (const sim of serverSims) {
-                if (!savedBySerial.has(sim.serial)) {
-                    saved.simulators.push({
-                        clientId: generateClientId(),
-                        type: sim.category,
-                        serial: sim.serial,
-                        slaveId: sim.slave_id || 1,
-                        profile: sim.profile || null,
-                        automation: {
-                            wasRunning: sim.running || false,
-                            timeMultiplier: 1,
-                            scenario: 'sunny'
-                        },
-                        createdAt: new Date().toISOString(),
-                        lastModified: new Date().toISOString()
-                    });
-                }
-            }
-
-            // Remove localStorage entries for simulators no longer on server
-            // (but only if server has some simulators - otherwise it was a restart)
-            if (serverSims.length > 0) {
-                saved.simulators = saved.simulators.filter(s => serverBySerial.has(s.serial));
-            }
-
-            saveConfigs(saved);
-        }
-
-        // ========== End localStorage Persistence ==========
-
-        async function init() {
-            // Set the host IP immediately from browser location
-            const hostIPEl = document.getElementById('hostIP');
-            if (hostIPEl) {
-                hostIPEl.textContent = localIP;
-            }
-
-            // Check if server has any simulators
-            try {
-                const resp = await fetch('/api/simulators');
-                const data = await resp.json();
-                const serverSims = Array.isArray(data) ? data : [];
-
-                if (serverSims.length === 0) {
-                    // Server is empty - restore from localStorage
-                    await restoreSimulators();
-                } else {
-                    // Server has simulators - sync with localStorage
-                    await syncWithServer(serverSims);
-                }
-            } catch (e) {
-                console.error('Failed to check server simulators:', e);
-            }
-
-            await loadSimulators();
-            setInterval(loadSimulators, 3000);
-        }
-
-        async function copyIP() {
-            try {
-                await navigator.clipboard.writeText(localIP);
-                const btn = document.querySelector('.copy-btn');
-                const copyIcon = btn?.querySelector('.copy-icon');
-                const checkIcon = btn?.querySelector('.check-icon');
-                if (btn && copyIcon && checkIcon) {
-                    btn.classList.add('copied');
-                    copyIcon.style.display = 'none';
-                    checkIcon.style.display = 'block';
-                    setTimeout(() => {
-                        btn.classList.remove('copied');
-                        copyIcon.style.display = 'block';
-                        checkIcon.style.display = 'none';
-                    }, 1500);
-                }
-            } catch (e) {
-                console.error('Failed to copy IP:', e);
-            }
-        }
-
-        async function copyLogs() {
-            try {
-                const logContainer = document.getElementById('logContainer');
-                const logEntries = logContainer.querySelectorAll('.log-entry');
-
-                // Format logs as plain text
-                const logText = Array.from(logEntries).map(entry => {
-                    const time = entry.querySelector('.log-time')?.textContent || '';
-                    const op = entry.querySelector('.log-op')?.textContent || '';
-                    const addr = entry.querySelector('.log-addr')?.textContent || '';
-                    const values = entry.querySelector('.log-values')?.textContent || '';
-                    return `${time} ${op} ${addr} ${values}`.trim().replace(/\s+/g, ' ');
-                }).join('\n');
-
-                // Copy as plain text
-                const textarea = document.createElement('textarea');
-                textarea.value = logText;
-                textarea.style.position = 'fixed';
-                textarea.style.opacity = '0';
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-
-                const btn = document.getElementById('copyLogsBtn');
-                const copyIcon = btn?.querySelector('.copy-icon');
-                const checkIcon = btn?.querySelector('.check-icon');
-                if (btn && copyIcon && checkIcon) {
-                    btn.classList.add('copied');
-                    copyIcon.style.display = 'none';
-                    checkIcon.style.display = 'block';
-                    setTimeout(() => {
-                        btn.classList.remove('copied');
-                        copyIcon.style.display = 'block';
-                        checkIcon.style.display = 'none';
-                    }, 1500);
-                }
-            } catch (e) {
-                console.error('Failed to copy logs:', e);
-            }
-        }
-
-        async function loadSimulators() {
-            try {
-                const resp = await fetch('/api/simulators');
-                const data = await resp.json();
-                simulators = Array.isArray(data) ? data : [];
-                renderSidebar();
-            } catch (e) {
-                console.error('Failed to load simulators:', e);
-            }
-        }
-
-        function renderSidebar() {
-            const list = document.getElementById('simulatorList');
-
-            // Group by category
-            const grouped = {};
-            for (const cat of Object.keys(categories)) {
-                grouped[cat] = simulators.filter(s => s.category === cat);
-            }
-
-            // Check if there are any simulators at all
-            if (simulators.length === 0) {
-                list.innerHTML = '<div class="no-simulators">No simulators yet.<br>Click "+ Add Simulator" below.</div>';
-                return;
-            }
-
-            list.innerHTML = Object.entries(grouped).map(([cat, sims]) => {
-                if (sims.length === 0) return '';
-                const catInfo = categories[cat];
-                return `
-                    <div class="category-section">
-                        <div class="category-header" onclick="toggleCategory('${cat}')">
-                            <span class="category-icon">${catInfo.icon}</span>
-                            <span class="category-name">${catInfo.name}</span>
-                            <span class="category-count">${sims.length}</span>
-                        </div>
-                        <div class="category-items ${catInfo.collapsed ? 'collapsed' : ''}" id="cat-${cat}">
-                            ${sims.map(sim => renderSimItem(sim)).join('')}
+                <!-- Registers Section (Modbus) -->
+                <template x-if="$store.app.selectedProtocol === 'modbus'">
+                    <div class="section" x-data="modbusRegisters()">
+                        <div class="section-title">Registers</div>
+                        <div class="register-grid">
+                            <template x-for="reg in $store.simulator.registers" :key="reg.address">
+                                <div class="register-card">
+                                    <div class="register-header">
+                                        <span class="register-name" x-text="reg.name"></span>
+                                        <span class="register-addr" x-text="reg.address"></span>
+                                    </div>
+                                    <div class="register-value">
+                                        <span x-text="formatValue(reg)"></span>
+                                        <span class="register-unit" x-text="reg.unit || ''"></span>
+                                    </div>
+                                    <div class="register-input">
+                                        <input type="number" placeholder="Set" step="any"
+                                               @input="setInputValue(reg.address, $event.target.value)">
+                                        <button @click="writeRegister(reg.address)">Set</button>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
-                `;
-            }).join('');
-        }
+                </template>
 
-        function renderSimItem(sim) {
-            const hasProfile = sim.profile && sim.profile !== '';
-            const profileClass = hasProfile ? '' : 'inactive';
-            const profileText = hasProfile ? sim.profile : 'no profile';
-            const isRunning = sim.running || false;
-
-            let stats = '';
-            let portInfo = '';
-
-            switch (sim.protocol) {
-                case 'modbus':
-                    portInfo = `Modbus :${sim.port} | Slave ${sim.slave_id}`;
-                    stats = `PV ${sim.pv_power?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`;
-                    break;
-                case 'mqtt':
-                    // Host port is offset by 10000 to avoid conflict with local mosquitto
-                    const mqttHostPort = sim.port + 10000;
-                    portInfo = `MQTT :${mqttHostPort}`;
-                    stats = `${sim.session_state || 'IDLE'} | ${sim.power_ac?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`;
-                    break;
-                case 'ocpp':
-                    portInfo = `WS :${sim.port}`;
-                    const connStatus = sim.connectors?.slice(1).map(c => c.status[0]).join('') || '?';
-                    stats = `${sim.connected ? 'Connected' : 'Disconnected'} | [${connStatus}]`;
-                    break;
-            }
-
-            return `
-                <div class="sim-item ${selectedId === sim.id ? 'active' : ''}"
-                     onclick="selectSimulator(${sim.id}, '${sim.protocol}')">
-                    <button class="sim-delete" onclick="event.stopPropagation(); deleteSimulatorConfirm(${sim.id}, '${sim.serial}')" title="Delete"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
-                    <div class="sim-header">
-                        <span class="sim-profile ${profileClass}">${profileText}</span>
-                        <span class="protocol-badge ${sim.protocol}">${sim.protocol}</span>
-                    </div>
-                    <div class="sim-serial">${sim.serial}</div>
-                    <div class="sim-ports">${portInfo}</div>
-                    <div class="sim-stats">${isRunning ? stats : 'Stopped'}</div>
-                    <div class="sim-toggle" onclick="event.stopPropagation()">
-                        <div class="sim-toggle-track ${isRunning ? 'on' : ''}" onclick="toggleSimRunning(${sim.id}, ${isRunning})">
-                            <div class="sim-toggle-thumb"></div>
-                        </div>
-                        <span class="sim-toggle-label ${isRunning ? 'on' : ''}">${isRunning ? 'Running' : 'Stopped'}</span>
-                    </div>
-                </div>
-            `;
-        }
-
-        function toggleCategory(cat) {
-            categories[cat].collapsed = !categories[cat].collapsed;
-            const el = document.getElementById(`cat-${cat}`);
-            el.classList.toggle('collapsed');
-        }
-
-        async function toggleSimRunning(id, currentState) {
-            const endpoint = currentState ? 'stop' : 'start';
-            await fetch(`/api/simulators/${id}/automation/${endpoint}`, { method: 'POST' });
-
-            // Update localStorage with running state
-            const sim = simulators.find(s => s.id === id);
-            if (sim) {
-                const saved = loadSavedConfigs();
-                const config = saved.simulators.find(s => s.serial === sim.serial);
-                if (config) {
-                    if (!config.automation) config.automation = {};
-                    config.automation.wasRunning = !currentState;
-                    config.lastModified = new Date().toISOString();
-                    saveConfigs(saved);
-                }
-            }
-
-            await loadSimulators();
-        }
-
-        function toggleAddMenu() {
-            const menu = document.getElementById('addMenu');
-            menu.classList.toggle('show');
-        }
-
-        async function addSimulator(type) {
-            // Hide menu immediately
-            document.getElementById('addMenu').classList.remove('show');
-
-            try {
-                const resp = await fetch('/api/simulators', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: type })
-                });
-
-                const text = await resp.text();
-                if (!resp.ok) {
-                    alert('Failed to create simulator: ' + text);
-                    return;
-                }
-
-                let newSim;
-                try {
-                    newSim = JSON.parse(text);
-                } catch (parseErr) {
-                    console.error('Failed to parse response:', text);
-                    alert('Failed to parse server response');
-                    return;
-                }
-
-                // Save to localStorage
-                saveSimulatorConfig({
-                    clientId: generateClientId(),
-                    type: type,
-                    serial: newSim.serial,
-                    slaveId: newSim.slave_id || 1,
-                    profile: newSim.profile || null,
-                    automation: {
-                        wasRunning: false,
-                        timeMultiplier: 1,
-                        scenario: 'sunny'
-                    }
-                });
-
-                await loadSimulators();
-            } catch (e) {
-                console.error('Failed to create simulator:', e);
-                alert('Network error creating simulator: ' + e.message);
-            }
-        }
-
-        async function deleteSimulatorConfirm(id, serial) {
-            if (!confirm(`Delete simulator ${serial}?`)) {
-                return;
-            }
-            try {
-                const resp = await fetch(`/api/simulators/${id}`, { method: 'DELETE' });
-                if (!resp.ok) {
-                    const err = await resp.text();
-                    alert('Failed to delete simulator: ' + err);
-                    return;
-                }
-
-                // Remove from localStorage
-                removeFromLocalStorage(serial);
-
-                // If we deleted the selected simulator, clear selection
-                if (selectedId === id) {
-                    selectedId = null;
-                    document.getElementById('simulatorView').style.display = 'none';
-                    document.getElementById('emptyState').style.display = 'flex';
-                }
-                await loadSimulators();
-            } catch (e) {
-                console.error('Failed to delete simulator:', e);
-                alert('Failed to delete simulator');
-            }
-        }
-
-        async function selectSimulator(id, protocol) {
-            selectedId = id;
-            selectedProtocol = protocol;
-            // Find and track current serial for localStorage updates
-            const sim = simulators.find(s => s.id === id);
-            selectedSerial = sim ? sim.serial : null;
-            cachedProfiles = null;
-            configRowBuilt = false;  // Reset so config row gets rebuilt for new simulator
-            controlsRowBuilt = false;
-            document.getElementById('emptyState').style.display = 'none';
-            document.getElementById('simulatorView').style.display = 'block';
-
-            // Show/hide protocol-specific sections
-            document.getElementById('registersSection').style.display = protocol === 'modbus' ? 'block' : 'none';
-            document.getElementById('stateSection').style.display = protocol !== 'modbus' ? 'block' : 'none';
-            document.getElementById('connectorsSection').style.display = protocol === 'ocpp' ? 'block' : 'none';
-            document.getElementById('debugSection').style.display = protocol === 'ocpp' ? 'block' : 'none';
-            document.getElementById('clientsSection').style.display = protocol === 'mqtt' ? 'block' : 'none';
-
-            // Load debug data for OCPP
-            if (protocol === 'ocpp') {
-                loadDebugMeterValues();
-            }
-
-            // Update log title and size
-            const logTitles = { modbus: 'Modbus Log', mqtt: 'MQTT Log', ocpp: 'OCPP Log' };
-            document.getElementById('logTitle').textContent = logTitles[protocol] || 'Log';
-            const logContainer = document.getElementById('logContainer');
-            logContainer.classList.toggle('ocpp-log', protocol === 'ocpp');
-
-            renderSidebar();
-            await loadAllData();
-            if (refreshInterval) clearInterval(refreshInterval);
-            refreshInterval = setInterval(loadAllData, 2000);
-        }
-
-        async function loadAllData() {
-            if (!selectedId) return;
-            const promises = [loadConfig(), loadState(), loadLogs()];
-            // Load debug data for OCPP simulators
-            if (selectedProtocol === 'ocpp') {
-                promises.push(loadDebugMeterValues());
-            }
-            await Promise.all(promises);
-        }
-
-        let configRowBuilt = false;
-
-        async function loadConfig() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}`);
-                const data = await resp.json();
-
-                // Only rebuild the config row structure once per simulator selection
-                if (!configRowBuilt) {
-                    renderConfigRow(data);
-                    configRowBuilt = true;
-                    // Set initial toggle state after building the row
-                    updateAutomationToggle(data.running || false);
-                } else {
-                    // Just update values without rebuilding DOM
-                    updateConfigValues(data);
-                }
-                renderControlsRow(data);
-            } catch (e) {
-                console.error('Failed to load config:', e);
-            }
-        }
-
-        function updateConfigValues(data) {
-            // Update input values only if not focused
-            const serialInput = document.getElementById('configSerial');
-            if (serialInput && document.activeElement !== serialInput) {
-                serialInput.value = data.serial;
-            }
-            const slaveInput = document.getElementById('configSlaveId');
-            if (slaveInput && document.activeElement !== slaveInput) {
-                slaveInput.value = data.slave_id;
-            }
-            // Update running toggle
-            updateAutomationToggle(data.running || false);
-            // Load profiles without rebuilding
-            loadProfiles();
-        }
-
-        function updateAutomationToggle(isRunning) {
-            const toggle = document.getElementById('automationToggle');
-            const status = document.getElementById('automationStatus');
-            if (toggle) {
-                if (isRunning) {
-                    toggle.classList.add('on');
-                } else {
-                    toggle.classList.remove('on');
-                }
-            }
-            if (status) {
-                status.textContent = isRunning ? 'Running' : 'Stopped';
-                status.className = `toggle-switch-status ${isRunning ? 'running' : 'stopped'}`;
-            }
-        }
-
-        async function toggleAutomation() {
-            const toggle = document.getElementById('automationToggle');
-            const isRunning = toggle?.classList.contains('on');
-
-            // If starting (not currently running), check for OCPP URL requirement
-            if (!isRunning && selectedProtocol === 'ocpp') {
-                const ocppUrlInput = document.getElementById('ocppUrlInput');
-                const ocppUrl = ocppUrlInput?.value?.trim() || '';
-                if (!ocppUrl) {
-                    alert('Please enter an OCPP URL before starting the simulation.');
-                    return;
-                }
-            }
-
-            const endpoint = isRunning ? 'stop' : 'start';
-            await fetch(`/api/simulators/${selectedId}/automation/${endpoint}`, { method: 'POST' });
-
-            // Update localStorage with running state
-            if (selectedSerial) {
-                const saved = loadSavedConfigs();
-                const config = saved.simulators.find(s => s.serial === selectedSerial);
-                if (config) {
-                    if (!config.automation) config.automation = {};
-                    config.automation.wasRunning = !isRunning;
-                    config.lastModified = new Date().toISOString();
-                    saveConfigs(saved);
-                }
-            }
-
-            await loadAllData();
-            await loadSimulators();
-        }
-
-        function renderConfigRow(data) {
-            const row = document.getElementById('configRow');
-            let html = `
-                <div class="config-item">
-                    <label>Serial</label>
-                    <input type="text" id="configSerial" value="${data.serial}" onchange="updateConfig()">
-                </div>
-            `;
-
-            if (data.protocol === 'modbus') {
-                html += `
-                    <div class="config-item">
-                        <label>Slave ID</label>
-                        <input type="number" id="configSlaveId" min="1" max="247" value="${data.slave_id}" onchange="updateConfig()">
-                    </div>
-                    <div class="config-item">
-                        <label>Modbus Port</label>
-                        <div class="value">${data.modbus_port || data.port}</div>
-                    </div>
-                `;
-            } else if (data.protocol === 'mqtt') {
-                // Host port is offset by 10000 to avoid conflict with local mosquitto
-                const mqttHostPort = data.port + 10000;
-                html += `
-                    <div class="config-item">
-                        <label>MQTT Port</label>
-                        <div class="value">${mqttHostPort}</div>
-                    </div>
-                `;
-            } else if (data.protocol === 'ocpp') {
-                const state = data.state || {};
-                const ocppUrl = data.ocpp_url || '';
-                const isClientMode = state.clientMode || false;
-                html += `
-                    <div class="config-item" style="flex: 2;">
-                        <label>OCPP URL</label>
-                        <input type="text" id="ocppUrlInput" placeholder="ws://host:port/path"
-                               value="${escapeHtml(ocppUrl)}"
-                               oninput="onOCPPUrlInput(this.value)"
-                               style="flex: 1; padding: 6px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 4px; color: #eee;">
-                    </div>
-                    <div class="config-item">
-                        <label>Connection</label>
-                        <div class="value" id="ocppConnection" style="color: ${state.connected ? '#00d9ff' : '#666'};">${state.connected ? 'Connected' : 'Disconnected'}</div>
-                    </div>
-                `;
-            }
-
-            // Profile selector for all protocols
-            html += `
-                <div class="config-item">
-                    <label>Profile</label>
-                    <select id="configProfile" onchange="applyProfile()"></select>
-                </div>
-            `;
-
-            // Host IP and Simulation toggle in top bar
-            html += `
-                <div class="config-item" style="margin-left: auto;">
-                    <label>Host IP</label>
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <span id="hostIP" class="host-ip">${localIP}</span>
-                        <button class="copy-btn" onclick="copyIP()" title="Copy IP">
-                            <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Logs Section -->
+                <div class="section" x-data="logsViewer()">
+                    <div class="section-title" style="display: flex; align-items: center; justify-content: space-between;">
+                        <span x-text="$store.app.selectedProtocol === 'modbus' ? 'Modbus Log' : ($store.app.selectedProtocol === 'mqtt' ? 'MQTT Log' : 'OCPP Log')"></span>
+                        <button class="copy-btn" :class="{ 'copied': copySuccess }" @click="copyLogs()" title="Copy logs to clipboard">
+                            <svg x-show="!copySuccess" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                             </svg>
-                            <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+                            <svg x-show="copySuccess" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <polyline points="20 6 9 17 4 12"></polyline>
                             </svg>
                         </button>
                     </div>
+                    <div class="log-container" :class="{ 'ocpp-log': $store.app.selectedProtocol === 'ocpp' }">
+                        <template x-if="$store.simulator.logs.length === 0">
+                            <div class="log-empty">No activity yet</div>
+                        </template>
+                        <template x-for="log in $store.simulator.logs" :key="log.timestamp + log.operation">
+                            <div class="log-entry">
+                                <span class="log-time" x-text="formatTime(log.timestamp)"></span>
+                                <span :class="getOpClass(log)" x-text="log.operation"></span>
+                                <template x-if="log.address !== undefined">
+                                    <span class="log-addr" x-text="log.address"></span>
+                                </template>
+                                <span class="log-values" x-text="formatDetails(log)"></span>
+                            </div>
+                        </template>
+                    </div>
                 </div>
-                <div class="config-item">
-                    <label>Simulation</label>
-                    <div class="toggle-switch" style="height: 32px;">
-                        <div class="toggle-switch-track" id="automationToggle" onclick="toggleAutomation()">
-                            <div class="toggle-switch-thumb"></div>
-                        </div>
-                        <span class="toggle-switch-status stopped" id="automationStatus">Stopped</span>
-                    </div>
-                </div>
-            `;
 
-            row.innerHTML = html;
-            loadProfiles();
-        }
-
-        async function loadProfiles() {
-            try {
-                const profResp = await fetch(`/api/simulators/${selectedId}/profiles`);
-                const profData = await profResp.json();
-                const select = document.getElementById('configProfile');
-                if (!select) return;
-
-                const profileNames = profData.profiles.map(p => p.name).join(',');
-                // Always rebuild if select is empty (DOM was recreated) or if profiles changed
-                if (select.options.length === 0 || cachedProfiles !== profileNames) {
-                    cachedProfiles = profileNames;
-                    select.innerHTML = profData.profiles.map(p =>
-                        `<option value="${p.name}">${p.name}</option>`
-                    ).join('');
-                }
-
-                const activeProfile = profData.active || (profData.profiles[0]?.name || '');
-                if (document.activeElement !== select && select.value !== activeProfile) {
-                    select.value = activeProfile;
-                }
-            } catch (e) {
-                console.error('Failed to load profiles:', e);
-            }
-        }
-
-        let controlsRowBuilt = false;
-
-        function renderControlsRow(data) {
-            const row = document.getElementById('controlsRow');
-            const section = document.getElementById('controlsSection');
-
-            // Only rebuild structure once, then just update values
-            if (!controlsRowBuilt) {
-                let html = '';
-
-                if (data.protocol === 'modbus') {
-                    html = `
-                        <div class="controls-panel">
-                            <div class="controls-row">
-                                <div class="control-group">
-                                    <span class="control-group-label">Scenario</span>
-                                    <select id="simScenario" onchange="updateAutomationConfig()">
-                                        <option value="sunny">☀️ Sunny Day</option>
-                                        <option value="cloudy">⛅ Cloudy Day</option>
-                                        <option value="overcast">☁️ Overcast</option>
-                                        <option value="rainy">🌧️ Rainy Day</option>
-                                        <option value="night">🌙 Night Mode</option>
-                                        <option value="peak_load">⚡ Peak Load</option>
-                                        <option value="battery_test">🔋 Battery Cycle</option>
-                                    </select>
-                                </div>
-                                <div class="control-group">
-                                    <span class="control-group-label">Speed</span>
-                                    <select id="timeMultiplier" onchange="updateAutomationConfig()">
-                                        <option value="1">1× Real-time</option>
-                                        <option value="60">60×</option>
-                                        <option value="360">360×</option>
-                                        <option value="3600">3600×</option>
-                                    </select>
-                                </div>
-                                <span class="sim-time" id="simulatedTime"></span>
-                            </div>
-                        </div>
-                    `;
-                    section.style.display = 'block';
-                } else if (data.protocol === 'mqtt') {
-                    html = `
-                        <div class="controls-two-column">
-                            <div class="controls-column-left">
-                                <div class="control-group">
-                                    <span class="control-group-label">EV Connected</span>
-                                    <div class="toggle-switch">
-                                        <div class="toggle-switch-track" id="evConnectToggle" onclick="toggleEVConnected()">
-                                            <div class="toggle-switch-thumb"></div>
-                                        </div>
-                                        <span class="toggle-switch-status" id="evConnectStatus">No</span>
+                <!-- MQTT Clients Section -->
+                <template x-if="$store.app.selectedProtocol === 'mqtt'">
+                    <div class="section" x-data="mqttClients()" x-init="$store.simulator.loadClients()">
+                        <div class="section-title">Connected Clients <span style="color: var(--text-muted); font-weight: normal;" x-text="`(${count})`"></span></div>
+                        <div class="clients-container">
+                            <template x-if="clients.length === 0">
+                                <div class="log-empty">No clients connected</div>
+                            </template>
+                            <template x-for="client in clients" :key="client.id">
+                                <div class="client-box">
+                                    <div class="client-id" x-text="client.id"></div>
+                                    <div class="client-detail">
+                                        <span class="label">Address</span>
+                                        <span class="value" x-text="client.remote_addr"></span>
+                                    </div>
+                                    <div class="client-detail">
+                                        <span class="label">Subscriptions</span>
+                                        <span class="value" x-text="client.subscription_count"></span>
                                     </div>
                                 </div>
-                                <div class="control-group">
-                                    <span class="control-group-label">Awake</span>
-                                    <div class="toggle-switch">
-                                        <div class="toggle-switch-track" id="wakeUpToggle" onclick="toggleWakeUp()">
-                                            <div class="toggle-switch-thumb"></div>
-                                        </div>
-                                        <span class="toggle-switch-status" id="wakeUpStatus">No</span>
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <span class="control-group-label">Mode</span>
-                                    <select id="controlMode" onchange="setControlMode()">
-                                        <option value="CONTROLLABLE">Controllable</option>
-                                        <option value="LIMITABLE">Limitable</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="controls-column-right">
-                                <div class="control-group vertical">
-                                    <span class="control-group-label">Power Control</span>
-                                    <div class="power-slider-container">
-                                        <div class="power-slider-labels">
-                                            <span id="sliderMinLabel">-11 kW</span>
-                                            <span>0</span>
-                                            <span id="sliderMaxLabel">11 kW</span>
-                                        </div>
-                                        <div class="power-slider-track">
-                                            <div class="power-slider-center"></div>
-                                            <input type="range" class="power-slider-input" id="powerSlider"
-                                                   min="-11000" max="11000" value="0" step="100"
-                                                   oninput="onPowerSliderInput(this.value)"
-                                                   onchange="onPowerSliderChange(this.value)">
-                                        </div>
-                                        <div class="power-slider-value stopped" id="powerSliderValue">0 W</div>
-                                    </div>
-                                </div>
-                                <div class="control-group vertical">
-                                    <span class="control-group-label">Battery State of Charge</span>
-                                    <div class="soc-slider-container">
-                                        <div class="soc-slider-labels">
-                                            <span>0%</span>
-                                            <span>25%</span>
-                                            <span>50%</span>
-                                            <span>75%</span>
-                                            <span>100%</span>
-                                        </div>
-                                        <div class="soc-slider-track">
-                                            <input type="range" class="soc-slider-input" id="socSlider"
-                                                   min="0" max="100" value="50" step="1"
-                                                   oninput="onSocSliderInput(this.value)"
-                                                   onchange="onSocSliderChange(this.value)">
-                                        </div>
-                                        <div class="soc-slider-value high" id="socSliderValue">50%</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    section.style.display = 'block';
-                } else if (data.protocol === 'ocpp') {
-                    const state = data.state || {};
-                    const maxPower = (state.maxPowerKW || 7.7) * 1000;
-                    html = `
-                        <div class="controls-two-column">
-                            <div class="controls-column-left">
-                                <div class="control-group">
-                                    <span class="control-group-label">EV Connected</span>
-                                    <div class="toggle-switch">
-                                        <div class="toggle-switch-track" id="ocppEvConnectToggle" onclick="toggleOCPPEvConnected()">
-                                            <div class="toggle-switch-thumb"></div>
-                                        </div>
-                                        <span class="toggle-switch-status" id="ocppEvConnectStatus">No</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="controls-column-right">
-                                <div class="control-group vertical">
-                                    <span class="control-group-label">Charging Power (drag to start charging)</span>
-                                    <div class="power-slider-container">
-                                        <div class="power-slider-labels">
-                                            <span>0 (off)</span>
-                                            <span id="ocppSliderMaxLabel">${(maxPower / 1000).toFixed(1)} kW</span>
-                                        </div>
-                                        <div class="power-slider-track" style="background: linear-gradient(to right, rgba(100, 100, 100, 0.3) 0%, rgba(0, 200, 100, 0.3) 100%);">
-                                            <input type="range" class="power-slider-input" id="ocppPowerSlider"
-                                                   min="0" max="${maxPower}" value="0" step="100"
-                                                   oninput="onOCPPPowerSliderInput(this.value)"
-                                                   onchange="onOCPPPowerSliderChange(this.value)">
-                                        </div>
-                                        <div class="power-slider-value stopped" id="ocppPowerSliderValue">Not charging</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    section.style.display = 'block';
-                }
-
-                row.innerHTML = html;
-                controlsRowBuilt = true;
-            }
-
-            // Update dynamic values
-            updateControlsValues(data);
-        }
-
-        function updateControlsValues(data) {
-            if (data.protocol === 'mqtt' && data.state) {
-                const state = data.state;
-
-                // Update EV Connected toggle
-                const evToggle = document.getElementById('evConnectToggle');
-                const evStatus = document.getElementById('evConnectStatus');
-                if (evToggle) {
-                    evToggle.classList.toggle('on', state.evConnected);
-                }
-                if (evStatus) {
-                    evStatus.textContent = state.evConnected ? 'Yes' : 'No';
-                    evStatus.className = `toggle-switch-status ${state.evConnected ? 'running' : 'stopped'}`;
-                }
-
-                // Update Awake toggle
-                const wakeToggle = document.getElementById('wakeUpToggle');
-                const wakeStatus = document.getElementById('wakeUpStatus');
-                const isAwake = state.sessionState === 'CHARGE_LOOP' || state.sessionState === 'PAUSED';
-                if (wakeToggle) {
-                    wakeToggle.classList.toggle('on', isAwake);
-                }
-                if (wakeStatus) {
-                    wakeStatus.textContent = isAwake ? 'Yes' : 'No';
-                    wakeStatus.className = `toggle-switch-status ${isAwake ? 'running' : 'stopped'}`;
-                }
-
-                const controlMode = document.getElementById('controlMode');
-                if (controlMode && document.activeElement !== controlMode) {
-                    controlMode.value = state.controlMode || 'CONTROLLABLE';
-                }
-
-                // Update power slider range and value
-                const powerSlider = document.getElementById('powerSlider');
-                if (powerSlider && document.activeElement !== powerSlider && !powerSliderDragging) {
-                    const maxCharge = state.chargePowerMax || 11000;
-                    const maxDischarge = state.dischargePowerMax || 11000;
-                    powerSlider.min = -maxDischarge;
-                    powerSlider.max = maxCharge;
-
-                    // Update labels
-                    const minLabel = document.getElementById('sliderMinLabel');
-                    const maxLabel = document.getElementById('sliderMaxLabel');
-                    if (minLabel) minLabel.textContent = `-${(maxDischarge / 1000).toFixed(0)} kW`;
-                    if (maxLabel) maxLabel.textContent = `${(maxCharge / 1000).toFixed(0)} kW`;
-
-                    // Update slider value from requested target power
-                    const currentPower = state.requestedTargetPower || 0;
-                    powerSlider.value = currentPower;
-                    updatePowerSliderDisplay(currentPower);
-                }
-
-                // Update SoC slider
-                const socSlider = document.getElementById('socSlider');
-                if (socSlider && document.activeElement !== socSlider && !socSliderDragging) {
-                    const currentSoc = state.soc ?? 50;
-                    socSlider.value = currentSoc;
-                    updateSocSliderDisplay(currentSoc);
-                }
-
-                // Load connected clients
-                loadMQTTClients();
-            }
-
-            // Update OCPP controls
-            if (data.protocol === 'ocpp' && data.state) {
-                const state = data.state;
-                const evConnected = state.evConnected || false;
-
-                // Update EV Connected toggle
-                const evToggle = document.getElementById('ocppEvConnectToggle');
-                const evStatus = document.getElementById('ocppEvConnectStatus');
-                if (evToggle) {
-                    evToggle.classList.toggle('on', evConnected);
-                }
-                if (evStatus) {
-                    evStatus.textContent = evConnected ? 'Yes' : 'No';
-                    evStatus.className = `toggle-switch-status ${evConnected ? 'running' : 'stopped'}`;
-                }
-
-                // Track charging state for power slider
-                const isCharging = state.hasActiveTransaction || false;
-                ocppWasCharging = isCharging;
-
-                // Update power slider
-                const powerSlider = document.getElementById('ocppPowerSlider');
-                if (powerSlider && document.activeElement !== powerSlider && !ocppPowerSliderDragging) {
-                    const maxPower = (state.maxPowerKW || 7.7) * 1000;
-                    powerSlider.max = maxPower;
-
-                    // Disable slider if EV not connected
-                    powerSlider.disabled = !evConnected;
-
-                    // Show 0 if not charging, otherwise show target power
-                    const targetPower = isCharging ? (state.targetPowerW || maxPower) : 0;
-                    powerSlider.value = targetPower;
-                    updateOCPPPowerSliderDisplay(targetPower, evConnected);
-
-                    const maxLabel = document.getElementById('ocppSliderMaxLabel');
-                    if (maxLabel) maxLabel.textContent = `${(maxPower / 1000).toFixed(1)} kW`;
-                }
-            }
-        }
-
-        async function loadMQTTClients() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}/clients`);
-                const data = await resp.json();
-                const clients = data.clients || [];
-                const count = data.count || 0;
-
-                // Update the count in section header
-                const clientCount = document.getElementById('clientCount');
-                if (clientCount) {
-                    clientCount.textContent = `(${count})`;
-                }
-
-                // Populate the clients container
-                const container = document.getElementById('clientsContainer');
-                if (container) {
-                    if (clients.length === 0) {
-                        container.innerHTML = '<div class="log-empty">No clients connected</div>';
-                    } else {
-                        // Sort clients alphabetically by ID
-                        clients.sort((a, b) => a.id.localeCompare(b.id));
-                        container.innerHTML = clients.map(client => `
-                            <div class="client-box">
-                                <div class="client-id">${escapeHtml(client.id)}</div>
-                                <div class="client-detail">
-                                    <span class="label">Address</span>
-                                    <span class="value">${escapeHtml(client.remote_addr)}</span>
-                                </div>
-                                <div class="client-detail">
-                                    <span class="label">Subscriptions</span>
-                                    <span class="value">${client.subscription_count}</span>
-                                </div>
-                            </div>
-                        `).join('');
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to load MQTT clients:', e);
-            }
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        async function toggleWakeUp() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}`);
-                const data = await resp.json();
-                const state = data.state || {};
-                const isAwake = state.sessionState === 'CHARGE_LOOP' || state.sessionState === 'PAUSED';
-
-                await fetch(`/api/simulators/${selectedId}/wakeup`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ wake: !isAwake })
-                });
-                await loadAllData();
-            } catch (e) {
-                console.error('Failed to toggle wake up:', e);
-            }
-        }
-
-        // OCPP Charger Controls
-        async function toggleOCPPEvConnected() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}`);
-                const data = await resp.json();
-                const state = data.state || {};
-                const isConnected = state.evConnected || false;
-
-                await fetch(`/api/simulators/${selectedId}/state`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'evConnected', value: !isConnected })
-                });
-                await loadAllData();
-            } catch (e) {
-                console.error('Failed to toggle EV connected:', e);
-            }
-        }
-
-        let ocppPowerSliderDragging = false;
-        let ocppWasCharging = false;
-        let ocppEvConnected = false;
-
-        function updateOCPPPowerSliderDisplay(value, evConnected = ocppEvConnected) {
-            const display = document.getElementById('ocppPowerSliderValue');
-            if (!display) return;
-
-            ocppEvConnected = evConnected;
-
-            if (!evConnected) {
-                display.textContent = 'EV not connected';
-                display.className = 'power-slider-value disabled';
-            } else if (value === 0) {
-                display.textContent = 'Not charging';
-                display.className = 'power-slider-value stopped';
-            } else {
-                const text = value >= 1000 ? `Charging at ${(value / 1000).toFixed(1)} kW` : `Charging at ${value} W`;
-                display.textContent = text;
-                display.className = 'power-slider-value charging';
-            }
-        }
-
-        function onOCPPPowerSliderInput(value) {
-            ocppPowerSliderDragging = true;
-            updateOCPPPowerSliderDisplay(parseInt(value));
-        }
-
-        async function onOCPPPowerSliderChange(value) {
-            ocppPowerSliderDragging = false;
-            const powerW = parseInt(value);
-            updateOCPPPowerSliderDisplay(powerW);
-
-            try {
-                // If power > 0 and not currently charging, start charging first
-                if (powerW > 0 && !ocppWasCharging) {
-                    await fetch(`/api/simulators/${selectedId}/state`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key: 'startCharging', value: true })
-                    });
-                    ocppWasCharging = true;
-                }
-
-                // If power is 0, stop charging
-                if (powerW === 0 && ocppWasCharging) {
-                    await fetch(`/api/simulators/${selectedId}/state`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key: 'stopCharging', value: true })
-                    });
-                    ocppWasCharging = false;
-                }
-
-                // Set the power level
-                await fetch(`/api/simulators/${selectedId}/state`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'chargingPower', value: powerW })
-                });
-            } catch (e) {
-                console.error('Failed to set charging power:', e);
-            }
-        }
-
-        // OCPP Debug functions
-        let cachedDebugJson = '';
-
-        async function loadDebugMeterValues() {
-            if (!selectedId || selectedProtocol !== 'ocpp') return;
-
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}/debug/meter-values`);
-                if (!resp.ok) {
-                    console.error('Failed to load debug meter values:', resp.status);
-                    return;
-                }
-                const data = await resp.json();
-
-                // Update voltage values
-                document.getElementById('debugVoltageL1').textContent = data.voltage_L1?.toFixed(2) ?? '--';
-                document.getElementById('debugVoltageL2').textContent = data.voltage_L2?.toFixed(2) ?? '--';
-                document.getElementById('debugVoltageL3').textContent = data.voltage_L3?.toFixed(2) ?? '--';
-
-                // Update current values
-                document.getElementById('debugCurrentL1').textContent = data.current_L1?.toFixed(3) ?? '--';
-                document.getElementById('debugCurrentL2').textContent = data.current_L2?.toFixed(3) ?? '--';
-                document.getElementById('debugCurrentL3').textContent = data.current_L3?.toFixed(3) ?? '--';
-
-                // Update power and energy
-                document.getElementById('debugPowerW').textContent = data.power_W?.toFixed(0) ?? '--';
-                document.getElementById('debugEnergyWh').textContent = data.energy_Wh?.toFixed(1) ?? '--';
-
-                // Update sample JSON
-                cachedDebugJson = data.sample_meter_values_json || '';
-                document.getElementById('debugSampleJson').textContent = cachedDebugJson;
-
-            } catch (e) {
-                console.error('Failed to load debug meter values:', e);
-            }
-        }
-
-        function copyDebugJson() {
-            // Read directly from the DOM element
-            const jsonElement = document.getElementById('debugSampleJson');
-            const jsonText = jsonElement?.textContent || cachedDebugJson;
-
-            if (!jsonText) {
-                console.warn('No JSON to copy');
-                return;
-            }
-
-            // Copy as plain text without formatting
-            const textarea = document.createElement('textarea');
-            textarea.value = jsonText;
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-
-            // Show checkmark feedback
-            const btn = document.getElementById('copyDebugJsonBtn');
-            if (btn) {
-                const copyIcon = btn.querySelector('.copy-icon');
-                const checkIcon = btn.querySelector('.check-icon');
-                if (copyIcon && checkIcon) {
-                    btn.classList.add('copied');
-                    copyIcon.style.display = 'none';
-                    checkIcon.style.display = 'block';
-                    setTimeout(() => {
-                        btn.classList.remove('copied');
-                        copyIcon.style.display = 'block';
-                        checkIcon.style.display = 'none';
-                    }, 2000);
-                }
-            }
-        }
-
-        // Power slider with zero snap
-        // Convention: negative = charging, positive = discharging (matches Power AC display)
-        function updatePowerSliderDisplay(value) {
-            const display = document.getElementById('powerSliderValue');
-            if (!display) return;
-
-            const absValue = Math.abs(value);
-            let text, className;
-
-            if (value === 0) {
-                text = '0 W';
-                className = 'power-slider-value stopped';
-            } else if (value > 0) {
-                text = absValue >= 1000 ? `Discharging +${(value / 1000).toFixed(1)} kW` : `Discharging +${value} W`;
-                className = 'power-slider-value discharging';
-            } else {
-                text = absValue >= 1000 ? `Charging ${(value / 1000).toFixed(1)} kW` : `Charging ${value} W`;
-                className = 'power-slider-value charging';
-            }
-
-            display.textContent = text;
-            display.className = className;
-        }
-
-        function onPowerSliderInput(value) {
-            powerSliderDragging = true;
-            let snappedValue = parseInt(value);
-
-            // Snap to zero if within threshold
-            if (Math.abs(snappedValue) < SNAP_THRESHOLD) {
-                snappedValue = 0;
-                document.getElementById('powerSlider').value = 0;
-            }
-
-            updatePowerSliderDisplay(snappedValue);
-        }
-
-        async function onPowerSliderChange(value) {
-            powerSliderDragging = false;
-            let snappedValue = parseInt(value);
-
-            // Snap to zero if within threshold
-            if (Math.abs(snappedValue) < SNAP_THRESHOLD) {
-                snappedValue = 0;
-                document.getElementById('powerSlider').value = 0;
-            }
-
-            updatePowerSliderDisplay(snappedValue);
-
-            // Send to API
-            try {
-                await fetch(`/api/simulators/${selectedId}/power`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ power: snappedValue })
-                });
-            } catch (e) {
-                console.error('Failed to set target power:', e);
-            }
-        }
-
-        // SoC slider
-        function updateSocSliderDisplay(value) {
-            const display = document.getElementById('socSliderValue');
-            if (!display) return;
-
-            let className;
-            if (value <= 20) {
-                className = 'soc-slider-value low';
-            } else if (value <= 40) {
-                className = 'soc-slider-value medium';
-            } else {
-                className = 'soc-slider-value high';
-            }
-
-            display.textContent = `${Math.round(value)}%`;
-            display.className = className;
-        }
-
-        function onSocSliderInput(value) {
-            socSliderDragging = true;
-            updateSocSliderDisplay(parseInt(value));
-        }
-
-        async function onSocSliderChange(value) {
-            socSliderDragging = false;
-            const socValue = parseInt(value);
-            updateSocSliderDisplay(socValue);
-
-            // Send to API
-            try {
-                await fetch(`/api/simulators/${selectedId}/state`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'soc', value: socValue })
-                });
-            } catch (e) {
-                console.error('Failed to set SoC:', e);
-            }
-        }
-
-        let ocppUrlDebounceTimer = null;
-
-        function onOCPPUrlInput(value) {
-            // Debounce: wait 500ms after last keystroke before saving
-            if (ocppUrlDebounceTimer) {
-                clearTimeout(ocppUrlDebounceTimer);
-            }
-            ocppUrlDebounceTimer = setTimeout(() => {
-                saveOCPPUrl(value.trim());
-            }, 500);
-        }
-
-        async function saveOCPPUrl(url) {
-            try {
-                await fetch(`/api/simulators/${selectedId}/config`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ocpp_url: url })
-                });
-                console.log('OCPP URL set to:', url);
-
-                // Save OCPP URL to localStorage
-                if (selectedSerial) {
-                    updateSavedConfig(selectedSerial, { ocppUrl: url });
-                }
-            } catch (e) {
-                console.error('Failed to set OCPP URL:', e);
-            }
-        }
-
-        async function loadState() {
-            if (selectedProtocol === 'modbus') {
-                await loadRegisters();
-                await loadAutomation();
-            } else if (selectedProtocol === 'mqtt') {
-                await loadMQTTState();
-            } else if (selectedProtocol === 'ocpp') {
-                await loadOCPPState();
-            }
-        }
-
-        async function loadMQTTState() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}`);
-                const data = await resp.json();
-                const state = data.state || {};
-
-                document.getElementById('stateTitle').textContent = 'V2X Charger State';
-
-                const grid = document.getElementById('stateGrid');
-                grid.innerHTML = `
-                    <div class="state-card highlight">
-                        <div class="state-label">Session State</div>
-                        <div class="state-value">${state.sessionState || 'IDLE'}</div>
-                    </div>
-                    <div class="state-card highlight">
-                        <div class="state-label">Control Mode</div>
-                        <div class="state-value">${state.controlMode || 'CONTROLLABLE'}</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">EV Connected</div>
-                        <div class="state-value">${state.evConnected ? 'Yes' : 'No'}</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Charge Protocol</div>
-                        <div class="state-value">${state.chargeProtocol || 'CCS'}</div>
-                    </div>
-                    <div class="state-card highlight">
-                        <div class="state-label">Power AC</div>
-                        <div class="state-value ${(state.powerAc || 0) < 0 ? 'positive' : (state.powerAc || 0) > 0 ? 'negative' : ''}">${(state.powerAc || 0).toFixed(0)} W</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Power DC</div>
-                        <div class="state-value">${(state.powerDc || 0).toFixed(0)} W</div>
-                    </div>
-                    <div class="state-card highlight">
-                        <div class="state-label">State of Charge</div>
-                        <div class="state-value">${(state.soc || 0).toFixed(1)} %</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Voltage AC (L1/L2/L3)</div>
-                        <div class="state-value">${(state.voltageAc1 || 0).toFixed(0)} V</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Current AC (L1)</div>
-                        <div class="state-value">${(state.currentAc1 || 0).toFixed(1)} A</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Frequency</div>
-                        <div class="state-value">${(state.frequency || 50).toFixed(1)} Hz</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Energy Import</div>
-                        <div class="state-value">${(state.energyAcImport || 0).toFixed(0)} Wh</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Energy Export</div>
-                        <div class="state-value">${(state.energyAcExport || 0).toFixed(0)} Wh</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Max Charge Power</div>
-                        <div class="state-value">${(state.chargePowerMax || 0).toFixed(0)} W</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Max Discharge Power</div>
-                        <div class="state-value">${(state.dischargePowerMax || 0).toFixed(0)} W</div>
-                    </div>
-                `;
-            } catch (e) {
-                console.error('Failed to load MQTT state:', e);
-            }
-        }
-
-        async function loadOCPPState() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}`);
-                const data = await resp.json();
-                const state = data.state || {};
-
-                document.getElementById('stateTitle').textContent = 'OCPP Charger State';
-
-                // Update connection status in config row
-                const connEl = document.getElementById('ocppConnection');
-                if (connEl) {
-                    connEl.textContent = state.connected ? 'Connected' : 'Disconnected';
-                    connEl.style.color = state.connected ? '#00d9ff' : '#666';
-                }
-
-                const grid = document.getElementById('stateGrid');
-                grid.innerHTML = `
-                    <div class="state-card highlight">
-                        <div class="state-label">Connection</div>
-                        <div class="state-value" style="color: ${state.connected ? '#00d9ff' : '#666'};">${state.connected ? 'Connected' : 'Disconnected'}</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Vendor</div>
-                        <div class="state-value">${state.vendor || 'SimulatorCo'}</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">Model</div>
-                        <div class="state-value">${state.model || 'SimCharger'}</div>
-                    </div>
-                    <div class="state-card highlight">
-                        <div class="state-label">Total Power</div>
-                        <div class="state-value">${(state.totalPower || 0).toFixed(0)} W</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">L1 Voltage</div>
-                        <div class="state-value">${(state.voltageL1 || 0).toFixed(1)} V</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">L2 Voltage</div>
-                        <div class="state-value">${(state.voltageL2 || 0).toFixed(1)} V</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">L3 Voltage</div>
-                        <div class="state-value">${(state.voltageL3 || 0).toFixed(1)} V</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">L1 Current</div>
-                        <div class="state-value">${(state.currentL1 || 0).toFixed(3)} A</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">L2 Current</div>
-                        <div class="state-value">${(state.currentL2 || 0).toFixed(3)} A</div>
-                    </div>
-                    <div class="state-card">
-                        <div class="state-label">L3 Current</div>
-                        <div class="state-value">${(state.currentL3 || 0).toFixed(3)} A</div>
-                    </div>
-                `;
-
-                // Render connectors
-                const connectorGrid = document.getElementById('connectorGrid');
-                const connectors = data.connectors || state.connectors || [];
-                connectorGrid.innerHTML = connectors.map((conn, i) => `
-                    <div class="connector-card">
-                        <div class="connector-header">
-                            <span class="connector-id">Connector ${conn.id}</span>
-                            <span class="connector-status ${conn.status?.toLowerCase()}">${conn.status}</span>
-                        </div>
-                        <div class="connector-details">
-                            Power: ${(conn.currentPower || 0).toFixed(0)} W<br>
-                            Energy: ${(conn.energyWh || 0).toFixed(0)} Wh
+                            </template>
                         </div>
                     </div>
-                `).join('');
-            } catch (e) {
-                console.error('Failed to load OCPP state:', e);
-            }
-        }
+                </template>
+            </div>
+        </template>
+    </main>
 
-        async function loadRegisters() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}/registers`);
-                const registers = await resp.json();
-                const grid = document.getElementById('registerGrid');
-                grid.innerHTML = registers.map(reg => `
-                    <div class="register-card">
-                        <div class="register-header">
-                            <span class="register-name">${reg.name}</span>
-                            <span class="register-addr">${reg.address}</span>
-                        </div>
-                        <div class="register-value">
-                            ${reg.value?.toFixed(reg.scale < 1 ? 1 : 0) || 0}<span class="register-unit">${reg.unit || ''}</span>
-                        </div>
-                        <div class="register-input">
-                            <input type="number" id="input-${reg.address}" placeholder="Set" step="any">
-                            <button onclick="writeRegister(${reg.address})">Set</button>
-                        </div>
-                    </div>
-                `).join('');
-            } catch (e) {
-                console.error('Failed to load registers:', e);
-            }
-        }
-
-        async function writeRegister(address) {
-            const input = document.getElementById(`input-${address}`);
-            const value = parseFloat(input.value);
-            if (isNaN(value)) return;
-            try {
-                await fetch(`/api/simulators/${selectedId}/registers/${address}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ value })
-                });
-                input.value = '';
-                await loadRegisters();
-            } catch (e) {
-                console.error('Failed to write register:', e);
-            }
-        }
-
-        async function loadLogs() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}/logs?limit=50`);
-                const data = await resp.json();
-                const container = document.getElementById('logContainer');
-                const logs = data.logs || [];
-                if (!logs.length) {
-                    container.innerHTML = '<div class="log-empty">No activity yet</div>';
-                    return;
-                }
-                container.innerHTML = logs.reverse().map(log => {
-                    const time = new Date(log.timestamp).toLocaleTimeString();
-                    let opClass = 'message';
-                    if (log.operation?.includes('read')) opClass = 'read';
-                    else if (log.operation?.includes('write')) opClass = 'write';
-                    else if (log.operation?.includes('connect')) opClass = 'connect';
-
-                    let details = '';
-                    if (log.address !== undefined) {
-                        details = `<span class="log-addr">${log.address}</span>`;
-                    }
-                    if (log.values) {
-                        details += `<span class="log-values">${log.values.join(', ')}</span>`;
-                    } else if (log.details) {
-                        const d = log.details;
-                        if (d.topic) details += `<span class="log-values">${d.topic}: ${d.payload}</span>`;
-                        else if (d.action) {
-                            // OCPP message - show action and payload
-                            let payloadStr = '';
-                            if (d.payload && d.payload !== '{}' && d.payload !== 'null') {
-                                try {
-                                    const parsed = typeof d.payload === 'string' ? JSON.parse(d.payload) : d.payload;
-                                    payloadStr = Object.keys(parsed).length > 0 ? ` ${JSON.stringify(parsed)}` : '';
-                                } catch { payloadStr = ` ${d.payload}`; }
-                            }
-                            details += `<span class="log-values">${d.action}${payloadStr}</span>`;
-                        }
-                        else details += `<span class="log-values">${JSON.stringify(d)}</span>`;
-                    } else if (log.count) {
-                        details += `<span class="log-values">x${log.count}</span>`;
-                    }
-
-                    return `
-                        <div class="log-entry">
-                            <span class="log-time">${time}</span>
-                            <span class="log-op ${opClass}">${log.operation}</span>
-                            ${details}
-                        </div>
-                    `;
-                }).join('');
-            } catch (e) {
-                console.error('Failed to load logs:', e);
-            }
-        }
-
-        async function loadAutomation() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}/automation`);
-                const data = await resp.json();
-
-                const timeSelect = document.getElementById('timeMultiplier');
-                const scenarioSelect = document.getElementById('simScenario');
-
-                if (timeSelect && document.activeElement !== timeSelect) {
-                    timeSelect.value = String(data.time_multiplier || 1);
-                }
-                if (scenarioSelect && document.activeElement !== scenarioSelect) {
-                    scenarioSelect.value = data.scenario || 'sunny';
-                }
-
-                const simTime = document.getElementById('simulatedTime');
-                if (simTime && data.simulated_time) {
-                    simTime.textContent = new Date(data.simulated_time).toLocaleString();
-                }
-            } catch (e) {
-                console.error('Failed to load automation:', e);
-            }
-        }
-
-        async function updateConfig() {
-            const serial = document.getElementById('configSerial').value;
-            const slaveIdEl = document.getElementById('configSlaveId');
-            const slaveId = slaveIdEl ? parseInt(slaveIdEl.value) : 1;
-            try {
-                await fetch(`/api/simulators/${selectedId}/config`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ serial, slave_id: slaveId })
-                });
-
-                // Update localStorage (handle serial change)
-                if (selectedSerial && serial !== selectedSerial) {
-                    updateSavedConfigByOldSerial(selectedSerial, serial, { slaveId });
-                    selectedSerial = serial;  // Update tracked serial
-                } else if (selectedSerial) {
-                    updateSavedConfig(selectedSerial, { slaveId });
-                }
-
-                await loadSimulators();
-            } catch (e) {
-                console.error('Failed to update config:', e);
-            }
-        }
-
-        async function applyProfile() {
-            const profile = document.getElementById('configProfile').value;
-            try {
-                await fetch(`/api/simulators/${selectedId}/profiles/${profile}/apply`, { method: 'POST' });
-
-                // Update localStorage
-                if (selectedSerial) {
-                    updateSavedConfig(selectedSerial, { profile });
-                }
-
-                await loadState();
-            } catch (e) {
-                console.error('Failed to apply profile:', e);
-            }
-        }
-
-        async function updateAutomationConfig() {
-            const multiplier = parseInt(document.getElementById('timeMultiplier')?.value || 1);
-            const scenario = document.getElementById('simScenario')?.value || 'sunny';
-            await fetch(`/api/simulators/${selectedId}/automation/config`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ time_multiplier: multiplier, scenario: scenario })
-            });
-
-            // Update localStorage
-            if (selectedSerial) {
-                const saved = loadSavedConfigs();
-                const config = saved.simulators.find(s => s.serial === selectedSerial);
-                if (config) {
-                    if (!config.automation) config.automation = {};
-                    config.automation.timeMultiplier = multiplier;
-                    config.automation.scenario = scenario;
-                    config.lastModified = new Date().toISOString();
-                    saveConfigs(saved);
-                }
-            }
-        }
-
-        // V2X specific controls
-        async function toggleEVConnected() {
-            try {
-                const resp = await fetch(`/api/simulators/${selectedId}`);
-                const data = await resp.json();
-                const currentState = data.state?.evConnected || false;
-
-                await fetch(`/api/simulators/${selectedId}/state`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'evConnected', value: !currentState })
-                });
-                await loadAllData();
-            } catch (e) {
-                console.error('Failed to toggle EV connected:', e);
-            }
-        }
-
-        async function setControlMode() {
-            const mode = document.getElementById('controlMode').value;
-            try {
-                await fetch(`/api/simulators/${selectedId}/state`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'controlMode', value: mode })
-                });
-                await loadAllData();
-            } catch (e) {
-                console.error('Failed to set control mode:', e);
-            }
-        }
-
-        async function setSoC() {
-            const soc = parseFloat(document.getElementById('socInput').value);
-            if (isNaN(soc)) return;
-            try {
-                await fetch(`/api/simulators/${selectedId}/state`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: 'soc', value: soc })
-                });
-                await loadAllData();
-            } catch (e) {
-                console.error('Failed to set SoC:', e);
-            }
-        }
-
-        init();
-    </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"math"
 	"net"
@@ -25,8 +26,8 @@ import (
 	"github.com/srcfl/device-simulator/internal/profiles"
 )
 
-//go:embed templates/*
-var templatesFS embed.FS
+//go:embed templates/* static/*
+var embeddedFS embed.FS
 
 // Simulator represents a single simulator instance
 type Simulator struct {
@@ -367,6 +368,10 @@ func stopSimulatorServer(sim *Simulator) {
 func startHTTPServer(port int) {
 	mux := http.NewServeMux()
 
+	// Serve static files (CSS, JS)
+	staticFS, _ := fs.Sub(embeddedFS, "static")
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+
 	// Dashboard
 	mux.HandleFunc("/", handleDashboard)
 
@@ -458,7 +463,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, err := template.ParseFS(templatesFS, "templates/index.html")
+	tmpl, err := template.ParseFS(embeddedFS, "templates/index.html")
 	if err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		log.Printf("Template error: %v", err)
