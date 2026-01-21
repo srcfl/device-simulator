@@ -244,7 +244,22 @@ func createSimulator(simType string) (*Simulator, error) {
 		sim.Automation.Scenario = "idle"
 
 	case "ocpp":
-		ocppServer := ocpp.NewServer(id, port, "SimulatorCo", "SimCharger-22", 2, 22.0)
+		// Get default values from first available OCPP profile
+		vendor := "SimulatorCo"
+		model := "SimCharger-22"
+		numConnectors := 2
+		maxPowerKW := 22.0
+
+		if len(availableProfiles) > 0 {
+			if profile := pm.Get(availableProfiles[0].Name); profile != nil && profile.OCPPConfig != nil {
+				vendor = profile.OCPPConfig.Vendor
+				model = profile.OCPPConfig.Model
+				numConnectors = profile.OCPPConfig.NumConnectors
+				maxPowerKW = profile.OCPPConfig.MaxPowerKW
+			}
+		}
+
+		ocppServer := ocpp.NewServer(id, port, vendor, model, numConnectors, maxPowerKW)
 		sim.Serial = ocppServer.SerialNumber()
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
@@ -622,6 +637,8 @@ func handleSimulatorAPI(w http.ResponseWriter, r *http.Request) {
 		handleWakeUp(w, r, sim)
 	case action == "power":
 		handlePower(w, r, sim)
+	case action == "debug/meter-values":
+		handleDebugMeterValues(w, r, sim)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}
@@ -667,7 +684,9 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 	case "mqtt":
 		status["state"] = sim.MQTTServer.GetState()
 	case "ocpp":
-		status["state"] = sim.OCPPServer.GetState()
+		state := sim.OCPPServer.GetState()
+		status["state"] = state
+		status["ocpp_url"] = sim.OCPPServer.GetOCPPURL()
 	}
 	sim.mu.RUnlock()
 
@@ -684,6 +703,7 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 	var config struct {
 		SlaveID *uint8  `json:"slave_id"`
 		Serial  *string `json:"serial"`
+		OCPPURL *string `json:"ocpp_url"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -716,6 +736,12 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 			}
 		}
 		log.Printf("[%s] Serial changed from %s", sim.Serial, oldSerial)
+	}
+	if config.OCPPURL != nil && sim.Protocol == "ocpp" {
+		if sim.OCPPServer != nil {
+			sim.OCPPServer.SetOCPPURL(*config.OCPPURL)
+			log.Printf("[%s] OCPP URL set to %s", sim.Serial, *config.OCPPURL)
+		}
 	}
 	sim.mu.Unlock()
 
@@ -866,12 +892,22 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 			return
 		}
 
-		for addr, value := range profile.Defaults {
-			def := modbus.RegisterLookup[addr]
-			if def != nil {
-				sim.Server.WriteRegisterValue(def, value)
+		// Apply profile based on protocol
+		switch sim.Protocol {
+		case "modbus":
+			for addr, value := range profile.Defaults {
+				def := modbus.RegisterLookup[addr]
+				if def != nil {
+					sim.Server.WriteRegisterValue(def, value)
+				}
+			}
+		case "ocpp":
+			if profile.OCPPConfig != nil && sim.OCPPServer != nil {
+				sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
+				log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
 			}
 		}
+
 		sim.ProfilesManager.SetActive(name)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1102,6 +1138,22 @@ func handlePower(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 		"status":   "ok",
 		"power_ac": state["powerAc"],
 	})
+}
+
+func handleDebugMeterValues(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if sim.Protocol != "ocpp" {
+		http.Error(w, "Debug meter-values endpoint only available for OCPP chargers", http.StatusBadRequest)
+		return
+	}
+
+	debug := sim.OCPPServer.GetMeterValuesDebug()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(debug)
 }
 
 func runAutomationLoop(sim *Simulator) {

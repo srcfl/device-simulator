@@ -529,6 +529,28 @@ var EmbeddedProfiles = map[string]*Profile{
 			DefaultStatus: "Available",
 		},
 	},
+
+	// Charge Amps DAWN
+	"chargeamps-dawn": {
+		Name:        "chargeamps-dawn",
+		Description: "Charge Amps DAWN (7.7kW, 3-phase)",
+		Protocol:    "ocpp",
+		DeviceType:  "chargeamps",
+		Categories:  []string{"ev", "charger"},
+		OCPPConfig: &OCPPConfig{
+			Version:       "1.6",
+			Vendor:        "Charge Amps",
+			Model:         "DAWN",
+			NumConnectors: 1,
+			MaxPowerKW:    7.7,
+			Configuration: map[string]string{
+				"HeartbeatInterval":        "60",
+				"MeterValueSampleInterval": "30",
+				"NumberOfConnectors":       "1",
+			},
+			DefaultStatus: "Available",
+		},
+	},
 }
 
 // InitEmbedded adds embedded profiles to the manager

@@ -167,6 +167,45 @@ type RemoteStopTransactionResponse struct {
 	Status string `json:"status"`
 }
 
+// GetConfigurationRequest represents a GetConfiguration.req from central system
+type GetConfigurationRequest struct {
+	Key []string `json:"key,omitempty"`
+}
+
+// ConfigurationKey represents a single configuration key-value pair
+type ConfigurationKey struct {
+	Key      string `json:"key"`
+	Readonly bool   `json:"readonly"`
+	Value    string `json:"value,omitempty"`
+}
+
+// GetConfigurationResponse represents a GetConfiguration.conf
+type GetConfigurationResponse struct {
+	ConfigurationKey []ConfigurationKey `json:"configurationKey,omitempty"`
+	UnknownKey       []string           `json:"unknownKey,omitempty"`
+}
+
+// ChangeConfigurationRequest represents a ChangeConfiguration.req from central system
+type ChangeConfigurationRequest struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// ChangeConfigurationResponse represents a ChangeConfiguration.conf
+type ChangeConfigurationResponse struct {
+	Status string `json:"status"` // Accepted, Rejected, RebootRequired, NotSupported
+}
+
+// ResetRequest represents a Reset.req from central system
+type ResetRequest struct {
+	Type string `json:"type"` // Hard or Soft
+}
+
+// ResetResponse represents a Reset.conf
+type ResetResponse struct {
+	Status string `json:"status"` // Accepted, Rejected
+}
+
 // ParseOCPPMessage parses an OCPP WebSocket message
 func ParseOCPPMessage(data []byte) (messageType int, messageId string, action string, payload json.RawMessage, err error) {
 	var raw []json.RawMessage
