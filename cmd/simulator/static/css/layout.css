@@ -312,6 +312,15 @@
     align-items: center;
 }
 
+.config-item .value.readonly {
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0 var(--spacing-sm);
+    color: var(--text-secondary);
+    min-width: 80px;
+}
+
 .config-item .host-ip {
     font-family: var(--font-mono);
     font-size: 0.9rem;

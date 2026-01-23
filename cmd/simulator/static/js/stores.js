@@ -90,6 +90,27 @@ const api = {
         });
     },
 
+    // New emulator/simulation endpoints
+    async startEmulator(id) {
+        await fetch(`/api/simulators/${id}/start`, { method: 'POST' });
+    },
+
+    async stopEmulator(id) {
+        await fetch(`/api/simulators/${id}/stop`, { method: 'POST' });
+    },
+
+    async startSimulation(id) {
+        const resp = await fetch(`/api/simulators/${id}/simulation/start`, { method: 'POST' });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+    },
+
+    async stopSimulation(id) {
+        await fetch(`/api/simulators/${id}/simulation/stop`, { method: 'POST' });
+    },
+
     async setState(id, key, value) {
         await fetch(`/api/simulators/${id}/state`, {
             method: 'POST',
@@ -556,6 +577,27 @@ document.addEventListener('alpine:init', () => {
             await this.loadSimulators();
         },
 
+        // Toggle emulator (server) only - for sidebar toggle
+        async toggleEmulatorRunning(id, currentState) {
+            if (currentState) {
+                await api.stopEmulator(id);
+            } else {
+                await api.startEmulator(id);
+            }
+
+            const sim = this.simulators.find(s => s.id === id);
+            if (sim) {
+                const saved = storage.load();
+                const config = saved.simulators.find(s => s.serial === sim.serial);
+                if (config) {
+                    if (!config.automation) config.automation = {};
+                    config.automation.wasRunning = !currentState;
+                    storage.save(saved);
+                }
+            }
+            await this.loadSimulators();
+        },
+
         async copyIP() {
             try {
                 await navigator.clipboard.writeText(this.localIP);
@@ -735,6 +777,57 @@ document.addEventListener('alpine:init', () => {
 
             await this.loadAllData();
             await app.loadSimulators();
+        },
+
+        // Toggle emulator (server) only
+        async toggleEmulator() {
+            const isRunning = this.data?.running;
+
+            if (!isRunning && this.protocol === 'ocpp') {
+                const ocppUrl = this.data?.ocpp_url || '';
+                if (!ocppUrl.trim()) {
+                    alert('Please enter an OCPP URL before starting.');
+                    return;
+                }
+            }
+
+            if (isRunning) {
+                await api.stopEmulator(this.id);
+            } else {
+                await api.startEmulator(this.id);
+            }
+
+            const app = Alpine.store('app');
+            if (app.selectedSerial) {
+                const saved = storage.load();
+                const config = saved.simulators.find(s => s.serial === app.selectedSerial);
+                if (config) {
+                    if (!config.automation) config.automation = {};
+                    config.automation.wasRunning = !isRunning;
+                    storage.save(saved);
+                }
+            }
+
+            await this.loadAllData();
+            await app.loadSimulators();
+        },
+
+        // Toggle simulation (data generation) only
+        async toggleSimulation() {
+            const simulationEnabled = this.automation?.enabled || this.data?.automation?.enabled;
+
+            try {
+                if (simulationEnabled) {
+                    await api.stopSimulation(this.id);
+                } else {
+                    await api.startSimulation(this.id);
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+                return;
+            }
+
+            await this.loadAllData();
         },
 
         async updateAutomationConfig(multiplier, scenario) {

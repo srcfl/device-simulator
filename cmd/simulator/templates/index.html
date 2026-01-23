@@ -32,7 +32,7 @@
         <!-- Simulator List -->
         <div class="simulator-list" id="simulatorList">
             <template x-if="$store.app.simulators.length === 0">
-                <div class="no-simulators">No simulators yet.<br>Click "+ Add Simulator" below.</div>
+                <div class="no-simulators">No emulators yet.<br>Click "+ Add Emulator" below.</div>
             </template>
 
             <template x-for="[cat, sims] in Object.entries($store.app.getGroupedSimulators())" :key="cat">
@@ -91,17 +91,17 @@
                                             </template>
                                         </template>
                                         <template x-if="!sim.running">
-                                            <span>Stopped</span>
+                                            <span>Offline</span>
                                         </template>
                                     </div>
                                     <div class="sim-toggle" @click.stop>
                                         <div class="sim-toggle-track"
                                              :class="{ 'on': sim.running }"
-                                             @click="$store.app.toggleSimRunning(sim.id, sim.running)">
+                                             @click="$store.app.toggleEmulatorRunning(sim.id, sim.running)">
                                             <div class="sim-toggle-thumb"></div>
                                         </div>
                                         <span class="sim-toggle-label" :class="{ 'on': sim.running }"
-                                              x-text="sim.running ? 'Running' : 'Stopped'"></span>
+                                              x-text="sim.running ? 'Online' : 'Offline'"></span>
                                     </div>
                                 </div>
                             </template>
@@ -111,9 +111,9 @@
             </template>
         </div>
 
-        <!-- Add Simulator -->
+        <!-- Add Emulator -->
         <div style="padding: 0.5rem;">
-            <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Simulator</button>
+            <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Emulator</button>
             <div class="add-menu" :class="{ 'show': $store.app.addMenuOpen }">
                 <div class="add-menu-title">Select Type</div>
                 <button class="add-menu-btn" @click="$store.app.addSimulator('inverter')">⚡ Inverter (Modbus)</button>
@@ -450,29 +450,56 @@
                     <div class="config-row" x-data="configRow()">
                         <div class="config-item">
                             <label>Serial</label>
-                            <input type="text"
-                                   :value="$store.simulator.data?.serial || ''"
-                                   @change="updateSerial($event.target.value)">
+                            <template x-if="!$store.simulator.data?.running">
+                                <input type="text"
+                                       x-model="localSerial"
+                                       @focus="onSerialFocus()"
+                                       @blur="onSerialBlur()">
+                            </template>
+                            <template x-if="$store.simulator.data?.running">
+                                <div class="value readonly" x-text="localSerial"></div>
+                            </template>
                         </div>
                         <div class="config-item">
                             <label>Unit ID</label>
-                            <input type="number" min="1" max="247"
-                                   :value="$store.simulator.data?.slave_id || 1"
-                                   @change="updateSlaveId(parseInt($event.target.value))">
+                            <template x-if="!$store.simulator.data?.running">
+                                <input type="number" min="1" max="247"
+                                       x-model.number="localSlaveId"
+                                       @focus="onSlaveIdFocus()"
+                                       @blur="onSlaveIdBlur()">
+                            </template>
+                            <template x-if="$store.simulator.data?.running">
+                                <div class="value readonly" x-text="localSlaveId"></div>
+                            </template>
                         </div>
                         <div class="config-item">
                             <label>Profile</label>
-                            <select @change="$store.simulator.applyProfile($event.target.value)">
-                                <template x-for="profile in $store.simulator.profiles" :key="profile.name">
-                                    <option :value="profile.name"
-                                            :selected="profile.name === $store.simulator.activeProfile"
-                                            x-text="profile.name"></option>
-                                </template>
-                            </select>
+                            <template x-if="!$store.simulator.data?.running">
+                                <select x-model="localProfile" @change="onProfileChange($event.target.value)">
+                                    <template x-for="profile in $store.simulator.profiles" :key="profile.name">
+                                        <option :value="profile.name" x-text="profile.name"></option>
+                                    </template>
+                                </select>
+                            </template>
+                            <template x-if="$store.simulator.data?.running">
+                                <div class="value readonly" x-text="localProfile"></div>
+                            </template>
                         </div>
                         <div class="config-item">
                             <label>Modbus Port</label>
                             <div class="value" x-text="$store.simulator.data?.port"></div>
+                        </div>
+                        <div class="config-item">
+                            <label>Connected Site</label>
+                            <select @change="onSiteChange($event.target.value)"
+                                    :value="selectedSiteId || ''">
+                                <option value="">Not connected</option>
+                                <template x-for="site in sites" :key="site.id">
+                                    <option :value="site.id"
+                                            :selected="site.id === selectedSiteId"
+                                            x-text="site.name"></option>
+                                </template>
+                            </select>
                         </div>
                         <div class="config-item" style="margin-left: auto;">
                             <label>Host IP</label>
@@ -487,11 +514,11 @@
                             </div>
                         </div>
                         <div class="config-item">
-                            <label>Server</label>
+                            <label>Emulator</label>
                             <div class="toggle-switch" style="height: 32px;">
                                 <div class="toggle-switch-track"
                                      :class="{ 'on': $store.simulator.data?.running }"
-                                     @click="$store.simulator.toggleAutomation()">
+                                     @click="$store.simulator.toggleEmulator()">
                                     <div class="toggle-switch-thumb"></div>
                                 </div>
                                 <span class="toggle-switch-status"
@@ -603,21 +630,33 @@
                 <!-- Config Section -->
                 <div class="section">
                     <div class="config-row" x-data="configRow()">
-                        <!-- Serial -->
+                        <!-- Serial - editable when offline -->
                         <div class="config-item">
                             <label>Serial</label>
-                            <input type="text"
-                                   :value="$store.simulator.data?.serial || ''"
-                                   @change="updateSerial($event.target.value)">
+                            <template x-if="!$store.simulator.data?.running">
+                                <input type="text"
+                                       x-model="localSerial"
+                                       @focus="onSerialFocus()"
+                                       @blur="onSerialBlur()">
+                            </template>
+                            <template x-if="$store.simulator.data?.running">
+                                <div class="value readonly" x-text="localSerial"></div>
+                            </template>
                         </div>
 
-                        <!-- Modbus: Unit ID & Port -->
+                        <!-- Modbus: Unit ID - editable when offline -->
                         <template x-if="$store.app.selectedProtocol === 'modbus'">
                             <div class="config-item">
                                 <label>Unit ID</label>
-                                <input type="number" min="1" max="247"
-                                       :value="$store.simulator.data?.slave_id || 1"
-                                       @change="updateSlaveId(parseInt($event.target.value))">
+                                <template x-if="!$store.simulator.data?.running">
+                                    <input type="number" min="1" max="247"
+                                           x-model.number="localSlaveId"
+                                           @focus="onSlaveIdFocus()"
+                                           @blur="onSlaveIdBlur()">
+                                </template>
+                                <template x-if="$store.simulator.data?.running">
+                                    <div class="value readonly" x-text="localSlaveId"></div>
+                                </template>
                             </div>
                         </template>
                         <template x-if="$store.app.selectedProtocol === 'modbus'">
@@ -635,14 +674,21 @@
                             </div>
                         </template>
 
-                        <!-- OCPP: URL & Connection -->
+                        <!-- OCPP: URL - editable when offline -->
                         <template x-if="$store.app.selectedProtocol === 'ocpp'">
                             <div class="config-item" style="flex: 2;">
                                 <label>OCPP URL</label>
-                                <input type="text" placeholder="ws://host:port/path"
-                                       :value="$store.simulator.data?.ocpp_url || ''"
-                                       @input="onOCPPUrlInput($event)"
-                                       style="flex: 1; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                                <template x-if="!$store.simulator.data?.running">
+                                    <input type="text" placeholder="ws://host:port/path"
+                                           x-model="localOcppUrl"
+                                           @focus="onOcppUrlFocus()"
+                                           @input="onOcppUrlInput()"
+                                           @blur="onOcppUrlBlur()"
+                                           style="flex: 1; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                                </template>
+                                <template x-if="$store.simulator.data?.running">
+                                    <div class="value readonly" style="flex: 1; word-break: break-all;" x-text="localOcppUrl || '(not set)'"></div>
+                                </template>
                             </div>
                         </template>
                         <template x-if="$store.app.selectedProtocol === 'ocpp'">
@@ -654,16 +700,19 @@
                             </div>
                         </template>
 
-                        <!-- Profile Selector -->
+                        <!-- Profile Selector - editable when offline -->
                         <div class="config-item">
                             <label>Profile</label>
-                            <select @change="$store.simulator.applyProfile($event.target.value)">
-                                <template x-for="profile in $store.simulator.profiles" :key="profile.name">
-                                    <option :value="profile.name"
-                                            :selected="profile.name === $store.simulator.activeProfile"
-                                            x-text="profile.name"></option>
-                                </template>
-                            </select>
+                            <template x-if="!$store.simulator.data?.running">
+                                <select x-model="localProfile" @change="onProfileChange($event.target.value)">
+                                    <template x-for="profile in $store.simulator.profiles" :key="profile.name">
+                                        <option :value="profile.name" x-text="profile.name"></option>
+                                    </template>
+                                </select>
+                            </template>
+                            <template x-if="$store.simulator.data?.running">
+                                <div class="value readonly" x-text="localProfile"></div>
+                            </template>
                         </div>
 
                         <!-- Host IP -->
@@ -680,18 +729,18 @@
                             </div>
                         </div>
 
-                        <!-- Simulation Toggle -->
+                        <!-- Emulator Toggle (server only) -->
                         <div class="config-item">
-                            <label>Simulation</label>
+                            <label>Emulator</label>
                             <div class="toggle-switch" style="height: 32px;">
                                 <div class="toggle-switch-track"
                                      :class="{ 'on': $store.simulator.data?.running }"
-                                     @click="$store.simulator.toggleAutomation()">
+                                     @click="$store.simulator.toggleEmulator()">
                                     <div class="toggle-switch-thumb"></div>
                                 </div>
                                 <span class="toggle-switch-status"
                                       :class="$store.simulator.data?.running ? 'running' : 'stopped'"
-                                      x-text="$store.simulator.data?.running ? 'Running' : 'Stopped'"></span>
+                                      x-text="$store.simulator.data?.running ? 'Online' : 'Offline'"></span>
                             </div>
                         </div>
                     </div>
@@ -699,8 +748,8 @@
 
                 <!-- Controls Section -->
                 <div class="section">
-                    <!-- Modbus Controls -->
-                    <template x-if="$store.app.selectedProtocol === 'modbus'">
+                    <!-- Modbus Simulation Controls (only for inverters when emulator is online) -->
+                    <template x-if="$store.app.selectedProtocol === 'modbus' && $store.simulator.data?.running">
                         <div class="auto-row" x-data="modbusControls()">
                             <div class="controls-panel">
                                 <div class="controls-row">
@@ -721,6 +770,29 @@
                                         </select>
                                     </div>
                                     <span class="sim-time" x-text="simulatedTime"></span>
+                                    <div class="control-group" style="margin-left: auto;">
+                                        <span class="control-group-label">Simulation</span>
+                                        <div class="toggle-switch">
+                                            <div class="toggle-switch-track"
+                                                 :class="{ 'on': $store.simulator.automation?.enabled }"
+                                                 @click="$store.simulator.toggleSimulation()">
+                                                <div class="toggle-switch-thumb"></div>
+                                            </div>
+                                            <span class="toggle-switch-status"
+                                                  :class="$store.simulator.automation?.enabled ? 'running' : 'stopped'"
+                                                  x-text="$store.simulator.automation?.enabled ? 'Running' : 'Stopped'"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <!-- Modbus Offline Message -->
+                    <template x-if="$store.app.selectedProtocol === 'modbus' && !$store.simulator.data?.running">
+                        <div class="auto-row">
+                            <div class="controls-panel">
+                                <div style="color: var(--text-muted); font-size: var(--font-size-sm);">
+                                    Start the emulator to enable simulation controls.
                                 </div>
                             </div>
                         </div>

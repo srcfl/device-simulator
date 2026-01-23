@@ -680,6 +680,14 @@ func handleSimulatorAPI(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(action, "profiles/"):
 		profilePath := strings.TrimPrefix(action, "profiles/")
 		handleProfile(w, r, sim, profilePath)
+	case action == "start":
+		handleEmulatorStart(w, r, sim)
+	case action == "stop":
+		handleEmulatorStop(w, r, sim)
+	case action == "simulation/start":
+		handleSimulationStart(w, r, sim)
+	case action == "simulation/stop":
+		handleSimulationStop(w, r, sim)
 	case action == "automation":
 		handleAutomation(w, r, sim)
 	case action == "automation/start":
@@ -1084,6 +1092,93 @@ func handleAutomationConfig(w http.ResponseWriter, r *http.Request, sim *Simulat
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+// handleEmulatorStart starts only the protocol server (emulator), not the simulation
+func handleEmulatorStart(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := startSimulatorServer(sim); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+// handleEmulatorStop stops the protocol server (and simulation if running)
+func handleEmulatorStop(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Stop simulation first if running
+	sim.Automation.mu.Lock()
+	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
+		close(sim.Automation.stopChan)
+		sim.Automation.Enabled = false
+	}
+	sim.Automation.mu.Unlock()
+
+	// Then stop the server
+	stopSimulatorServer(sim)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
+}
+
+// handleSimulationStart starts data generation (requires server to be running)
+func handleSimulationStart(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if server is running
+	sim.mu.RLock()
+	running := sim.Running
+	sim.mu.RUnlock()
+
+	if !running {
+		http.Error(w, "Emulator must be online before starting simulation", http.StatusBadRequest)
+		return
+	}
+
+	// Start simulation
+	sim.Automation.mu.Lock()
+	if !sim.Automation.Enabled {
+		sim.Automation.Enabled = true
+		sim.Automation.stopChan = make(chan struct{})
+		sim.Automation.SimulatedTime = time.Now()
+		go runAutomationLoop(sim)
+	}
+	sim.Automation.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+// handleSimulationStop stops data generation (server keeps running)
+func handleSimulationStop(w http.ResponseWriter, r *http.Request, sim *Simulator) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sim.Automation.mu.Lock()
+	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
+		close(sim.Automation.stopChan)
+		sim.Automation.Enabled = false
+	}
+	sim.Automation.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 }
 
 func handleReset(w http.ResponseWriter, r *http.Request, sim *Simulator) {

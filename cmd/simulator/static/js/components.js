@@ -1,27 +1,140 @@
 // Alpine Components - Must load before Alpine.js (not a module)
 
 document.addEventListener('alpine:init', () => {
-    // Config row component
+    // Config row component with local state to prevent overwriting during edits
     Alpine.data('configRow', () => ({
+        // Local state for editable fields
+        localSerial: '',
+        localSlaveId: 1,
+        localOcppUrl: '',
+        localProfile: '',
+
+        // Track if user is currently editing
+        editingSerial: false,
+        editingSlaveId: false,
+        editingOcppUrl: false,
+
+        // Track last known store ID to detect simulator changes
+        lastStoreId: null,
+
         ocppUrlDebounceTimer: null,
 
-        async updateSerial(serial) {
-            const slaveId = Alpine.store('simulator').data?.slave_id || 1;
-            await Alpine.store('simulator').updateConfig({ serial, slave_id: slaveId });
+        init() {
+            // Initialize local state from store
+            this.syncFromStore();
+
+            // Watch for store changes, but only update if not editing
+            this.$watch('$store.simulator.data', () => {
+                const currentId = Alpine.store('simulator').id;
+
+                // Always sync if simulator changed
+                if (this.lastStoreId !== currentId) {
+                    this.lastStoreId = currentId;
+                    this.syncFromStore();
+                    return;
+                }
+
+                // Only sync fields that aren't being edited
+                if (!this.editingSerial) {
+                    this.localSerial = Alpine.store('simulator').data?.serial || '';
+                }
+                if (!this.editingSlaveId) {
+                    this.localSlaveId = Alpine.store('simulator').data?.slave_id || 1;
+                }
+                if (!this.editingOcppUrl) {
+                    this.localOcppUrl = Alpine.store('simulator').data?.ocpp_url || '';
+                }
+                // Profile always syncs (it's a select, not text input)
+                this.localProfile = Alpine.store('simulator').activeProfile || '';
+            });
         },
 
-        async updateSlaveId(slaveId) {
-            const serial = Alpine.store('simulator').data?.serial || '';
-            await Alpine.store('simulator').updateConfig({ serial, slave_id: slaveId });
+        syncFromStore() {
+            const data = Alpine.store('simulator').data;
+            this.localSerial = data?.serial || '';
+            this.localSlaveId = data?.slave_id || 1;
+            this.localOcppUrl = data?.ocpp_url || '';
+            this.localProfile = Alpine.store('simulator').activeProfile || '';
         },
 
-        onOCPPUrlInput(event) {
+        // Serial field handlers
+        onSerialFocus() {
+            this.editingSerial = true;
+        },
+
+        async onSerialBlur() {
+            this.editingSerial = false;
+            const storeSerial = Alpine.store('simulator').data?.serial || '';
+            if (this.localSerial !== storeSerial && this.localSerial.trim()) {
+                await Alpine.store('simulator').updateConfig({
+                    serial: this.localSerial.trim(),
+                    slave_id: this.localSlaveId
+                });
+            }
+        },
+
+        // Slave ID field handlers
+        onSlaveIdFocus() {
+            this.editingSlaveId = true;
+        },
+
+        async onSlaveIdBlur() {
+            this.editingSlaveId = false;
+            const storeSlaveId = Alpine.store('simulator').data?.slave_id || 1;
+            const newSlaveId = parseInt(this.localSlaveId) || 1;
+            if (newSlaveId !== storeSlaveId) {
+                await Alpine.store('simulator').updateConfig({
+                    serial: this.localSerial,
+                    slave_id: newSlaveId
+                });
+            }
+        },
+
+        // OCPP URL field handlers
+        onOcppUrlFocus() {
+            this.editingOcppUrl = true;
+        },
+
+        onOcppUrlInput() {
             if (this.ocppUrlDebounceTimer) {
                 clearTimeout(this.ocppUrlDebounceTimer);
             }
             this.ocppUrlDebounceTimer = setTimeout(() => {
-                Alpine.store('simulator').updateConfig({ ocpp_url: event.target.value.trim() });
+                Alpine.store('simulator').updateConfig({ ocpp_url: this.localOcppUrl.trim() });
             }, 500);
+        },
+
+        onOcppUrlBlur() {
+            this.editingOcppUrl = false;
+            // Final save on blur
+            if (this.ocppUrlDebounceTimer) {
+                clearTimeout(this.ocppUrlDebounceTimer);
+            }
+            Alpine.store('simulator').updateConfig({ ocpp_url: this.localOcppUrl.trim() });
+        },
+
+        // Profile selection handler
+        async onProfileChange(profileName) {
+            if (profileName && profileName !== this.localProfile) {
+                this.localProfile = profileName;
+                await Alpine.store('simulator').applyProfile(profileName);
+            }
+        },
+
+        // Legacy methods for backwards compatibility
+        async updateSerial(serial) {
+            this.localSerial = serial;
+            await Alpine.store('simulator').updateConfig({ serial, slave_id: this.localSlaveId });
+        },
+
+        async updateSlaveId(slaveId) {
+            this.localSlaveId = slaveId;
+            await Alpine.store('simulator').updateConfig({ serial: this.localSerial, slave_id: slaveId });
+        },
+
+        onOCPPUrlInput(event) {
+            this.localOcppUrl = event.target.value;
+            this.onOcppUrlInput();
         }
     }));
 
@@ -712,6 +825,55 @@ document.addEventListener('alpine:init', () => {
 
     // Energy Meter View
     Alpine.data('energyMeterView', () => ({
+        selectedSiteId: null,
+
+        init() {
+            // Initialize selected site from current meter assignment
+            this.updateSelectedSite();
+
+            // Watch for site changes
+            this.$watch('$store.site.sites', () => {
+                this.updateSelectedSite();
+            });
+        },
+
+        updateSelectedSite() {
+            const meterId = Alpine.store('simulator').id;
+            const sites = Alpine.store('site').sites || [];
+            const connectedSite = sites.find(s => s.meter_id === meterId);
+            this.selectedSiteId = connectedSite?.id || null;
+        },
+
+        get sites() {
+            return Alpine.store('site').sites || [];
+        },
+
+        get connectedSiteName() {
+            if (!this.selectedSiteId) return null;
+            const site = this.sites.find(s => s.id === this.selectedSiteId);
+            return site?.name || null;
+        },
+
+        async onSiteChange(siteId) {
+            const meterId = Alpine.store('simulator').id;
+            const previousSiteId = this.selectedSiteId;
+
+            if (siteId === '') {
+                // Disconnect from current site - set meter_id to 0
+                if (previousSiteId) {
+                    await siteApi.setSiteMeter(previousSiteId, 0);
+                    await Alpine.store('site').loadSites();
+                }
+                this.selectedSiteId = null;
+            } else {
+                const newSiteId = parseInt(siteId);
+                // Connect to new site
+                await siteApi.setSiteMeter(newSiteId, meterId);
+                await Alpine.store('site').loadSites();
+                this.selectedSiteId = newSiteId;
+            }
+        },
+
         get meterPower() {
             const regs = Alpine.store('simulator').registers || [];
             const reg = regs.find(r => r.address === 5600);
