@@ -199,6 +199,9 @@ func createSimulator(simType string) (*Simulator, error) {
 	case "inverter":
 		protocol = "modbus"
 		category = "inverter"
+	case "energy_meter":
+		protocol = "modbus"
+		category = "energy_meter"
 	case "v2x_charger":
 		protocol = "mqtt"
 		category = "v2x_charger"
@@ -223,9 +226,14 @@ func createSimulator(simType string) (*Simulator, error) {
 	pm.InitEmbedded()
 	pm.LoadAll()
 
-	// Set default profile for the protocol
+	// Get available profiles for this protocol (used by OCPP for default config)
 	availableProfiles := pm.ListByProtocol(protocol)
-	if len(availableProfiles) > 0 {
+
+	// Set default profile based on device type
+	if category == "energy_meter" {
+		// Energy meters use the sdm630 profile (native gateway support)
+		pm.SetActive("sdm630")
+	} else if len(availableProfiles) > 0 {
 		pm.SetActive(availableProfiles[0].Name)
 	}
 
@@ -246,7 +254,12 @@ func createSimulator(simType string) (*Simulator, error) {
 	// Create protocol-specific server
 	switch protocol {
 	case "modbus":
-		serial := fmt.Sprintf("INVSIM%02d", id)
+		var serial string
+		if category == "energy_meter" {
+			serial = fmt.Sprintf("MTRSIM%02d", id)
+		} else {
+			serial = fmt.Sprintf("INVSIM%02d", id)
+		}
 		sim.Serial = serial
 		sim.SlaveID = 1
 		server := modbus.NewServer(65535)
@@ -566,10 +579,15 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 		switch sim.Protocol {
 		case "modbus":
 			entry["slave_id"] = sim.SlaveID
-			entry["pv_power"] = getRegisterValue(sim.Server, 5016)
-			entry["soc"] = getRegisterValue(sim.Server, 13022)
-			entry["load"] = getRegisterValue(sim.Server, 13007)
-			entry["meter"] = getRegisterValue(sim.Server, 13009)
+			// Use register 5600 (Meter Power) for energy meters, standard registers for inverters
+			if sim.Category == "energy_meter" {
+				entry["meter"] = getRegisterValue(sim.Server, 5600)
+			} else {
+				entry["pv_power"] = getRegisterValue(sim.Server, 5016)
+				entry["soc"] = getRegisterValue(sim.Server, 13022)
+				entry["load"] = getRegisterValue(sim.Server, 13007)
+				entry["meter"] = getRegisterValue(sim.Server, 5600)
+			}
 		case "mqtt":
 			state := sim.MQTTServer.GetState()
 			entry["session_state"] = state["sessionState"]
@@ -580,6 +598,10 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 			state := sim.OCPPServer.GetState()
 			entry["connected"] = state["connected"]
 			entry["connectors"] = state["connectors"]
+			entry["ev_connected"] = state["evConnected"]
+			entry["total_power"] = state["totalPower"]
+			entry["has_active_transaction"] = state["hasActiveTransaction"]
+			entry["max_power_kw"] = state["maxPowerKW"]
 		}
 
 		sim.mu.RUnlock()
@@ -894,8 +916,14 @@ func handleLogs(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 }
 
 func handleProfiles(w http.ResponseWriter, r *http.Request, sim *Simulator) {
-	// Filter profiles by the simulator's protocol
-	list := sim.ProfilesManager.ListByProtocol(sim.Protocol)
+	// Filter profiles by the simulator's protocol and category
+	var list []profiles.ProfileInfo
+	if sim.Category == "energy_meter" {
+		// Energy meters only show meter-specific profiles
+		list = sim.ProfilesManager.ListByProtocolAndCategory(sim.Protocol, "meter")
+	} else {
+		list = sim.ProfilesManager.ListByProtocol(sim.Protocol)
+	}
 	active := sim.ProfilesManager.GetActiveName()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1096,16 +1124,27 @@ func handleState(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 }
 
 func handleClients(w http.ResponseWriter, r *http.Request, sim *Simulator) {
-	if sim.Protocol != "mqtt" {
-		http.Error(w, "Clients endpoint only available for MQTT devices", http.StatusBadRequest)
+	var clients interface{}
+	var count int
+
+	switch sim.Protocol {
+	case "mqtt":
+		mqttClients := sim.MQTTServer.GetClients()
+		clients = mqttClients
+		count = len(mqttClients)
+	case "modbus":
+		modbusClients := sim.Server.GetClients()
+		clients = modbusClients
+		count = len(modbusClients)
+	default:
+		http.Error(w, "Clients endpoint not available for this protocol", http.StatusBadRequest)
 		return
 	}
 
-	clients := sim.MQTTServer.GetClients()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"clients": clients,
-		"count":   len(clients),
+		"count":   count,
 	})
 }
 
@@ -1606,6 +1645,11 @@ func generateValues(sim *Simulator, simTime time.Time) {
 		return
 	}
 
+	// Energy meters don't generate their own values - they are controlled by site aggregation
+	if sim.Category == "energy_meter" {
+		return
+	}
+
 	// Modbus inverter simulation
 	hour := float64(simTime.Hour()) + float64(simTime.Minute())/60.0
 
@@ -1859,6 +1903,66 @@ func calculateAndUpdateMeter(site *Site) {
 	if meterDef := modbus.RegisterLookup[5600]; meterDef != nil {
 		meterSim.Server.WriteRegisterValue(meterDef, totalPower)
 	}
+
+	// Also write to SDM630 registers (for gateways that read SDM630 format)
+	// Register 52: Total System Power (W)
+	if sdm630PowerDef := modbus.RegisterLookup[52]; sdm630PowerDef != nil {
+		meterSim.Server.WriteRegisterValue(sdm630PowerDef, totalPower)
+	}
+
+	// Distribute power across phases (simple 3-way split)
+	phasePower := totalPower / 3.0
+	if l1PowerDef := modbus.RegisterLookup[12]; l1PowerDef != nil {
+		meterSim.Server.WriteRegisterValue(l1PowerDef, phasePower)
+	}
+	if l2PowerDef := modbus.RegisterLookup[14]; l2PowerDef != nil {
+		meterSim.Server.WriteRegisterValue(l2PowerDef, phasePower)
+	}
+	if l3PowerDef := modbus.RegisterLookup[16]; l3PowerDef != nil {
+		meterSim.Server.WriteRegisterValue(l3PowerDef, phasePower)
+	}
+
+	// Calculate current from power (I = P / V, assuming 230V)
+	phaseCurrent := math.Abs(phasePower) / 230.0
+	if l1CurrentDef := modbus.RegisterLookup[6]; l1CurrentDef != nil {
+		meterSim.Server.WriteRegisterValue(l1CurrentDef, phaseCurrent)
+	}
+	if l2CurrentDef := modbus.RegisterLookup[8]; l2CurrentDef != nil {
+		meterSim.Server.WriteRegisterValue(l2CurrentDef, phaseCurrent)
+	}
+	if l3CurrentDef := modbus.RegisterLookup[10]; l3CurrentDef != nil {
+		meterSim.Server.WriteRegisterValue(l3CurrentDef, phaseCurrent)
+	}
+
+	// Update energy totals (accumulate based on power, 0.5s interval = 1/7200 hour)
+	energyDeltaKWh := math.Abs(totalPower) / 1000.0 / 7200.0 // kWh per 0.5s
+	if totalPower > 0 {
+		// Importing - add to import energy (register 72)
+		if importDef := modbus.RegisterLookup[72]; importDef != nil {
+			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
+			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaKWh)
+		}
+	} else if totalPower < 0 {
+		// Exporting - add to export energy (register 74)
+		if exportDef := modbus.RegisterLookup[74]; exportDef != nil {
+			currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
+			meterSim.Server.WriteRegisterValue(exportDef, currentExport+energyDeltaKWh)
+		}
+	}
+
+	// Also update Sungrow-style energy registers (13036, 13045) in Wh
+	energyDeltaWh := math.Abs(totalPower) / 7200.0 // Wh per 0.5s
+	if totalPower > 0 {
+		if importDef := modbus.RegisterLookup[13036]; importDef != nil {
+			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
+			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaWh)
+		}
+	} else if totalPower < 0 {
+		if exportDef := modbus.RegisterLookup[13045]; exportDef != nil {
+			currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
+			meterSim.Server.WriteRegisterValue(exportDef, currentExport+energyDeltaWh)
+		}
+	}
 }
 
 // getSite returns a site by ID
@@ -1875,13 +1979,15 @@ func getSite(id int) *Site {
 
 // createSite creates a new site
 func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64) (*Site, error) {
-	// Validate meter exists and is Modbus
-	meterSim := getSimulator(meterID)
-	if meterSim == nil {
-		return nil, fmt.Errorf("meter simulator %d not found", meterID)
-	}
-	if meterSim.Protocol != "modbus" {
-		return nil, fmt.Errorf("meter must be a Modbus simulator")
+	// Validate meter exists and is Modbus (if meter is specified)
+	if meterID != 0 {
+		meterSim := getSimulator(meterID)
+		if meterSim == nil {
+			return nil, fmt.Errorf("meter simulator %d not found", meterID)
+		}
+		if meterSim.Protocol != "modbus" {
+			return nil, fmt.Errorf("meter must be a Modbus simulator")
+		}
 	}
 
 	// Validate simulators exist

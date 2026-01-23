@@ -162,6 +162,43 @@ func (m *Manager) ListByProtocol(protocol string) []ProfileInfo {
 	return list
 }
 
+// ListByProtocolAndCategory returns profiles filtered by protocol and category
+func (m *Manager) ListByProtocolAndCategory(protocol string, category string) []ProfileInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var list []ProfileInfo
+	for _, p := range m.profiles {
+		// Match protocol
+		protocolMatches := p.Protocol == protocol || (protocol == "modbus" && p.Protocol == "")
+		if !protocolMatches {
+			continue
+		}
+
+		// Match category - profile must have ONLY this category (meter-only profiles)
+		categoryMatches := false
+		if len(p.Categories) == 1 && p.Categories[0] == category {
+			categoryMatches = true
+		}
+		if !categoryMatches {
+			continue
+		}
+
+		list = append(list, ProfileInfo{
+			Name:        p.Name,
+			Description: p.Description,
+			Protocol:    p.Protocol,
+			DeviceType:  p.DeviceType,
+		})
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Name < list[j].Name
+	})
+
+	return list
+}
+
 // ProfileInfo is a summary of a profile
 type ProfileInfo struct {
 	Name        string `json:"name"`
@@ -378,8 +415,20 @@ var EmbeddedProfiles = map[string]*Profile{
 		Categories:  []string{"meter"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sdm.yaml",
 		Defaults: map[uint16]float64{
-			5600:  0,
-			13052: 500,
+			// SDM630 registers (F32, Big Endian, Input Registers FC 0x04)
+			0:  230.0, // L1 Voltage (V)
+			2:  230.0, // L2 Voltage (V)
+			4:  230.0, // L3 Voltage (V)
+			6:  0.0,   // L1 Current (A)
+			8:  0.0,   // L2 Current (A)
+			10: 0.0,   // L3 Current (A)
+			12: 0.0,   // L1 Power (W)
+			14: 0.0,   // L2 Power (W)
+			16: 0.0,   // L3 Power (W)
+			52: 0.0,   // Total System Power (W)
+			70: 50.0,  // Frequency (Hz)
+			72: 100.0, // Import Energy (kWh)
+			74: 50.0,  // Export Energy (kWh)
 		},
 		Generators: map[string]GeneratorConfig{
 			"load": {
@@ -392,6 +441,24 @@ var EmbeddedProfiles = map[string]*Profile{
 			},
 		},
 	},
+	// "fronius-meter" - disabled, use sdm630 instead
+	// {
+	// 	Name:        "fronius-meter",
+	// 	Description: "Fronius Smart Meter (SunSpec)",
+	// 	Protocol:    "modbus",
+	// 	DeviceType:  "fronius",
+	// 	Categories:  []string{"meter"},
+	// 	Defaults: map[uint16]float64{
+	// 		40074: 0,   // L1 Current (A)
+	// 		40076: 0,   // L2 Current (A)
+	// 		40078: 0,   // L3 Current (A)
+	// 		40086: 230, // L1 Voltage (V)
+	// 		40088: 230, // L2 Voltage (V)
+	// 		40090: 230, // L3 Voltage (V)
+	// 		40092: 0,   // AC Power (W)
+	// 		40094: 50,  // Frequency (Hz)
+	// 	},
+	// },
 	"residential-5kw": {
 		Name:        "residential-5kw",
 		Description: "Typical 5kW Residential System",

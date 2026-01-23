@@ -20,6 +20,14 @@ type LogEntry struct {
 	UnitID    uint8     `json:"unit_id"`
 }
 
+// ClientInfo represents a connected Modbus client
+type ClientInfo struct {
+	ID         string    `json:"id"`
+	RemoteAddr string    `json:"remote_addr"`
+	ConnectedAt time.Time `json:"connected_at"`
+	LastSeen   time.Time `json:"last_seen"`
+}
+
 // Server is a Modbus TCP server
 type Server struct {
 	mu             sync.RWMutex
@@ -32,6 +40,9 @@ type Server struct {
 	mirrorToInput  bool
 	serialNumber   string
 	onWrite        func(addr uint16, values []uint16) // callback when registers are written
+	clients        map[string]*ClientInfo
+	clientsMu      sync.RWMutex
+	nextClientID   int
 }
 
 // NewServer creates a new Modbus server with the specified register count
@@ -42,6 +53,7 @@ func NewServer(regCount int) *Server {
 		logs:          make([]LogEntry, 0, 500),
 		maxLogs:       500,
 		mirrorToInput: true,
+		clients:       make(map[string]*ClientInfo),
 	}
 	return s
 }
@@ -212,10 +224,59 @@ func (s *Server) Close() error {
 	return nil
 }
 
+// addClient adds a new client and returns its ID
+func (s *Server) addClient(remoteAddr string) string {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+
+	s.nextClientID++
+	clientID := fmt.Sprintf("client-%d", s.nextClientID)
+	now := time.Now()
+	s.clients[clientID] = &ClientInfo{
+		ID:          clientID,
+		RemoteAddr:  remoteAddr,
+		ConnectedAt: now,
+		LastSeen:    now,
+	}
+	return clientID
+}
+
+// removeClient removes a client by ID
+func (s *Server) removeClient(clientID string) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	delete(s.clients, clientID)
+}
+
+// updateClientLastSeen updates the last seen time for a client
+func (s *Server) updateClientLastSeen(clientID string) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	if client, ok := s.clients[clientID]; ok {
+		client.LastSeen = time.Now()
+	}
+}
+
+// GetClients returns a list of connected clients
+func (s *Server) GetClients() []ClientInfo {
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+
+	clients := make([]ClientInfo, 0, len(s.clients))
+	for _, client := range s.clients {
+		clients = append(clients, *client)
+	}
+	return clients
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	remoteAddr := conn.RemoteAddr().String()
 	log.Printf("New connection from %s", remoteAddr)
+
+	// Track client
+	clientID := s.addClient(remoteAddr)
+	defer s.removeClient(clientID)
 
 	buf := make([]byte, 256)
 	for {
@@ -224,6 +285,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if err != nil {
 			return
 		}
+
+		// Update last seen time
+		s.updateClientLastSeen(clientID)
 
 		if n < 8 {
 			continue
@@ -420,6 +484,11 @@ func (s *Server) WriteRegisterValue(def *RegisterDef, value float64) error {
 	if err != nil {
 		return err
 	}
-	s.SetHoldingRegisters(def.Address, regs)
+	if def.UseHolding {
+		s.SetHoldingRegisters(def.Address, regs)
+	} else {
+		// Write directly to input registers for devices that use FC 0x04
+		s.SetInputRegisters(def.Address, regs)
+	}
 	return nil
 }

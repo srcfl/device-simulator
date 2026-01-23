@@ -3,6 +3,7 @@ package modbus
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 )
 
 // DataType represents the type of a Modbus register
@@ -13,10 +14,11 @@ const (
 	I16
 	U32
 	I32
+	F32 // IEEE 754 single-precision float
 )
 
 func (d DataType) String() string {
-	return [...]string{"U16", "I16", "U32", "I32"}[d]
+	return [...]string{"U16", "I16", "U32", "I32", "F32"}[d]
 }
 
 // Endianness for multi-word registers
@@ -76,6 +78,35 @@ var RegisterDefinitions = []RegisterDef{
 
 	// Control/Load Registers
 	{Address: 13052, Name: "Load Power", Description: "Load power", Unit: "W", Category: "control", DataType: I16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
+
+	// SDM630 Registers (Input Registers - Function Code 0x04)
+	// All SDM630 registers use F32 (IEEE 754 float), Big Endian
+	{Address: 0, Name: "SDM630 L1 Voltage", Description: "Phase 1 Voltage", Unit: "V", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 2, Name: "SDM630 L2 Voltage", Description: "Phase 2 Voltage", Unit: "V", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 4, Name: "SDM630 L3 Voltage", Description: "Phase 3 Voltage", Unit: "V", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 6, Name: "SDM630 L1 Current", Description: "Phase 1 Current", Unit: "A", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 8, Name: "SDM630 L2 Current", Description: "Phase 2 Current", Unit: "A", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 10, Name: "SDM630 L3 Current", Description: "Phase 3 Current", Unit: "A", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 12, Name: "SDM630 L1 Power", Description: "Phase 1 Power", Unit: "W", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 14, Name: "SDM630 L2 Power", Description: "Phase 2 Power", Unit: "W", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 16, Name: "SDM630 L3 Power", Description: "Phase 3 Power", Unit: "W", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 52, Name: "SDM630 Total Power", Description: "Total System Power", Unit: "W", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 70, Name: "SDM630 Frequency", Description: "Frequency", Unit: "Hz", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 72, Name: "SDM630 Import Energy", Description: "Total Import Energy", Unit: "kWh", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 74, Name: "SDM630 Export Energy", Description: "Total Export Energy", Unit: "kWh", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
+	{Address: 64513, Name: "SDM630 Serial", Description: "SDM630 serial number", Unit: "", Category: "meter", DataType: U32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+
+	// Fronius Registers (SunSpec-style)
+	// Gateway reads at 40074 (firmware's 40073 + 1), offset calc uses 40073
+	// So firmware offset X reads Modbus addr 40074+X, we store at firmware_addr+1
+	{Address: 40074, Name: "Fronius L1 Current", Description: "AC Phase-A Current", Unit: "A", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40076, Name: "Fronius L2 Current", Description: "AC Phase-B Current", Unit: "A", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40078, Name: "Fronius L3 Current", Description: "AC Phase-C Current", Unit: "A", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40086, Name: "Fronius L1 Voltage", Description: "AC Voltage Phase-A", Unit: "V", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40088, Name: "Fronius L2 Voltage", Description: "AC Voltage Phase-B", Unit: "V", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40090, Name: "Fronius L3 Voltage", Description: "AC Voltage Phase-C", Unit: "V", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40092, Name: "Fronius AC Power", Description: "AC Power (+=import, -=export)", Unit: "W", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 40094, Name: "Fronius Frequency", Description: "AC Frequency", Unit: "Hz", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
 }
 
 // RegisterLookup maps address to RegisterDef
@@ -151,6 +182,11 @@ func EncodeValue(value float64, def *RegisterDef) ([]uint16, error) {
 			return nil, fmt.Errorf("value %d out of range for I32", raw)
 		}
 		return encodeU32(uint32(raw), def.Endianness), nil
+
+	case F32:
+		// IEEE 754 single-precision float (no scaling for floats)
+		bits := math.Float32bits(float32(value))
+		return encodeU32(bits, def.Endianness), nil
 	}
 
 	return nil, fmt.Errorf("unsupported data type: %v", def.DataType)
@@ -186,6 +222,10 @@ func DecodeValue(registers []uint16, def *RegisterDef) (float64, error) {
 	case I32:
 		uval := decodeU32(registers, def.Endianness)
 		raw = int64(int32(uval))
+
+	case F32:
+		bits := decodeU32(registers, def.Endianness)
+		return float64(math.Float32frombits(bits)), nil
 	}
 
 	if def.Scale != 0 {
@@ -239,8 +279,9 @@ func (def *RegisterDef) ToPayload(registers []uint16) (*RegisterPayload, error) 
 }
 
 // SetSerialNumber encodes a serial number into registers at address 4990
+// Also writes to SDM630 register 64513 and Fronius register 40052
 func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) {
-	// Pad or truncate to 20 characters (10 registers * 2 bytes)
+	// Sungrow-style: Pad or truncate to 20 characters (10 registers * 2 bytes)
 	padded := serial
 	if len(padded) > 20 {
 		padded = padded[:20]
@@ -255,6 +296,32 @@ func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) 
 	}
 
 	setFunc(4990, registers)
+
+	// SDM630: Write numeric serial to register 64513 (U32, Big Endian)
+	var numericSerial uint32 = 1000000
+	for i, c := range serial {
+		numericSerial += uint32(c) * uint32(i+1) * 7
+	}
+	sdm630Regs := []uint16{
+		uint16(numericSerial >> 16),
+		uint16(numericSerial & 0xFFFF),
+	}
+	setFunc(64513, sdm630Regs)
+
+	// Fronius: Write string serial to register 40053 (16 registers = 32 bytes)
+	// Note: +1 offset due to Modbus addressing convention
+	froniusPadded := serial
+	if len(froniusPadded) > 32 {
+		froniusPadded = froniusPadded[:32]
+	}
+	for len(froniusPadded) < 32 {
+		froniusPadded += "\x00"
+	}
+	froniusRegs := make([]uint16, 16)
+	for i := 0; i < 16; i++ {
+		froniusRegs[i] = uint16(froniusPadded[i*2])<<8 | uint16(froniusPadded[i*2+1])
+	}
+	setFunc(40053, froniusRegs)
 }
 
 // Helper for reading bytes as big-endian uint16
