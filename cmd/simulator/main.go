@@ -267,6 +267,17 @@ func createSimulator(simType string) (*Simulator, error) {
 		server.InitDefaults()
 		sim.Server = server
 
+		// Apply profile defaults for energy meters
+		if category == "energy_meter" {
+			if profile := pm.GetActive(); profile != nil {
+				for addr, value := range profile.Defaults {
+					if def := modbus.RegisterLookup[addr]; def != nil {
+						server.WriteRegisterValue(def, value)
+					}
+				}
+			}
+		}
+
 	case "mqtt":
 		mqttServer := mqtt.NewServer(id, port)
 		sim.Serial = mqttServer.SerialNumber()
@@ -1932,6 +1943,20 @@ func calculateAndUpdateMeter(site *Site) {
 	}
 	if l3CurrentDef := modbus.RegisterLookup[10]; l3CurrentDef != nil {
 		meterSim.Server.WriteRegisterValue(l3CurrentDef, phaseCurrent)
+	}
+
+	// Ensure voltage and frequency are always set (SDM630 registers)
+	if l1VoltageDef := modbus.RegisterLookup[0]; l1VoltageDef != nil {
+		meterSim.Server.WriteRegisterValue(l1VoltageDef, 230.0)
+	}
+	if l2VoltageDef := modbus.RegisterLookup[2]; l2VoltageDef != nil {
+		meterSim.Server.WriteRegisterValue(l2VoltageDef, 230.0)
+	}
+	if l3VoltageDef := modbus.RegisterLookup[4]; l3VoltageDef != nil {
+		meterSim.Server.WriteRegisterValue(l3VoltageDef, 230.0)
+	}
+	if freqDef := modbus.RegisterLookup[70]; freqDef != nil {
+		meterSim.Server.WriteRegisterValue(freqDef, 50.0)
 	}
 
 	// Update energy totals (accumulate based on power, 0.5s interval = 1/7200 hour)
