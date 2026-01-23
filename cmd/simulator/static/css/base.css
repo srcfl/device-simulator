@@ -1,0 +1,164 @@
+/* Base Styles - Reset and Typography */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    height: 100vh;
+    display: flex;
+}
+
+/* Section Styles */
+.section {
+    margin-bottom: var(--spacing-xl);
+}
+
+.section-title {
+    font-size: var(--font-size-lg);
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Buttons */
+.btn {
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: var(--font-size-md);
+}
+
+.btn-action { background: var(--color-primary); color: #000; }
+
+.toggle-btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.75rem;
+    transition: all var(--transition-fast);
+    min-width: 100px;
+}
+
+.toggle-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.toggle-btn.on { background: linear-gradient(135deg, var(--color-success), #00a050); color: #000; }
+.toggle-btn.off { background: linear-gradient(135deg, #555, #444); color: #fff; }
+
+.quick-btn {
+    padding: 0.5rem 0.75rem;
+    border: none;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.75rem;
+    transition: all var(--transition-fast);
+}
+
+.quick-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.quick-btn.charge { background: linear-gradient(135deg, var(--color-success), #00a050); color: #000; }
+.quick-btn.discharge { background: linear-gradient(135deg, var(--color-warning), #d97706); color: #000; }
+.quick-btn.stop { background: linear-gradient(135deg, #666, #555); color: #fff; }
+.quick-btn.set { background: linear-gradient(135deg, var(--color-modbus), #2563eb); color: #fff; }
+
+/* Status Badges */
+.status-badge {
+    padding: 0.25rem 0.6rem;
+    border-radius: var(--radius-round);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.status-badge.running { background: rgba(var(--color-success-rgb), 0.2); color: var(--color-success); }
+.status-badge.stopped { background: rgba(100, 100, 100, 0.2); color: var(--text-secondary); }
+.status-badge.idle { background: rgba(100, 100, 100, 0.2); color: var(--text-secondary); }
+.status-badge.paused { background: rgba(var(--color-warning-rgb), 0.2); color: var(--color-warning); }
+.status-badge.charge_loop { background: rgba(var(--color-success-rgb), 0.2); color: var(--color-success); }
+
+/* Protocol Badges */
+.protocol-badge {
+    font-size: var(--font-size-xs);
+    padding: 0.1rem 0.3rem;
+    border-radius: 2px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.protocol-badge.modbus { background: var(--color-modbus); color: #fff; }
+.protocol-badge.mqtt { background: var(--color-mqtt); color: #fff; }
+.protocol-badge.ocpp { background: var(--color-ocpp); color: #000; }
+.protocol-badge.load { background: var(--color-warning); color: #000; }
+
+/* Status Indicators */
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.status-dot.idle { background: var(--text-muted); }
+.status-dot.charging { background: var(--color-success); }
+.status-dot.connected { background: var(--color-primary); }
+.status-dot.available { background: var(--color-success); }
+.status-dot.occupied { background: var(--color-warning); }
+
+/* Copy Button */
+.copy-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 6px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.copy-btn:hover {
+    color: var(--color-primary);
+    background: var(--color-primary-hover);
+}
+
+.copy-btn.copied {
+    color: #4ade80;
+}
+
+/* Simulated Time Display */
+.sim-time {
+    color: var(--color-primary);
+    font-size: var(--font-size-lg);
+    margin-left: auto;
+    padding: 0.3rem 0.6rem;
+    background: rgba(var(--color-primary-rgb), 0.1);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+}
+
+/* Empty State */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+}
+
+.empty-state h3 {
+    color: var(--color-primary);
+    margin-bottom: var(--spacing-sm);
+}

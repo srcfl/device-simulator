@@ -166,4 +166,4 @@ cython_debug/
 .github
 .git1
 # Go binaries
-simulator
+/simulator
