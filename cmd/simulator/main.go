@@ -108,6 +108,26 @@ func (p *PortAllocator) Release(port int) {
 	delete(p.allocatedPorts, port)
 }
 
+// P1UpdateMode represents the update interval mode for P1 port simulation
+type P1UpdateMode string
+
+const (
+	P1ModeDirect P1UpdateMode = "direct" // Updates every 500ms (default)
+	P1Mode1s     P1UpdateMode = "1s"     // Updates every 1 second with averaging
+	P1Mode10s    P1UpdateMode = "10s"    // Updates every 10 seconds with averaging
+)
+
+// P1IntervalBuffer holds state for interval-based P1 port updates
+type P1IntervalBuffer struct {
+	Mode              P1UpdateMode
+	LastPower         float64   // Last instant power value
+	LastPhasePower    float64   // Last instant phase power value
+	ImportEnergyDelta float64   // Accumulated import energy during interval (kWh)
+	ExportEnergyDelta float64   // Accumulated export energy during interval (kWh)
+	LastUpdateTime    time.Time // When registers were last written
+	IntervalStart     time.Time // Start of current interval
+}
+
 // Site represents a group of simulators with aggregated energy metering
 type Site struct {
 	ID           int    `json:"id"`
@@ -116,6 +136,7 @@ type Site struct {
 	SimulatorIDs []int  `json:"simulator_ids"` // Member simulators
 	BaseLoadW    float64 `json:"base_load_w"`  // Configurable 0-10kW
 	Enabled      bool   `json:"enabled"`       // Aggregation enabled
+	P1Buffer     *P1IntervalBuffer             // P1 port interval buffer
 	mu           sync.RWMutex
 	stopChan     chan struct{}
 }
@@ -1347,6 +1368,10 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 	var list []map[string]interface{}
 	for _, site := range sites {
 		site.mu.RLock()
+		p1Mode := P1ModeDirect
+		if site.P1Buffer != nil {
+			p1Mode = site.P1Buffer.Mode
+		}
 		entry := map[string]interface{}{
 			"id":            site.ID,
 			"name":          site.Name,
@@ -1354,6 +1379,7 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 			"simulator_ids": site.SimulatorIDs,
 			"base_load_w":   site.BaseLoadW,
 			"enabled":       site.Enabled,
+			"p1_mode":       string(p1Mode),
 		}
 
 		// Add current meter reading if meter is valid
@@ -1458,6 +1484,8 @@ func handleSiteAPI(w http.ResponseWriter, r *http.Request) {
 		handleSiteEnable(w, r, site)
 	case action == "disable":
 		handleSiteDisable(w, r, site)
+	case action == "p1-mode":
+		handleSiteP1Mode(w, r, site)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}
@@ -1465,6 +1493,10 @@ func handleSiteAPI(w http.ResponseWriter, r *http.Request) {
 
 func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 	site.mu.RLock()
+	p1Mode := P1ModeDirect
+	if site.P1Buffer != nil {
+		p1Mode = site.P1Buffer.Mode
+	}
 	status := map[string]interface{}{
 		"id":            site.ID,
 		"name":          site.Name,
@@ -1472,6 +1504,7 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 		"simulator_ids": site.SimulatorIDs,
 		"base_load_w":   site.BaseLoadW,
 		"enabled":       site.Enabled,
+		"p1_mode":       string(p1Mode),
 	}
 
 	// Add current meter reading if meter is valid
@@ -1505,6 +1538,34 @@ func sumPowerContributions(contributions map[int]float64) float64 {
 		total += power
 	}
 	return total
+}
+
+// newP1IntervalBuffer creates a new P1IntervalBuffer with default direct mode
+func newP1IntervalBuffer() *P1IntervalBuffer {
+	return &P1IntervalBuffer{
+		Mode:           P1ModeDirect,
+		LastUpdateTime: time.Now(),
+		IntervalStart:  time.Now(),
+	}
+}
+
+// getP1IntervalDuration returns the interval duration for a given P1 mode
+func getP1IntervalDuration(mode P1UpdateMode) time.Duration {
+	switch mode {
+	case P1Mode1s:
+		return time.Second
+	case P1Mode10s:
+		return 10 * time.Second
+	default:
+		return 0 // Direct mode has no interval
+	}
+}
+
+// resetEnergy clears the accumulated energy and resets the interval start time
+func (buf *P1IntervalBuffer) resetEnergy() {
+	buf.ImportEnergyDelta = 0
+	buf.ExportEnergyDelta = 0
+	buf.IntervalStart = time.Now()
 }
 
 func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
@@ -1708,6 +1769,49 @@ func handleSiteDisable(w http.ResponseWriter, r *http.Request, site *Site) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "disabled"})
+}
+
+func handleSiteP1Mode(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Mode string `json:"mode"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate mode
+	var mode P1UpdateMode
+	switch req.Mode {
+	case "direct":
+		mode = P1ModeDirect
+	case "1s":
+		mode = P1Mode1s
+	case "10s":
+		mode = P1Mode10s
+	default:
+		http.Error(w, "Invalid mode. Must be 'direct', '1s', or '10s'", http.StatusBadRequest)
+		return
+	}
+
+	site.mu.Lock()
+	if site.P1Buffer == nil {
+		site.P1Buffer = newP1IntervalBuffer()
+	}
+	site.P1Buffer.Mode = mode
+	site.P1Buffer.resetEnergy() // Reset energy accumulator when mode changes
+	site.mu.Unlock()
+
+	log.Printf("[Site %d] P1 mode changed to %s", site.ID, mode)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated", "mode": string(mode)})
 }
 
 func runAutomationLoop(sim *Simulator) {
@@ -1977,6 +2081,7 @@ func calculateAndUpdateMeter(site *Site) {
 	simIDs := make([]int, len(site.SimulatorIDs))
 	copy(simIDs, site.SimulatorIDs)
 	baseLoad := site.BaseLoadW
+	p1Buffer := site.P1Buffer
 	site.mu.RUnlock()
 
 	meterSim := getSimulator(meterID)
@@ -1991,6 +2096,7 @@ func calculateAndUpdateMeter(site *Site) {
 	}
 	meterSim.mu.RUnlock()
 
+	// Calculate current total power
 	totalPower := baseLoad // Start with base load
 
 	for _, simID := range simIDs {
@@ -2005,6 +2111,79 @@ func calculateAndUpdateMeter(site *Site) {
 		totalPower += getPowerContribution(sim)
 	}
 
+	// Distribute power across phases (simple 3-way split)
+	phasePower := totalPower / 3.0
+
+	// Calculate energy delta for this 0.5s tick (kWh and Wh)
+	energyDeltaKWh := math.Abs(totalPower) / 1000.0 / 7200.0 // kWh per 0.5s
+	energyDeltaWh := math.Abs(totalPower) / 7200.0           // Wh per 0.5s
+
+	// Handle P1 interval mode
+	if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
+		// Direct mode: write immediately
+		writeMeterRegisters(meterSim, totalPower, phasePower)
+		updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
+	} else {
+		// Interval mode: accumulate energy internally, write only when interval elapses
+		site.mu.Lock()
+
+		// Store current instant power values
+		p1Buffer.LastPower = totalPower
+		p1Buffer.LastPhasePower = phasePower
+
+		// Accumulate energy deltas continuously
+		if totalPower > 0 {
+			p1Buffer.ImportEnergyDelta += energyDeltaKWh
+		} else if totalPower < 0 {
+			p1Buffer.ExportEnergyDelta += energyDeltaKWh
+		}
+
+		// Check if interval has elapsed
+		intervalDuration := getP1IntervalDuration(p1Buffer.Mode)
+		if time.Since(p1Buffer.IntervalStart) >= intervalDuration {
+			// Get instant power values (not averaged)
+			instantPower := p1Buffer.LastPower
+			instantPhasePower := p1Buffer.LastPhasePower
+			importDelta := p1Buffer.ImportEnergyDelta
+			exportDelta := p1Buffer.ExportEnergyDelta
+
+			// Reset energy accumulator and interval timer
+			p1Buffer.resetEnergy()
+			p1Buffer.LastUpdateTime = time.Now()
+			site.mu.Unlock()
+
+			// Write instant power values to registers
+			writeMeterRegisters(meterSim, instantPower, instantPhasePower)
+
+			// Write accumulated energy
+			if importDelta > 0 {
+				if importDef := modbus.RegisterLookup[72]; importDef != nil {
+					currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
+					meterSim.Server.WriteRegisterValue(importDef, currentImport+importDelta)
+				}
+				if importDefWh := modbus.RegisterLookup[13036]; importDefWh != nil {
+					currentImport, _ := meterSim.Server.ReadRegisterValue(importDefWh)
+					meterSim.Server.WriteRegisterValue(importDefWh, currentImport+importDelta*1000)
+				}
+			}
+			if exportDelta > 0 {
+				if exportDef := modbus.RegisterLookup[74]; exportDef != nil {
+					currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
+					meterSim.Server.WriteRegisterValue(exportDef, currentExport+exportDelta)
+				}
+				if exportDefWh := modbus.RegisterLookup[13045]; exportDefWh != nil {
+					currentExport, _ := meterSim.Server.ReadRegisterValue(exportDefWh)
+					meterSim.Server.WriteRegisterValue(exportDefWh, currentExport+exportDelta*1000)
+				}
+			}
+		} else {
+			site.mu.Unlock()
+		}
+	}
+}
+
+// writeMeterRegisters writes power values to meter registers
+func writeMeterRegisters(meterSim *Simulator, totalPower, phasePower float64) {
 	// Write to meter register 5600 (positive=import, negative=export)
 	if meterDef := modbus.RegisterLookup[5600]; meterDef != nil {
 		meterSim.Server.WriteRegisterValue(meterDef, totalPower)
@@ -2016,8 +2195,7 @@ func calculateAndUpdateMeter(site *Site) {
 		meterSim.Server.WriteRegisterValue(sdm630PowerDef, totalPower)
 	}
 
-	// Distribute power across phases (simple 3-way split)
-	phasePower := totalPower / 3.0
+	// Write phase powers
 	if l1PowerDef := modbus.RegisterLookup[12]; l1PowerDef != nil {
 		meterSim.Server.WriteRegisterValue(l1PowerDef, phasePower)
 	}
@@ -2053,14 +2231,19 @@ func calculateAndUpdateMeter(site *Site) {
 	if freqDef := modbus.RegisterLookup[70]; freqDef != nil {
 		meterSim.Server.WriteRegisterValue(freqDef, 50.0)
 	}
+}
 
-	// Update energy totals (accumulate based on power, 0.5s interval = 1/7200 hour)
-	energyDeltaKWh := math.Abs(totalPower) / 1000.0 / 7200.0 // kWh per 0.5s
+// updateMeterEnergy updates energy registers for direct mode
+func updateMeterEnergy(meterSim *Simulator, totalPower, energyDeltaKWh, energyDeltaWh float64) {
 	if totalPower > 0 {
 		// Importing - add to import energy (register 72)
 		if importDef := modbus.RegisterLookup[72]; importDef != nil {
 			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
 			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaKWh)
+		}
+		if importDef := modbus.RegisterLookup[13036]; importDef != nil {
+			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
+			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaWh)
 		}
 	} else if totalPower < 0 {
 		// Exporting - add to export energy (register 74)
@@ -2068,16 +2251,6 @@ func calculateAndUpdateMeter(site *Site) {
 			currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
 			meterSim.Server.WriteRegisterValue(exportDef, currentExport+energyDeltaKWh)
 		}
-	}
-
-	// Also update Sungrow-style energy registers (13036, 13045) in Wh
-	energyDeltaWh := math.Abs(totalPower) / 7200.0 // Wh per 0.5s
-	if totalPower > 0 {
-		if importDef := modbus.RegisterLookup[13036]; importDef != nil {
-			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
-			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaWh)
-		}
-	} else if totalPower < 0 {
 		if exportDef := modbus.RegisterLookup[13045]; exportDef != nil {
 			currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
 			meterSim.Server.WriteRegisterValue(exportDef, currentExport+energyDeltaWh)
@@ -2142,6 +2315,7 @@ func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64)
 		SimulatorIDs: simulatorIDs,
 		BaseLoadW:    baseLoadW,
 		Enabled:      false,
+		P1Buffer:     newP1IntervalBuffer(),
 	}
 	sites = append(sites, site)
 	sitesMu.Unlock()

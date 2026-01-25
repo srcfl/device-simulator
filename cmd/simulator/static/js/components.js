@@ -904,6 +904,23 @@ document.addEventListener('alpine:init', () => {
                 return `${(wh / 1000).toFixed(2)} kWh`;
             }
             return `${wh.toFixed(0)} Wh`;
+        },
+
+        getP1Mode() {
+            if (!this.selectedSiteId) return 'direct';
+            const site = this.sites.find(s => s.id === this.selectedSiteId);
+            return site?.p1_mode || 'direct';
+        },
+
+        async setP1Mode(mode) {
+            if (!this.selectedSiteId) return;
+            try {
+                await siteApi.setP1Mode(this.selectedSiteId, mode);
+                await Alpine.store('site').loadSites();
+            } catch (e) {
+                console.error('Set P1 mode error:', e);
+                alert('Error: ' + e.message);
+            }
         }
     }));
 

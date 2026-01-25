@@ -205,6 +205,10 @@
                                  x-text="formatMeterPower()"></div>
                         </div>
                         <div class="state-card">
+                            <div class="state-label">P1 Update Mode</div>
+                            <div class="state-value" x-text="($store.site.data?.p1_mode || 'direct').toUpperCase()"></div>
+                        </div>
+                        <div class="state-card">
                             <div class="state-label">Total Power</div>
                             <div class="state-value" x-text="`${($store.site.data?.total_power || 0).toFixed(0)} W`"></div>
                         </div>
@@ -500,6 +504,20 @@
                                             x-text="site.name"></option>
                                 </template>
                             </select>
+                        </div>
+                        <div class="config-item" x-show="selectedSiteId">
+                            <label>P1 Update</label>
+                            <div class="p1-mode-toggle">
+                                <button class="p1-mode-btn"
+                                        :class="{ 'active': getP1Mode() === 'direct' }"
+                                        @click="setP1Mode('direct')">Direct</button>
+                                <button class="p1-mode-btn"
+                                        :class="{ 'active': getP1Mode() === '1s' }"
+                                        @click="setP1Mode('1s')">1s</button>
+                                <button class="p1-mode-btn"
+                                        :class="{ 'active': getP1Mode() === '10s' }"
+                                        @click="setP1Mode('10s')">10s</button>
+                            </div>
                         </div>
                         <div class="config-item" style="margin-left: auto;">
                             <label>Host IP</label>

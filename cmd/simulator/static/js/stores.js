@@ -233,6 +233,19 @@ const siteApi = {
 
     async disableSite(id) {
         await fetch(`/api/sites/${id}/disable`, { method: 'POST' });
+    },
+
+    async setP1Mode(id, mode) {
+        const resp = await fetch(`/api/sites/${id}/p1-mode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        return resp.json();
     }
 };
 
@@ -1182,6 +1195,17 @@ document.addEventListener('alpine:init', () => {
                 if (a.category !== 'energy_meter' && b.category === 'energy_meter') return 1;
                 return 0;
             });
+        },
+
+        async setP1Mode(mode) {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.setP1Mode(this.selectedId, mode);
+                await this.loadSiteData();
+            } catch (e) {
+                console.error('Set P1 mode error:', e);
+                alert('Error: ' + e.message);
+            }
         }
     });
 });
