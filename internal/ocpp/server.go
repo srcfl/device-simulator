@@ -335,9 +335,10 @@ func (s *Server) sendMeterValues(connectorId, transactionId int) {
 	// IMPORTANT: Use "Current.Offered" to trigger CalculateBasedOnCurrent path in CSMS
 	// IMPORTANT: Use "L1", "L2", "L3" phases (not "L1-N") - matches Ambibox test data format
 	// IMPORTANT: ORDER matters - match Ambibox exactly: Energy, Current.Offered, Current.Import, Voltage
-	// Calculate offered current from power: I = P / (V * sqrt(3)) for 3-phase
+	// Calculate offered current from power using phase voltage (L-N):
+	// P = 3 × V_phase × I_phase, so I_phase = P / (3 × V_phase)
 	avgVoltage := (s.voltageL1 + s.voltageL2 + s.voltageL3) / 3.0
-	offeredCurrent := conn.CurrentPower / (avgVoltage * 1.732)
+	offeredCurrent := conn.CurrentPower / (3.0 * avgVoltage)
 	if offeredCurrent < 0 {
 		offeredCurrent = 0
 	}
@@ -1094,6 +1095,169 @@ func (s *Server) SetValue(key string, value interface{}) error {
 			}
 			s.mu.Unlock()
 		}
+
+	case "suspendEVSE":
+		// Charger suspends power delivery (power management, no auth, etc.)
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusCharging {
+			conn.Status = StatusSuspendedEVSE
+			conn.CurrentPower = 0
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusSuspendedEVSE)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "suspendEV":
+		// Vehicle stops accepting power (battery full, user limit, etc.)
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusCharging {
+			conn.Status = StatusSuspendedEV
+			conn.CurrentPower = 0
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusSuspendedEV)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "resumeCharging":
+		// Resume charging from suspended state
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusSuspendedEVSE || conn.Status == StatusSuspendedEV {
+			conn.Status = StatusCharging
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusCharging)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "reserve":
+		// Reserve connector for specific user
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusAvailable {
+			conn.Status = StatusReserved
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusReserved)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "cancelReservation":
+		// Cancel reservation
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusReserved {
+			conn.Status = StatusAvailable
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusAvailable)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "setUnavailable":
+		// Put connector out of service (maintenance, restart pending)
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		// Can set unavailable from most states except active charging
+		if conn.Status != StatusCharging {
+			conn.Status = StatusUnavailable
+			conn.CurrentPower = 0
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusUnavailable)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "setAvailable":
+		// Return connector to available state
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusUnavailable || conn.Status == StatusReserved || conn.Status == StatusFaulted {
+			conn.Status = StatusAvailable
+			conn.ErrorCode = "NoError"
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusAvailable)
+			return nil
+		}
+		s.mu.Unlock()
+
+	case "setFaulted":
+		// Simulate a fault condition
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		// Stop any active charging
+		for txId, tx := range s.transactions {
+			if tx.ConnectorID == 1 {
+				meterStop := int(conn.EnergyWh)
+				delete(s.transactions, txId)
+				go s.sendStopTransaction(txId, tx.IdTag, meterStop)
+				break
+			}
+		}
+		conn.Status = StatusFaulted
+		conn.CurrentPower = 0
+		// Set error code from value if provided
+		if errorCode, ok := value.(string); ok && errorCode != "" {
+			conn.ErrorCode = errorCode
+		} else {
+			conn.ErrorCode = "OtherError"
+		}
+		s.mu.Unlock()
+		go s.sendStatusNotification(1, StatusFaulted)
+		return nil
+
+	case "clearFault":
+		// Clear fault and return to available
+		s.mu.Lock()
+		conn := s.connectors[1]
+		if conn == nil {
+			s.mu.Unlock()
+			return fmt.Errorf("connector 1 not found")
+		}
+		if conn.Status == StatusFaulted {
+			conn.Status = StatusAvailable
+			conn.ErrorCode = "NoError"
+			s.mu.Unlock()
+			go s.sendStatusNotification(1, StatusAvailable)
+			return nil
+		}
+		s.mu.Unlock()
 	}
 
 	return nil
@@ -1181,9 +1345,10 @@ func (s *Server) GenerateValues(simTime time.Time) {
 		s.voltageL2 = 227.0 + (float64((simTime.Second()+3)%10) * 0.2)
 		s.voltageL3 = 228.0 + (float64((simTime.Second()+7)%10) * 0.2)
 
-		// Calculate current per phase (balanced load)
+		// Calculate current per phase (balanced load) using phase voltage (L-N)
+		// P = 3 × V_phase × I_phase, so I_phase = P / (3 × V_phase)
 		avgVoltage := (s.voltageL1 + s.voltageL2 + s.voltageL3) / 3.0
-		totalCurrent := totalPower / (avgVoltage * 1.732) // 3-phase formula: P = V * I * sqrt(3)
+		totalCurrent := totalPower / (3.0 * avgVoltage)
 
 		// Distribute with small variations
 		s.currentL1 = totalCurrent * (0.98 + (float64(simTime.Second()%5) * 0.01))
@@ -1251,8 +1416,9 @@ func (s *Server) GetMeterValuesDebug() MeterValuesDebug {
 	}
 
 	// Calculate offered current (same formula as sendMeterValues)
+	// P = 3 × V_phase × I_phase, so I_phase = P / (3 × V_phase)
 	avgVoltage := (s.voltageL1 + s.voltageL2 + s.voltageL3) / 3.0
-	offeredCurrent := powerW / (avgVoltage * 1.732)
+	offeredCurrent := powerW / (3.0 * avgVoltage)
 	if offeredCurrent < 0 {
 		offeredCurrent = 0
 	}

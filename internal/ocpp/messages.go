@@ -27,16 +27,17 @@ const (
 	ActionReset                   = "Reset"
 )
 
-// Connector Status values
+// Connector Status values (OCPP 1.6)
 const (
-	StatusAvailable   = "Available"
-	StatusPreparing   = "Preparing"
-	StatusCharging    = "Charging"
-	StatusSuspendedEV = "SuspendedEV"
-	StatusFinishing   = "Finishing"
-	StatusReserved    = "Reserved"
-	StatusUnavailable = "Unavailable"
-	StatusFaulted     = "Faulted"
+	StatusAvailable     = "Available"     // No vehicle plugged in, ready for new vehicle
+	StatusPreparing     = "Preparing"     // Vehicle plugged in, waiting for auth/communication
+	StatusCharging      = "Charging"      // Actively charging
+	StatusSuspendedEVSE = "SuspendedEVSE" // Vehicle plugged in, charger not delivering power (charger-side reason)
+	StatusSuspendedEV   = "SuspendedEV"   // Vehicle plugged in, vehicle not accepting power (vehicle-side reason)
+	StatusFinishing     = "Finishing"     // Charging ended, vehicle still plugged in
+	StatusReserved      = "Reserved"      // Reserved for specific user/vehicle
+	StatusUnavailable   = "Unavailable"   // Not available (maintenance, restart pending)
+	StatusFaulted       = "Faulted"       // Experiencing fault or issue
 )
 
 // BootNotificationRequest represents a BootNotification.req
