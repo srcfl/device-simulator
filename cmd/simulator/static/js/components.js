@@ -13,6 +13,7 @@ document.addEventListener('alpine:init', () => {
         editingSerial: false,
         editingSlaveId: false,
         editingOcppUrl: false,
+        changingProfile: false,
 
         // Track last known store ID to detect simulator changes
         lastStoreId: null,
@@ -30,6 +31,7 @@ document.addEventListener('alpine:init', () => {
                 // Always sync if simulator changed
                 if (this.lastStoreId !== currentId) {
                     this.lastStoreId = currentId;
+                    this.changingProfile = false;
                     this.syncFromStore();
                     return;
                 }
@@ -44,8 +46,10 @@ document.addEventListener('alpine:init', () => {
                 if (!this.editingOcppUrl) {
                     this.localOcppUrl = Alpine.store('simulator').data?.ocpp_url || '';
                 }
-                // Profile always syncs (it's a select, not text input)
-                this.localProfile = Alpine.store('simulator').activeProfile || '';
+                // Only sync profile if not in the middle of changing it
+                if (!this.changingProfile) {
+                    this.localProfile = Alpine.store('simulator').activeProfile || '';
+                }
             });
         },
 
@@ -115,9 +119,18 @@ document.addEventListener('alpine:init', () => {
 
         // Profile selection handler
         async onProfileChange(profileName) {
-            if (profileName && profileName !== this.localProfile) {
+            // Compare against store's activeProfile, not localProfile (x-model already updated localProfile)
+            const storeProfile = Alpine.store('simulator').activeProfile || '';
+            if (profileName && profileName !== storeProfile) {
+                this.changingProfile = true;
                 this.localProfile = profileName;
-                await Alpine.store('simulator').applyProfile(profileName);
+                try {
+                    await Alpine.store('simulator').applyProfile(profileName);
+                    // Wait for server to process before allowing sync
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } finally {
+                    this.changingProfile = false;
+                }
             }
         },
 
@@ -142,6 +155,7 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('modbusControls', () => ({
         scenario: 'sunny',
         timeMultiplier: 1,
+        updatingConfig: false,
 
         scenarios: [
             { value: 'sunny', label: '☀️ Sunny Day' },
@@ -161,8 +175,17 @@ document.addEventListener('alpine:init', () => {
         ],
 
         init() {
+            // Initial sync
+            const automation = Alpine.store('simulator').automation;
+            if (automation) {
+                this.scenario = automation.scenario || 'sunny';
+                this.timeMultiplier = automation.time_multiplier || 1;
+            }
+
             this.$watch('$store.simulator.automation', (automation) => {
-                if (automation) {
+                // Only sync from store if not currently updating AND values match what server has
+                // This prevents reverting user selections before the server has processed them
+                if (automation && !this.updatingConfig) {
                     this.scenario = automation.scenario || 'sunny';
                     this.timeMultiplier = automation.time_multiplier || 1;
                 }
@@ -170,10 +193,17 @@ document.addEventListener('alpine:init', () => {
         },
 
         async updateConfig() {
-            await Alpine.store('simulator').updateAutomationConfig(
-                parseInt(this.timeMultiplier),
-                this.scenario
-            );
+            this.updatingConfig = true;
+            try {
+                await Alpine.store('simulator').updateAutomationConfig(
+                    parseInt(this.timeMultiplier),
+                    this.scenario
+                );
+                // Wait a bit for server to process before allowing sync
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } finally {
+                this.updatingConfig = false;
+            }
         },
 
         get simulatedTime() {
@@ -213,6 +243,7 @@ document.addEventListener('alpine:init', () => {
         powerDragging: false,
         socDragging: false,
         controlMode: 'CONTROLLABLE',
+        changingControlMode: false,
         SNAP_THRESHOLD: 500,
 
         init() {
@@ -223,7 +254,9 @@ document.addEventListener('alpine:init', () => {
                     if (!this.socDragging) {
                         this.socSliderValue = state.soc ?? 50;
                     }
-                    this.controlMode = state.controlMode || 'CONTROLLABLE';
+                    if (!this.changingControlMode) {
+                        this.controlMode = state.controlMode || 'CONTROLLABLE';
+                    }
                 }
             });
         },
@@ -316,7 +349,12 @@ document.addEventListener('alpine:init', () => {
         },
 
         async setControlMode() {
-            await Alpine.store('simulator').setState('controlMode', this.controlMode);
+            this.changingControlMode = true;
+            try {
+                await Alpine.store('simulator').setState('controlMode', this.controlMode);
+            } finally {
+                this.changingControlMode = false;
+            }
         }
     }));
 
@@ -826,6 +864,7 @@ document.addEventListener('alpine:init', () => {
     // Energy Meter View
     Alpine.data('energyMeterView', () => ({
         selectedSiteId: null,
+        changingSite: false,
 
         init() {
             // Initialize selected site from current meter assignment
@@ -833,7 +872,9 @@ document.addEventListener('alpine:init', () => {
 
             // Watch for site changes
             this.$watch('$store.site.sites', () => {
-                this.updateSelectedSite();
+                if (!this.changingSite) {
+                    this.updateSelectedSite();
+                }
             });
         },
 
@@ -858,19 +899,24 @@ document.addEventListener('alpine:init', () => {
             const meterId = Alpine.store('simulator').id;
             const previousSiteId = this.selectedSiteId;
 
-            if (siteId === '') {
-                // Disconnect from current site - set meter_id to 0
-                if (previousSiteId) {
-                    await siteApi.setSiteMeter(previousSiteId, 0);
+            this.changingSite = true;
+            try {
+                if (siteId === '') {
+                    // Disconnect from current site - set meter_id to 0
+                    if (previousSiteId) {
+                        await siteApi.setSiteMeter(previousSiteId, 0);
+                        await Alpine.store('site').loadSites();
+                    }
+                    this.selectedSiteId = null;
+                } else {
+                    const newSiteId = parseInt(siteId);
+                    // Connect to new site
+                    await siteApi.setSiteMeter(newSiteId, meterId);
                     await Alpine.store('site').loadSites();
+                    this.selectedSiteId = newSiteId;
                 }
-                this.selectedSiteId = null;
-            } else {
-                const newSiteId = parseInt(siteId);
-                // Connect to new site
-                await siteApi.setSiteMeter(newSiteId, meterId);
-                await Alpine.store('site').loadSites();
-                this.selectedSiteId = newSiteId;
+            } finally {
+                this.changingSite = false;
             }
         },
 

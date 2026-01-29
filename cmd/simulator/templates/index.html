@@ -177,20 +177,6 @@
                                 </template>
                             </select>
                         </div>
-
-                        <div class="config-item" style="margin-left: auto;">
-                            <label>Aggregation</label>
-                            <div class="toggle-switch" style="height: 32px;">
-                                <div class="toggle-switch-track"
-                                     :class="{ 'on': $store.site.data?.enabled }"
-                                     @click="$store.site.toggleEnabled()">
-                                    <div class="toggle-switch-thumb"></div>
-                                </div>
-                                <span class="toggle-switch-status"
-                                      :class="$store.site.data?.enabled ? 'running' : 'stopped'"
-                                      x-text="$store.site.data?.enabled ? 'Active' : 'Inactive'"></span>
-                            </div>
-                        </div>
                     </div>
                 </div>
 

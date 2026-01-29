@@ -926,10 +926,26 @@ document.addEventListener('alpine:init', () => {
             }
             await this.loadSites();
 
+            // Auto-enable all sites (aggregation is always on)
+            await this.enableAllSites();
+
             // Auto-select the first site
             if (this.sites.length > 0 && !this.selectedId) {
                 this.selectSite(this.sites[0].id);
             }
+        },
+
+        async enableAllSites() {
+            for (const site of this.sites) {
+                if (!site.enabled) {
+                    try {
+                        await siteApi.enableSite(site.id);
+                    } catch (e) {
+                        console.error('Auto-enable site error:', e);
+                    }
+                }
+            }
+            await this.loadSites();
         },
 
         async createDefaultSite() {
@@ -1066,6 +1082,22 @@ document.addEventListener('alpine:init', () => {
             this.refreshInterval = setInterval(() => this.loadSiteData(), 1000);
 
             this.loadSiteData();
+
+            // Auto-enable aggregation (sites are always aggregating)
+            this.ensureEnabled(id);
+        },
+
+        async ensureEnabled(id) {
+            // Check if site is enabled, if not enable it
+            const site = this.sites.find(s => s.id === id);
+            if (site && !site.enabled) {
+                try {
+                    await siteApi.enableSite(id);
+                    await this.loadSites();
+                } catch (e) {
+                    console.error('Auto-enable site error:', e);
+                }
+            }
         },
 
         clearSelection() {
