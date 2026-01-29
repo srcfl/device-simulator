@@ -823,6 +823,27 @@ document.addEventListener('alpine:init', () => {
             return Alpine.store('site').data?.base_load_w || 0;
         },
 
+        get virtualDevices() {
+            return Alpine.store('site').data?.virtual_devices || [];
+        },
+
+        get pvPower() {
+            const pv = this.virtualDevices.find(d => d.type === 'pv');
+            return pv?.power || 0;
+        },
+
+        get batteryPower() {
+            const battery = this.virtualDevices.find(d => d.type === 'battery');
+            if (!battery) return 0;
+            const power = battery.power || 0;
+            // charging = positive (consuming), discharging = negative (generating)
+            return battery.direction === 'charging' ? power : -power;
+        },
+
+        get hasMeterInverter() {
+            return Alpine.store('site').isMeterInverter();
+        },
+
         get contributions() {
             const data = Alpine.store('site').data;
             const powerContribs = data?.power_contributions || {};
@@ -967,6 +988,396 @@ document.addEventListener('alpine:init', () => {
                 console.error('Set P1 mode error:', e);
                 alert('Error: ' + e.message);
             }
+        }
+    }));
+
+    // Inverter View (Connected Site dropdown for inverters)
+    Alpine.data('inverterView', () => ({
+        selectedSiteId: null,
+        changingSite: false,
+
+        init() {
+            // Initialize selected site from current meter assignment
+            this.updateSelectedSite();
+
+            // Watch for site changes
+            this.$watch('$store.site.sites', () => {
+                if (!this.changingSite) {
+                    this.updateSelectedSite();
+                }
+            });
+        },
+
+        updateSelectedSite() {
+            const inverterId = Alpine.store('simulator').id;
+            const sites = Alpine.store('site').sites || [];
+            const connectedSite = sites.find(s => s.meter_id === inverterId);
+            this.selectedSiteId = connectedSite?.id || null;
+        },
+
+        get sites() {
+            return Alpine.store('site').sites || [];
+        },
+
+        get connectedSiteName() {
+            if (!this.selectedSiteId) return null;
+            const site = this.sites.find(s => s.id === this.selectedSiteId);
+            return site?.name || null;
+        },
+
+        async onSiteChange(siteId) {
+            const inverterId = Alpine.store('simulator').id;
+            const previousSiteId = this.selectedSiteId;
+
+            this.changingSite = true;
+            try {
+                if (siteId === '') {
+                    // Disconnect from current site - set meter_id to 0
+                    if (previousSiteId) {
+                        await siteApi.setSiteMeter(previousSiteId, 0);
+                        await Alpine.store('site').loadSites();
+                    }
+                    this.selectedSiteId = null;
+                } else {
+                    const newSiteId = parseInt(siteId);
+                    // Connect to new site
+                    await siteApi.setSiteMeter(newSiteId, inverterId);
+                    await Alpine.store('site').loadSites();
+                    this.selectedSiteId = newSiteId;
+                }
+            } finally {
+                this.changingSite = false;
+            }
+        }
+    }));
+
+    // Virtual Device Controls (for PV/Battery cards in site view)
+    Alpine.data('virtualDeviceControls', () => ({
+        pvPower: 0,
+        batteryPower: 0,
+        batterySoc: 50,
+        dragging: null,
+
+        init() {
+            this.syncFromSite();
+
+            this.$watch('$store.site.data', () => {
+                if (!this.dragging) {
+                    this.syncFromSite();
+                }
+            });
+        },
+
+        syncFromSite() {
+            const virtualDevices = Alpine.store('site').data?.virtual_devices || [];
+            const pv = virtualDevices.find(d => d.type === 'pv');
+            const battery = virtualDevices.find(d => d.type === 'battery');
+
+            if (pv) this.pvPower = pv.power || 0;
+            if (battery) {
+                const power = battery.power || 0;
+                const direction = battery.direction || 'idle';
+                // Convert to signed: charging = negative, discharging = positive
+                this.batteryPower = direction === 'charging' ? -power : power;
+                this.batterySoc = battery.soc || 50;
+            }
+        },
+
+        get isSimulationRunning() {
+            // Check if the meter inverter has simulation running
+            const meterId = Alpine.store('site').data?.meter_id;
+            if (!meterId) return false;
+            const meterSim = Alpine.store('app').simulators.find(s => s.id === meterId);
+            // Note: simulators list returns automation as a boolean directly
+            return meterSim?.automation || false;
+        },
+
+        // PV Power handlers
+        onPvPowerInput(value) {
+            this.dragging = 'pv';
+            this.pvPower = parseFloat(value);
+        },
+
+        async onPvPowerChange(value) {
+            this.dragging = null;
+            this.pvPower = parseFloat(value);
+            const siteId = Alpine.store('site').selectedId;
+            if (siteId) {
+                await siteApi.writeVirtualDevice(siteId, 'pv', { power: this.pvPower });
+                await Alpine.store('site').loadSiteData();
+            }
+        },
+
+        // Battery Power handlers
+        onBatteryPowerInput(value) {
+            this.dragging = 'battery';
+            this.batteryPower = parseFloat(value);
+        },
+
+        async onBatteryPowerChange(value) {
+            this.dragging = null;
+            this.batteryPower = parseFloat(value);
+            const siteId = Alpine.store('site').selectedId;
+            if (siteId) {
+                await siteApi.writeVirtualDevice(siteId, 'battery', { power: this.batteryPower });
+                await Alpine.store('site').loadSiteData();
+            }
+        },
+
+        // Battery SoC handlers
+        onSocInput(value) {
+            this.dragging = 'soc';
+            this.batterySoc = parseFloat(value);
+        },
+
+        async onSocChange(value) {
+            this.dragging = null;
+            this.batterySoc = parseFloat(value);
+            const siteId = Alpine.store('site').selectedId;
+            if (siteId) {
+                await siteApi.writeVirtualDevice(siteId, 'battery', { soc: this.batterySoc });
+                await Alpine.store('site').loadSiteData();
+            }
+        },
+
+        // UI helpers
+        formatPvPower() {
+            const power = this.pvPower;
+            if (power >= 1000) return `${(power / 1000).toFixed(1)} kW`;
+            return `${power.toFixed(0)} W`;
+        },
+
+        formatBatteryPower() {
+            const power = this.batteryPower;
+            const abs = Math.abs(power);
+            if (power === 0) return '0 W';
+            if (power < 0) {
+                return abs >= 1000 ? `Charging ${(abs / 1000).toFixed(1)} kW` : `Charging ${abs.toFixed(0)} W`;
+            }
+            return abs >= 1000 ? `Discharging ${(abs / 1000).toFixed(1)} kW` : `Discharging ${abs.toFixed(0)} W`;
+        },
+
+        getBatteryFillStyle() {
+            const soc = Math.max(0, Math.min(100, this.batterySoc));
+            let color;
+            if (soc <= 20) {
+                color = 'rgba(239, 68, 68, 0.8)';
+            } else if (soc <= 40) {
+                color = 'rgba(245, 158, 11, 0.8)';
+            } else {
+                color = 'rgba(139, 92, 246, 0.8)'; // purple for virtual battery
+            }
+            return `height: ${soc}%; background: ${color};`;
+        },
+
+        getBatteryPowerClass() {
+            if (this.batteryPower < 0) return 'charging';
+            if (this.batteryPower > 0) return 'discharging';
+            return 'idle';
+        }
+    }));
+
+    // Inverter Default Tab Component
+    Alpine.data('inverterDefaultTab', () => ({
+        activeTab: 'default',
+
+        // Local state for sliders
+        pvPower: 0,
+        batterySoc: 0,
+        batteryPower: 0,
+        meterPower: 0,
+
+        // Max values for sliders
+        maxPvPower: 10000,
+        maxBatteryPower: 5000,
+
+        // Dragging state to prevent sync during drag
+        dragging: null,
+
+        // Dialog state
+        showSimModeDialog: false,
+        pendingAction: null,
+
+        // Track last known simulator ID
+        lastSimulatorId: null,
+
+        init() {
+            // Initial sync from registers
+            this.syncFromRegisters();
+            this.lastSimulatorId = Alpine.store('simulator').id;
+
+            // Watch for register changes
+            this.$watch('$store.simulator.registers', () => {
+                // Only sync if not dragging
+                if (!this.dragging) {
+                    this.syncFromRegisters();
+                }
+            });
+
+            // Watch for simulator changes
+            this.$watch('$store.simulator.id', (newId) => {
+                if (newId !== this.lastSimulatorId) {
+                    this.lastSimulatorId = newId;
+                    this.syncFromRegisters();
+                }
+            });
+        },
+
+        syncFromRegisters() {
+            const regs = Alpine.store('simulator').registers || [];
+
+            // PV Power (address 5016, U32 Little Endian)
+            const pvReg = regs.find(r => r.address === 5016);
+            if (pvReg) this.pvPower = pvReg.value || 0;
+
+            // Battery Power (address 13021, U16)
+            const batPowerReg = regs.find(r => r.address === 13021);
+            if (batPowerReg) {
+                // Determine sign from command register (13050)
+                const cmdReg = regs.find(r => r.address === 13050);
+                const cmd = cmdReg?.value || 0;
+                const absVal = Math.abs(batPowerReg.value || 0);
+                // 170 = charge (negative, importing), 187 = discharge (positive, exporting)
+                this.batteryPower = cmd === 170 ? -absVal : absVal;
+            }
+
+            // Battery SoC (address 13022, scale 0.1)
+            const socReg = regs.find(r => r.address === 13022);
+            if (socReg) this.batterySoc = socReg.value || 0;
+
+            // Meter Power (address 5600, I32 Little Endian)
+            const meterReg = regs.find(r => r.address === 5600);
+            if (meterReg) this.meterPower = meterReg.value || 0;
+        },
+
+        get isSimulationRunning() {
+            return Alpine.store('simulator').automation?.enabled || false;
+        },
+
+        // Slider event handlers
+        onSliderMouseDown(type) {
+            if (this.isSimulationRunning) {
+                this.pendingAction = { type };
+                this.showSimModeDialog = true;
+            } else {
+                this.dragging = type;
+            }
+        },
+
+        // PV Power handlers
+        onPvPowerInput(value) {
+            if (!this.dragging) return;
+            this.pvPower = parseFloat(value);
+        },
+
+        async onPvPowerChange(value) {
+            if (!this.dragging) return;
+            this.dragging = null;
+            this.pvPower = parseFloat(value);
+            await api.writeRegister(Alpine.store('simulator').id, 5016, this.pvPower);
+            await Alpine.store('simulator').loadRegisters();
+        },
+
+        // Battery SoC handlers
+        onSocInput(value) {
+            if (!this.dragging) return;
+            this.batterySoc = parseFloat(value);
+        },
+
+        async onSocChange(value) {
+            if (!this.dragging) return;
+            this.dragging = null;
+            this.batterySoc = parseFloat(value);
+            await api.writeRegister(Alpine.store('simulator').id, 13022, this.batterySoc);
+            await Alpine.store('simulator').loadRegisters();
+        },
+
+        // Battery Power handlers
+        onBatteryPowerInput(value) {
+            if (!this.dragging) return;
+            this.batteryPower = parseFloat(value);
+        },
+
+        async onBatteryPowerChange(value) {
+            if (!this.dragging) return;
+            this.dragging = null;
+            this.batteryPower = parseFloat(value);
+            const simId = Alpine.store('simulator').id;
+
+            // Write absolute power value
+            await api.writeRegister(simId, 13021, Math.abs(this.batteryPower));
+
+            // Write command register: 170=charge, 187=discharge, 204=stop
+            let cmd = 204; // stop
+            if (this.batteryPower < 0) cmd = 170; // charge
+            else if (this.batteryPower > 0) cmd = 187; // discharge
+            await api.writeRegister(simId, 13050, cmd);
+
+            await Alpine.store('simulator').loadRegisters();
+        },
+
+        // Dialog handlers
+        async stopSimAndApply() {
+            const simId = Alpine.store('simulator').id;
+            await api.stopSimulation(simId);
+            await Alpine.store('simulator').loadAutomation();
+
+            // Now allow the control to be used
+            this.showSimModeDialog = false;
+            this.pendingAction = null;
+        },
+
+        cancelDialog() {
+            this.showSimModeDialog = false;
+            this.pendingAction = null;
+            // Sync back from registers to revert any visual changes
+            this.syncFromRegisters();
+        },
+
+        // Reset to profile defaults
+        async resetToDefaults() {
+            if (!confirm('Reset all values to profile defaults?')) return;
+            const simId = Alpine.store('simulator').id;
+            await api.reset(simId);
+            await Alpine.store('simulator').loadRegisters();
+            this.syncFromRegisters();
+        },
+
+        // UI helpers
+        getBatteryFillStyle() {
+            const soc = Math.max(0, Math.min(100, this.batterySoc));
+            let color;
+            if (soc <= 20) {
+                color = 'rgba(239, 68, 68, 0.8)'; // red
+            } else if (soc <= 40) {
+                color = 'rgba(245, 158, 11, 0.8)'; // yellow/orange
+            } else {
+                color = 'rgba(0, 200, 100, 0.8)'; // green
+            }
+            return `height: ${soc}%; background: ${color};`;
+        },
+
+        getBatteryPowerClass() {
+            if (this.batteryPower < 0) return 'charging';
+            if (this.batteryPower > 0) return 'discharging';
+            return 'idle';
+        },
+
+        formatBatteryPower() {
+            const power = this.batteryPower;
+            const abs = Math.abs(power);
+            if (power === 0) return '0 W';
+            if (power < 0) {
+                return abs >= 1000 ? `Charging ${(abs / 1000).toFixed(1)} kW` : `Charging ${abs.toFixed(0)} W`;
+            }
+            return abs >= 1000 ? `Discharging ${(abs / 1000).toFixed(1)} kW` : `Discharging ${abs.toFixed(0)} W`;
+        },
+
+        getSunGlowStyle() {
+            const intensity = Math.min(1, this.pvPower / this.maxPvPower);
+            const blur = 5 + intensity * 20;
+            const spread = intensity * 10;
+            return `filter: drop-shadow(0 0 ${blur}px rgba(255, 215, 0, ${intensity})) drop-shadow(0 0 ${spread}px rgba(255, 215, 0, ${intensity * 0.5}));`;
         }
     }));
 

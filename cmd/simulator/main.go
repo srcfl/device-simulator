@@ -1486,6 +1486,11 @@ func handleSiteAPI(w http.ResponseWriter, r *http.Request) {
 		handleSiteDisable(w, r, site)
 	case action == "p1-mode":
 		handleSiteP1Mode(w, r, site)
+	case action == "virtual-devices":
+		handleSiteVirtualDevices(w, r, site)
+	case strings.HasPrefix(action, "virtual-devices/"):
+		deviceType := strings.TrimPrefix(action, "virtual-devices/")
+		handleSiteVirtualDevice(w, r, site, deviceType)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}
@@ -1508,8 +1513,29 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 	}
 
 	// Add current meter reading if meter is valid
-	if meterSim := getSimulator(site.MeterID); meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
+	meterSim := getSimulator(site.MeterID)
+	if meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
 		status["meter_power"] = getRegisterValue(meterSim.Server, 5600)
+
+		// Include virtual devices if meter is an inverter
+		if meterSim.Category == "inverter" && meterSim.Running {
+			pvPower := getRegisterValue(meterSim.Server, 5016)
+			batteryPower := getRegisterValue(meterSim.Server, 13021)
+			batterySoc := getRegisterValue(meterSim.Server, 13022)
+			batteryCmd := getRegisterValue(meterSim.Server, 13050)
+
+			batteryDirection := "idle"
+			if batteryCmd == 170 {
+				batteryDirection = "charging"
+			} else if batteryCmd == 187 {
+				batteryDirection = "discharging"
+			}
+
+			status["virtual_devices"] = []map[string]interface{}{
+				{"type": "pv", "power": pvPower},
+				{"type": "battery", "power": batteryPower, "soc": batterySoc, "direction": batteryDirection},
+			}
+		}
 	}
 
 	// Add power contributions from each simulator
@@ -1814,6 +1840,144 @@ func handleSiteP1Mode(w http.ResponseWriter, r *http.Request, site *Site) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "updated", "mode": string(mode)})
 }
 
+// handleSiteVirtualDevices returns virtual devices info when meter is an inverter
+func handleSiteVirtualDevices(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	site.mu.RLock()
+	meterID := site.MeterID
+	site.mu.RUnlock()
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"virtual_devices": []interface{}{}})
+		return
+	}
+
+	meterSim.mu.RLock()
+	category := meterSim.Category
+	running := meterSim.Running
+	server := meterSim.Server
+	meterSim.mu.RUnlock()
+
+	if category != "inverter" || !running || server == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"virtual_devices": []interface{}{}})
+		return
+	}
+
+	// Read values from inverter
+	pvPower := getRegisterValue(server, 5016)
+	batteryPower := getRegisterValue(server, 13021)
+	batterySoc := getRegisterValue(server, 13022)
+	batteryCmd := getRegisterValue(server, 13050)
+
+	// Determine battery direction
+	batteryDirection := "idle"
+	if batteryCmd == 170 {
+		batteryDirection = "charging"
+	} else if batteryCmd == 187 {
+		batteryDirection = "discharging"
+	}
+
+	virtualDevices := []map[string]interface{}{
+		{
+			"type":  "pv",
+			"power": pvPower,
+		},
+		{
+			"type":      "battery",
+			"power":     batteryPower,
+			"soc":       batterySoc,
+			"direction": batteryDirection,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"virtual_devices": virtualDevices})
+}
+
+// handleSiteVirtualDevice handles writing to a virtual device (pv or battery)
+func handleSiteVirtualDevice(w http.ResponseWriter, r *http.Request, site *Site, deviceType string) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	site.mu.RLock()
+	meterID := site.MeterID
+	site.mu.RUnlock()
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil {
+		http.Error(w, "Meter not found", http.StatusNotFound)
+		return
+	}
+
+	meterSim.mu.RLock()
+	category := meterSim.Category
+	running := meterSim.Running
+	server := meterSim.Server
+	meterSim.mu.RUnlock()
+
+	if category != "inverter" {
+		http.Error(w, "Meter is not an inverter", http.StatusBadRequest)
+		return
+	}
+
+	if !running || server == nil {
+		http.Error(w, "Inverter is not running", http.StatusBadRequest)
+		return
+	}
+
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	switch deviceType {
+	case "pv":
+		if power, ok := req["power"].(float64); ok {
+			if pvDef := modbus.RegisterLookup[5016]; pvDef != nil {
+				server.WriteRegisterValue(pvDef, power)
+			}
+		}
+	case "battery":
+		if power, ok := req["power"].(float64); ok {
+			absPower := math.Abs(power)
+			if battDef := modbus.RegisterLookup[13021]; battDef != nil {
+				server.WriteRegisterValue(battDef, absPower)
+			}
+			// Set command register: 170=charge, 187=discharge, 204=stop
+			var cmd float64 = 204
+			if power < 0 {
+				cmd = 170 // charge (negative = consuming)
+			} else if power > 0 {
+				cmd = 187 // discharge (positive = generating)
+			}
+			if cmdDef := modbus.RegisterLookup[13050]; cmdDef != nil {
+				server.WriteRegisterValue(cmdDef, cmd)
+			}
+		}
+		if soc, ok := req["soc"].(float64); ok {
+			if socDef := modbus.RegisterLookup[13022]; socDef != nil {
+				server.WriteRegisterValue(socDef, soc)
+			}
+		}
+	default:
+		http.Error(w, "Unknown device type", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
 func runAutomationLoop(sim *Simulator) {
 	log.Printf("[%s] Automation started", sim.Serial)
 
@@ -1957,12 +2121,25 @@ func generateValues(sim *Simulator, simTime time.Time) {
 		sim.Server.WriteRegisterValue(socDef, soc)
 	}
 	if battDef := modbus.RegisterLookup[13021]; battDef != nil {
-		sim.Server.WriteRegisterValue(battDef, batteryPower)
+		sim.Server.WriteRegisterValue(battDef, math.Abs(batteryPower))
+	}
+	// Set battery command register: 170=charge, 187=discharge, 204=stop
+	if cmdDef := modbus.RegisterLookup[13050]; cmdDef != nil {
+		var cmd float64 = 204 // stop
+		if batteryPower > 0 {
+			cmd = 170 // charging (consuming power)
+		} else if batteryPower < 0 {
+			cmd = 187 // discharging (generating power)
+		}
+		sim.Server.WriteRegisterValue(cmdDef, cmd)
 	}
 
-	meterPower := loadPower - solarPower + batteryPower
-	if meterDef := modbus.RegisterLookup[5600]; meterDef != nil {
-		sim.Server.WriteRegisterValue(meterDef, meterPower)
+	// Only update meter register if NOT a site meter (site controls it)
+	if !isSimulatorSiteMeter(sim.ID) {
+		meterPower := loadPower - solarPower + batteryPower
+		if meterDef := modbus.RegisterLookup[5600]; meterDef != nil {
+			sim.Server.WriteRegisterValue(meterDef, meterPower)
+		}
 	}
 }
 
@@ -1973,6 +2150,21 @@ func getRegisterValue(server *modbus.Server, address uint16) float64 {
 	}
 	val, _ := server.ReadRegisterValue(def)
 	return val
+}
+
+// isSimulatorSiteMeter checks if a simulator is currently acting as a site meter
+func isSimulatorSiteMeter(simID int) bool {
+	sitesMu.RLock()
+	defer sitesMu.RUnlock()
+	for _, site := range sites {
+		site.mu.RLock()
+		isMeter := site.MeterID == simID && site.Enabled
+		site.mu.RUnlock()
+		if isMeter {
+			return true
+		}
+	}
+	return false
 }
 
 // Site aggregation functions
@@ -2094,10 +2286,27 @@ func calculateAndUpdateMeter(site *Site) {
 		meterSim.mu.RUnlock()
 		return
 	}
+	meterCategory := meterSim.Category
 	meterSim.mu.RUnlock()
 
 	// Calculate current total power
 	totalPower := baseLoad // Start with base load
+
+	// If meter is an inverter, read its PV/Battery values and include them in the calculation
+	if meterCategory == "inverter" {
+		pvPower := getRegisterValue(meterSim.Server, 5016)        // PV power
+		batteryPower := getRegisterValue(meterSim.Server, 13021)  // Battery power (absolute)
+		batteryCmd := getRegisterValue(meterSim.Server, 13050)    // Command register
+
+		// Battery sign from command register: 170=charge (importing), 187=discharge (exporting)
+		// For site calculation: charging adds to consumption, discharging reduces consumption
+		if batteryCmd == 187 {
+			batteryPower = -batteryPower // discharge = exporting
+		}
+		// Note: when cmd=170 (charge), batteryPower stays positive (importing/consuming)
+
+		totalPower = baseLoad - pvPower + batteryPower
+	}
 
 	for _, simID := range simIDs {
 		// Skip meter simulator to avoid double-counting its own power

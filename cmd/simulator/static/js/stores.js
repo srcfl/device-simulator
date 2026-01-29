@@ -143,6 +143,14 @@ const api = {
     async getDebugMeterValues(id) {
         const resp = await fetch(`/api/simulators/${id}/debug/meter-values`);
         return resp.json();
+    },
+
+    async reset(id) {
+        const resp = await fetch(`/api/simulators/${id}/reset`, { method: 'POST' });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
     }
 };
 
@@ -240,6 +248,25 @@ const siteApi = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        return resp.json();
+    },
+
+    async getVirtualDevices(siteId) {
+        const resp = await fetch(`/api/sites/${siteId}/virtual-devices`);
+        const data = await resp.json();
+        return data.virtual_devices || [];
+    },
+
+    async writeVirtualDevice(siteId, deviceType, data) {
+        const resp = await fetch(`/api/sites/${siteId}/virtual-devices/${deviceType}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
         });
         if (!resp.ok) {
             const text = await resp.text();
@@ -561,8 +588,13 @@ document.addEventListener('alpine:init', () => {
             const sim = this.simulators.find(s => s.id === id);
             this.selectedSerial = sim ? sim.serial : null;
 
-            // Clear site selection when selecting a simulator
-            Alpine.store('site').clearSelection();
+            // Don't clear site selection - site view should always be on
+            // Just stop the site refresh interval since we'll show simulator view
+            const siteStore = Alpine.store('site');
+            if (siteStore.refreshInterval) {
+                clearInterval(siteStore.refreshInterval);
+                siteStore.refreshInterval = null;
+            }
 
             if (this.refreshInterval) clearInterval(this.refreshInterval);
             this.refreshInterval = setInterval(() => Alpine.store('simulator').loadAllData(), 2000);
@@ -1238,6 +1270,34 @@ document.addEventListener('alpine:init', () => {
                 console.error('Set P1 mode error:', e);
                 alert('Error: ' + e.message);
             }
+        },
+
+        // Check if the current site's meter is an inverter
+        isMeterInverter() {
+            if (!this.data?.meter_id) return false;
+            const meter = Alpine.store('app').simulators.find(s => s.id === this.data.meter_id);
+            return meter?.category === 'inverter';
+        },
+
+        // Get virtual devices from site data
+        getVirtualDevices() {
+            return this.data?.virtual_devices || [];
+        },
+
+        // Write to a virtual device (pv or battery)
+        async writeVirtualDevice(deviceType, data) {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.writeVirtualDevice(this.selectedId, deviceType, data);
+                await this.loadSiteData();
+            } catch (e) {
+                console.error('Write virtual device error:', e);
+            }
+        },
+
+        // Find site that has this simulator as its meter
+        getSiteWithMeter(simulatorId) {
+            return this.sites.find(s => s.meter_id === simulatorId);
         }
     });
 });

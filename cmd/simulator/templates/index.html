@@ -148,13 +148,8 @@
 
         <!-- Content Area -->
         <div class="main-content">
-            <!-- Empty State (when a simulator is not selected but site is) -->
-            <template x-if="!$store.app.selectedId && $store.site.selectedId">
-                <!-- Show site view -->
-            </template>
-
-            <!-- Site View -->
-        <template x-if="$store.site.selectedId && $store.site.data">
+            <!-- Site View - shown when site is selected but no simulator is selected -->
+        <template x-if="$store.site.selectedId && $store.site.data && !$store.app.selectedId">
             <div x-data="siteView()">
                 <!-- Site Config Section -->
                 <div class="section">
@@ -262,6 +257,82 @@
                                 <span class="status-text">Always on</span>
                             </div>
                         </div>
+
+                        <!-- Virtual PV Card (when meter is an inverter) -->
+                        <template x-if="$store.site.isMeterInverter() && $store.site.data?.virtual_devices?.length > 0">
+                            <div class="member-card pv" x-data="virtualDeviceControls()">
+                                <div class="member-header">
+                                    <div class="member-info">
+                                        <span class="member-serial">Solar PV</span>
+                                        <span class="protocol-badge pv">virtual</span>
+                                    </div>
+                                </div>
+                                <div class="member-power">
+                                    <span class="power-label">Generation</span>
+                                    <span class="power-value" style="color: var(--color-primary);" x-text="formatPvPower()"></span>
+                                </div>
+                                <div class="member-controls">
+                                    <div class="member-control-row">
+                                        <span class="control-label">Power</span>
+                                        <div class="mini-slider-container">
+                                            <input type="range" class="mini-slider pv-power"
+                                                   min="0" max="10000" step="100"
+                                                   :value="pvPower"
+                                                   :disabled="isSimulationRunning"
+                                                   @input="onPvPowerInput($event.target.value)"
+                                                   @change="onPvPowerChange($event.target.value)">
+                                        </div>
+                                        <span class="control-value" style="color: var(--color-primary);" x-text="formatPvPower()"></span>
+                                    </div>
+                                </div>
+                                <div class="member-footer">
+                                    <span class="status-indicator running"></span>
+                                    <span class="status-text" x-text="isSimulationRunning ? 'Simulation running' : 'Manual control'"></span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Virtual Battery Card (when meter is an inverter) -->
+                        <template x-if="$store.site.isMeterInverter() && $store.site.data?.virtual_devices?.length > 0">
+                            <div class="member-card battery" x-data="virtualDeviceControls()">
+                                <div class="member-header">
+                                    <div class="member-info">
+                                        <span class="member-serial">Battery</span>
+                                        <span class="protocol-badge battery">virtual</span>
+                                    </div>
+                                </div>
+                                <div class="member-power">
+                                    <span class="power-label">Power</span>
+                                    <span class="power-value" :class="getBatteryPowerClass()" x-text="formatBatteryPower()"></span>
+                                </div>
+                                <div class="member-controls">
+                                    <div class="member-control-row">
+                                        <span class="control-label">SoC</span>
+                                        <div class="mini-progress">
+                                            <div class="mini-progress-fill battery" :style="`width: ${batterySoc}%`"></div>
+                                        </div>
+                                        <span class="control-value" x-text="`${batterySoc.toFixed(0)}%`"></span>
+                                    </div>
+                                    <div class="member-control-row">
+                                        <span class="control-label">Power</span>
+                                        <div class="mini-slider-container">
+                                            <input type="range" class="mini-slider battery-power"
+                                                   min="-5000" max="5000" step="100"
+                                                   :value="batteryPower"
+                                                   :disabled="isSimulationRunning"
+                                                   @input="onBatteryPowerInput($event.target.value)"
+                                                   @change="onBatteryPowerChange($event.target.value)">
+                                        </div>
+                                        <span class="control-value" :class="getBatteryPowerClass()"
+                                              x-text="`${(Math.abs(batteryPower) / 1000).toFixed(1)} kW`"></span>
+                                    </div>
+                                </div>
+                                <div class="member-footer">
+                                    <span class="status-indicator running"></span>
+                                    <span class="status-text" x-text="isSimulationRunning ? 'Simulation running' : 'Manual control'"></span>
+                                </div>
+                            </div>
+                        </template>
 
                         <template x-for="simId in ($store.site.data?.simulator_ids || [])" :key="simId">
                             <div class="member-card" :class="getSimInfo(simId).protocol">
@@ -418,6 +489,20 @@
                                 <span class="formula-contrib-name">Home Load</span>
                                 <span class="formula-contrib-value positive" x-text="formatValue(baseLoad)"></span>
                             </span>
+                            <template x-if="hasMeterInverter && pvPower !== 0">
+                                <span class="formula-contrib">
+                                    <span class="formula-contrib-name">Solar PV</span>
+                                    <span class="formula-contrib-value negative" x-text="formatValue(-pvPower)"></span>
+                                </span>
+                            </template>
+                            <template x-if="hasMeterInverter && batteryPower !== 0">
+                                <span class="formula-contrib">
+                                    <span class="formula-contrib-name">Battery</span>
+                                    <span class="formula-contrib-value"
+                                          :class="batteryPower >= 0 ? 'positive' : 'negative'"
+                                          x-text="formatValue(batteryPower)"></span>
+                                </span>
+                            </template>
                             <template x-for="contrib in contributions" :key="contrib.id">
                                 <span class="formula-contrib">
                                     <span class="formula-contrib-name" x-text="contrib.name"></span>
@@ -719,6 +804,19 @@
                             </template>
                         </div>
 
+                        <!-- Connected Site (for inverters only) -->
+                        <template x-if="$store.app.selectedProtocol === 'modbus' && $store.simulator.data?.category === 'inverter'">
+                            <div class="config-item" x-data="inverterView()">
+                                <label>Connected Site</label>
+                                <select @change="onSiteChange($event.target.value)" :value="selectedSiteId || ''">
+                                    <option value="">Not connected</option>
+                                    <template x-for="site in sites" :key="site.id">
+                                        <option :value="site.id" x-text="site.name" :selected="site.id === selectedSiteId"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+
                         <!-- Host IP -->
                         <div class="config-item" style="margin-left: auto;">
                             <label>Host IP</label>
@@ -1018,28 +1116,159 @@
                     </div>
                 </template>
 
-                <!-- Registers Section (Modbus) -->
+                <!-- Tabbed View Section (Modbus Inverters) -->
                 <template x-if="$store.app.selectedProtocol === 'modbus'">
-                    <div class="section" x-data="modbusRegisters()">
-                        <div class="section-title">Registers</div>
-                        <div class="register-grid">
-                            <template x-for="reg in $store.simulator.registers" :key="reg.address">
-                                <div class="register-card">
-                                    <div class="register-header">
-                                        <span class="register-name" x-text="reg.name"></span>
-                                        <span class="register-addr" x-text="reg.address"></span>
-                                    </div>
-                                    <div class="register-value">
-                                        <span x-text="formatValue(reg)"></span>
-                                        <span class="register-unit" x-text="reg.unit || ''"></span>
-                                    </div>
-                                    <div class="register-input">
-                                        <input type="number" placeholder="Set" step="any"
-                                               @input="setInputValue(reg.address, $event.target.value)">
-                                        <button @click="writeRegister(reg.address)">Set</button>
+                    <div class="section" x-data="inverterDefaultTab()">
+                        <!-- Tab Bar -->
+                        <div class="simulator-view-tabs">
+                            <button class="view-tab" :class="{ 'active': activeTab === 'default' }"
+                                    @click="activeTab = 'default'">Default</button>
+                            <button class="view-tab" :class="{ 'active': activeTab === 'registers' }"
+                                    @click="activeTab = 'registers'">Registers</button>
+                        </div>
+
+                        <!-- Default Tab Content -->
+                        <div x-show="activeTab === 'default'" class="default-tab-content">
+                            <!-- Energy Meter Section -->
+                            <div class="default-section">
+                                <div class="default-section-title">Energy Meter</div>
+                                <div class="meter-mini-display">
+                                    <div class="meter-mini-power">
+                                        <div class="meter-mini-label" x-text="meterPower >= 0 ? 'IMPORTING' : 'EXPORTING'"></div>
+                                        <div class="meter-mini-value" :class="{ 'exporting': meterPower < 0 }">
+                                            <span class="meter-mini-number" x-text="Math.abs(meterPower).toFixed(0)"></span>
+                                            <span class="meter-mini-unit">W</span>
+                                        </div>
                                     </div>
                                 </div>
-                            </template>
+                            </div>
+
+                            <!-- Battery Section -->
+                            <div class="default-section">
+                                <div class="default-section-title">Battery</div>
+                                <div class="battery-container">
+                                    <div class="battery-visual">
+                                        <div class="battery-cap"></div>
+                                        <div class="battery-body">
+                                            <div class="battery-fill" :style="getBatteryFillStyle()"></div>
+                                            <div class="battery-percentage" x-text="`${Math.round(batterySoc)}%`"></div>
+                                        </div>
+                                    </div>
+                                    <div class="battery-controls">
+                                        <div class="control-row">
+                                            <span class="control-label">State of Charge</span>
+                                            <div class="slider-container">
+                                                <input type="range" class="default-slider soc-slider"
+                                                       min="0" max="100" step="0.1"
+                                                       :value="batterySoc"
+                                                       :disabled="isSimulationRunning"
+                                                       @mousedown="onSliderMouseDown('soc')"
+                                                       @input="onSocInput($event.target.value)"
+                                                       @change="onSocChange($event.target.value)">
+                                            </div>
+                                            <span class="control-value" x-text="`${batterySoc.toFixed(1)}%`"></span>
+                                        </div>
+                                        <div class="control-row">
+                                            <span class="control-label">Power</span>
+                                            <div class="slider-container">
+                                                <input type="range" class="default-slider power-slider"
+                                                       :min="-maxBatteryPower" :max="maxBatteryPower" step="100"
+                                                       :value="batteryPower"
+                                                       :disabled="isSimulationRunning"
+                                                       @mousedown="onSliderMouseDown('batteryPower')"
+                                                       @input="onBatteryPowerInput($event.target.value)"
+                                                       @change="onBatteryPowerChange($event.target.value)">
+                                            </div>
+                                            <span class="control-value" :class="getBatteryPowerClass()"
+                                                  x-text="formatBatteryPower()"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Solar PV Section -->
+                            <div class="default-section">
+                                <div class="default-section-title">Solar PV</div>
+                                <div class="pv-container">
+                                    <div class="sun-icon" :style="getSunGlowStyle()">
+                                        <svg viewBox="0 0 100 100" width="80" height="80">
+                                            <circle cx="50" cy="50" r="20" fill="#FFD700"/>
+                                            <g stroke="#FFD700" stroke-width="3" stroke-linecap="round">
+                                                <line x1="50" y1="10" x2="50" y2="22"/>
+                                                <line x1="50" y1="78" x2="50" y2="90"/>
+                                                <line x1="10" y1="50" x2="22" y2="50"/>
+                                                <line x1="78" y1="50" x2="90" y2="50"/>
+                                                <line x1="21.7" y1="21.7" x2="30.2" y2="30.2"/>
+                                                <line x1="69.8" y1="69.8" x2="78.3" y2="78.3"/>
+                                                <line x1="21.7" y1="78.3" x2="30.2" y2="69.8"/>
+                                                <line x1="69.8" y1="30.2" x2="78.3" y2="21.7"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="pv-controls">
+                                        <div class="control-row">
+                                            <span class="control-label">Power Output</span>
+                                            <div class="slider-container">
+                                                <input type="range" class="default-slider pv-slider"
+                                                       min="0" :max="maxPvPower" step="100"
+                                                       :value="pvPower"
+                                                       :disabled="isSimulationRunning"
+                                                       @mousedown="onSliderMouseDown('pv')"
+                                                       @input="onPvPowerInput($event.target.value)"
+                                                       @change="onPvPowerChange($event.target.value)">
+                                            </div>
+                                            <span class="control-value pv-power" x-text="`${pvPower.toFixed(0)} W`"></span>
+                                        </div>
+                                        <div class="pv-power-display">
+                                            <span class="pv-power-value" x-text="`${(pvPower / 1000).toFixed(2)} kW`"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Reset Button -->
+                            <div class="default-actions">
+                                <button class="reset-btn" @click="resetToDefaults()"
+                                        :disabled="isSimulationRunning">
+                                    Reset to Defaults
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Registers Tab Content -->
+                        <div x-show="activeTab === 'registers'" x-data="modbusRegisters()">
+                            <div class="register-grid">
+                                <template x-for="reg in $store.simulator.registers" :key="reg.address">
+                                    <div class="register-card">
+                                        <div class="register-header">
+                                            <span class="register-name" x-text="reg.name"></span>
+                                            <span class="register-addr" x-text="reg.address"></span>
+                                        </div>
+                                        <div class="register-value">
+                                            <span x-text="formatValue(reg)"></span>
+                                            <span class="register-unit" x-text="reg.unit || ''"></span>
+                                        </div>
+                                        <div class="register-input">
+                                            <input type="number" placeholder="Set" step="any"
+                                                   @input="setInputValue(reg.address, $event.target.value)">
+                                            <button @click="writeRegister(reg.address)">Set</button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Simulation Mode Warning Dialog -->
+                        <div class="sim-warning-dialog-backdrop" x-show="showSimModeDialog" @click="cancelDialog()"></div>
+                        <div class="sim-warning-dialog" x-show="showSimModeDialog">
+                            <div class="sim-warning-title">Simulation Running</div>
+                            <div class="sim-warning-message">
+                                The simulation is currently running. To manually adjust values, you need to turn off the simulation first.
+                            </div>
+                            <div class="sim-warning-actions">
+                                <button class="btn btn-primary" @click="stopSimAndApply()">Turn Off Simulation</button>
+                                <button class="btn btn-secondary" @click="cancelDialog()">Cancel</button>
+                            </div>
                         </div>
                     </div>
                 </template>
