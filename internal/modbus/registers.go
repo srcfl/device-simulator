@@ -94,7 +94,7 @@ var RegisterDefinitions = []RegisterDef{
 	{Address: 70, Name: "SDM630 Frequency", Description: "Frequency", Unit: "Hz", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
 	{Address: 72, Name: "SDM630 Import Energy", Description: "Total Import Energy", Unit: "kWh", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
 	{Address: 74, Name: "SDM630 Export Energy", Description: "Total Export Energy", Unit: "kWh", Category: "meter", DataType: F32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: false},
-	{Address: 64513, Name: "SDM630 Serial", Description: "SDM630 serial number", Unit: "", Category: "meter", DataType: U32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 64512, Name: "SDM630 Serial", Description: "SDM630 serial number (0xFC00)", Unit: "", Category: "meter", DataType: U32, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
 
 	// Fronius Registers (SunSpec-style)
 	// Gateway reads at 40074 (firmware's 40073 + 1), offset calc uses 40073
@@ -279,7 +279,7 @@ func (def *RegisterDef) ToPayload(registers []uint16) (*RegisterPayload, error) 
 }
 
 // SetSerialNumber encodes a serial number into registers at address 4990
-// Also writes to SDM630 register 64513 and Fronius register 40052
+// Also writes to SDM630 register 64512 (0xFC00) and Fronius register 40053
 func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) {
 	// Sungrow-style: Pad or truncate to 20 characters (10 registers * 2 bytes)
 	padded := serial
@@ -297,7 +297,7 @@ func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) 
 
 	setFunc(4990, registers)
 
-	// SDM630: Write numeric serial to register 64513 (U32, Big Endian)
+	// SDM630: Write numeric serial to register 64512/0xFC00 (U32, Big Endian)
 	var numericSerial uint32 = 1000000
 	for i, c := range serial {
 		numericSerial += uint32(c) * uint32(i+1) * 7
@@ -306,7 +306,7 @@ func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) 
 		uint16(numericSerial >> 16),
 		uint16(numericSerial & 0xFFFF),
 	}
-	setFunc(64513, sdm630Regs)
+	setFunc(64512, sdm630Regs)
 
 	// Fronius: Write string serial to register 40053 (16 registers = 32 bytes)
 	// Note: +1 offset due to Modbus addressing convention
