@@ -77,6 +77,59 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        // Meter serial validation (must be numeric U32: 0-4294967295)
+        validateMeterSerial(event) {
+            let value = event.target.value;
+            // Remove non-numeric characters
+            value = value.replace(/[^0-9]/g, '');
+            // Clamp to U32 max
+            if (value && parseInt(value) > 4294967295) {
+                value = '4294967295';
+            }
+            this.localSerial = value;
+            event.target.value = value;
+        },
+
+        async onMeterSerialBlur() {
+            this.editingSerial = false;
+            const storeSerial = Alpine.store('simulator').data?.serial || '';
+            let serial = this.localSerial.toString().trim();
+
+            // Ensure it's a valid number
+            if (serial && !/^\d+$/.test(serial)) {
+                // Convert legacy string to numeric using simple hash
+                serial = this.stringToMeterSerial(serial);
+            }
+
+            // Clamp to U32 range
+            if (serial) {
+                const num = parseInt(serial);
+                if (isNaN(num) || num < 0) {
+                    serial = '0';
+                } else if (num > 4294967295) {
+                    serial = '4294967295';
+                }
+            }
+
+            this.localSerial = serial;
+
+            if (serial !== storeSerial && serial) {
+                await Alpine.store('simulator').updateConfig({
+                    serial: serial,
+                    slave_id: this.localSlaveId
+                });
+            }
+        },
+
+        // Convert legacy string serial to numeric for meters
+        stringToMeterSerial(str) {
+            let hash = 1000000;
+            for (let i = 0; i < str.length; i++) {
+                hash += str.charCodeAt(i) * (i + 1) * 7;
+            }
+            return String(hash % 4294967296);
+        },
+
         // Slave ID field handlers
         onSlaveIdFocus() {
             this.editingSlaveId = true;

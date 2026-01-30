@@ -298,9 +298,16 @@ func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) 
 	setFunc(4990, registers)
 
 	// SDM630: Write numeric serial to register 64512/0xFC00 (U32, Big Endian)
-	var numericSerial uint32 = 1000000
-	for i, c := range serial {
-		numericSerial += uint32(c) * uint32(i+1) * 7
+	// If serial is numeric, use it directly; otherwise hash the string
+	var numericSerial uint32
+	if n, err := parseUint32(serial); err == nil {
+		numericSerial = n
+	} else {
+		// Fallback: hash string to numeric value
+		numericSerial = 1000000
+		for i, c := range serial {
+			numericSerial += uint32(c) * uint32(i+1) * 7
+		}
 	}
 	sdm630Regs := []uint16{
 		uint16(numericSerial >> 16),
@@ -322,6 +329,20 @@ func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) 
 		froniusRegs[i] = uint16(froniusPadded[i*2])<<8 | uint16(froniusPadded[i*2+1])
 	}
 	setFunc(40053, froniusRegs)
+}
+
+// parseUint32 parses a string as uint32, returning error if not valid
+func parseUint32(s string) (uint32, error) {
+	// Try parsing as decimal
+	var n uint64
+	_, err := fmt.Sscanf(s, "%d", &n)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0xFFFFFFFF {
+		return 0, fmt.Errorf("value exceeds uint32 max")
+	}
+	return uint32(n), nil
 }
 
 // Helper for reading bytes as big-endian uint16

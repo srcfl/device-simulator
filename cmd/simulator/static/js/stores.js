@@ -283,14 +283,35 @@ const storage = {
     load() {
         try {
             const data = localStorage.getItem(STORAGE_KEY);
-            if (!data) return { version: 1, simulators: [], sites: [] };
+            if (!data) return { version: 2, simulators: [], sites: [] };
             const parsed = JSON.parse(data);
             // Ensure sites array exists (migration)
             if (!parsed.sites) parsed.sites = [];
+            // Migrate energy meter serials from string to numeric (v2)
+            if (!parsed.version || parsed.version < 2) {
+                parsed.simulators = parsed.simulators.map(sim => {
+                    if (sim.category === 'energy_meter' && sim.serial && !/^\d+$/.test(sim.serial)) {
+                        // Convert string serial to numeric using hash
+                        sim.serial = this.stringToMeterSerial(sim.serial);
+                    }
+                    return sim;
+                });
+                parsed.version = 2;
+                this.save(parsed);
+            }
             return parsed;
         } catch (e) {
-            return { version: 1, simulators: [], sites: [] };
+            return { version: 2, simulators: [], sites: [] };
         }
+    },
+
+    // Convert legacy string serial to numeric for energy meters (U32)
+    stringToMeterSerial(str) {
+        let hash = 1000000;
+        for (let i = 0; i < str.length; i++) {
+            hash += str.charCodeAt(i) * (i + 1) * 7;
+        }
+        return String(hash % 4294967296);
     },
 
     save(configs) {

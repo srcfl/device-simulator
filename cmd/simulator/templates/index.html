@@ -524,12 +524,16 @@
                 <div class="section">
                     <div class="config-row" x-data="configRow()">
                         <div class="config-item">
-                            <label>Serial</label>
+                            <label>Serial (U32)</label>
                             <template x-if="!$store.simulator.data?.running">
-                                <input type="text"
+                                <input type="number"
+                                       min="0"
+                                       max="4294967295"
                                        x-model="localSerial"
                                        @focus="onSerialFocus()"
-                                       @blur="onSerialBlur()">
+                                       @blur="onMeterSerialBlur()"
+                                       @input="validateMeterSerial($event)"
+                                       placeholder="0-4294967295">
                             </template>
                             <template x-if="$store.simulator.data?.running">
                                 <div class="value readonly" x-text="localSerial"></div>

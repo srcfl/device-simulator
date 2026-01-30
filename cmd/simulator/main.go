@@ -277,7 +277,8 @@ func createSimulator(simType string) (*Simulator, error) {
 	case "modbus":
 		var serial string
 		if category == "energy_meter" {
-			serial = fmt.Sprintf("MTRSIM%02d", id)
+			// Use numeric serial for meters (fits in SDM630's U32 register at 0xFC00)
+			serial = fmt.Sprintf("%d", 1000000+id)
 		} else {
 			serial = fmt.Sprintf("INVSIM%02d", id)
 		}
