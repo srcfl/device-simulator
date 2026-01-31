@@ -2,32 +2,63 @@
 
 > *"In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move."* - But Modbus? Modbus is mostly harmless.
 
-A **Mostly Harmless** Modbus TCP device simulator for testing solar inverters, batteries, and energy systems. Don't Panic - it's just registers.
+A **Mostly Harmless** multi-protocol device simulator for testing solar inverters, batteries, EV chargers, and energy systems. Don't Panic - it's just registers.
 
 ## Quick Start
+
+### Option 1: Desktop App (Recommended)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/srcfl/device-simulator/releases):
+
+| Platform | Download |
+|----------|----------|
+| macOS | `Device-Simulator-macos.zip` |
+| Linux | `Device-Simulator-linux-amd64.tar.gz` |
+| Windows | `Device-Simulator-windows-amd64.zip` |
+
+**macOS:** Unzip, drag to Applications, right-click → Open (first time only)
+
+**Linux:**
+```bash
+tar -xzf Device-Simulator-linux-amd64.tar.gz
+sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37  # Debian/Ubuntu
+./linux/device-simulator.sh
+```
+
+**Windows:** Unzip and run `device-simulator.exe --desktop`
+
+The app auto-updates when new versions are available.
+
+### Option 2: Docker (Development/Server)
 
 ```bash
 # The Answer to Everything (well, at least to running this)
 docker compose up --build
 ```
 
-**That's it.** One container. Ten simulators. Infinite improbability.
+**That's it.** One container. Dynamic simulators. Infinite improbability.
 
-| Port | What's There |
-|------|--------------|
-| 80 | Web Dashboard (your towel is in here) |
-| 5000-5009 | Modbus TCP servers (one per simulator) |
+| Port | Docker | Desktop App | What's There |
+|------|--------|-------------|--------------|
+| 80 | ✓ | - | Web Dashboard (Docker mode) |
+| 8762 | - | ✓ | Web Dashboard (Desktop mode) |
+| 5000+ | ✓ | ✓ | Modbus TCP servers |
+| 1883+ | ✓ | ✓ | MQTT brokers (V2X chargers) |
+| 9000+ | ✓ | ✓ | OCPP WebSocket servers |
 
-Open http://localhost and start exploring the galaxy of registers.
+- **Docker:** Open http://localhost
+- **Desktop:** The app opens automatically with a native window
 
 ## Features
 
-- **10 Simulator Instances** - Each with its own Modbus port (5000-5009)
-- **Unified Dashboard** - Single web interface to rule them all
+- **Multi-Protocol Support** - Modbus TCP, MQTT, and OCPP in one app
+- **Desktop & Server Modes** - Native app or Docker container
+- **Auto-Updates** - Desktop app updates itself from GitHub Releases
+- **Dynamic Simulators** - Create/delete simulators on the fly
+- **Site Management** - Group simulators into sites with energy meters
 - **Device Profiles** - Sungrow, SolarEdge, Fronius, Huawei, and more
 - **Time Acceleration** - Compress 24 hours into minutes for testing
-- **Modbus Logging** - See every read/write operation in real-time
-- **Configurable Slave IDs** - Because sometimes you need unit ID 42
+- **Real-time Logging** - See every protocol operation as it happens
 
 ## Supported Profiles
 
@@ -85,29 +116,86 @@ modpoll -m tcp -a 1 -r 5000 -c 10 localhost:5002
 
 ## Development
 
-```bash
-# Run locally (no Docker)
-go run ./cmd/simulator
+### Using Docker (Recommended for Development)
 
+```bash
+# Start development server
+make up
+# or
+docker compose up --build
+
+# View logs
+make logs
+
+# Stop
+make down
+```
+
+Access the dashboard at http://localhost
+
+### Building Desktop App Locally
+
+**macOS:**
+```bash
+make build-macos
+make run-macos  # Build and launch
+```
+
+**Linux (via Docker):**
+```bash
+make build-linux
+```
+
+**All Platforms:**
+```bash
 # Run tests
 go test ./...
 
-# Build
-go build -o simulator ./cmd/simulator
+# Build server-only binary (no GUI)
+make build-linux-server
+make build-windows-server
 ```
+
+### Makefile Targets
+
+```bash
+make help  # Show all available targets
+```
+
+| Target | Description |
+|--------|-------------|
+| `make up` | Start Docker development server |
+| `make build-macos` | Build macOS desktop app |
+| `make build-linux` | Build Linux desktop app (via Docker) |
+| `make run-macos` | Build and run macOS app |
+| `make test` | Run Go tests |
+| `make clean` | Remove build artifacts |
 
 ## Architecture
 
 ```
 device-simulator (single process)
-├── HTTP Server :8080 (unified dashboard)
-├── Simulator 0: Modbus :5000
-├── Simulator 1: Modbus :5001
-├── ...
-└── Simulator 9: Modbus :5009
+├── Wails Desktop Window (desktop mode) or HTTP-only (Docker mode)
+├── HTTP API Server (:80 Docker, :8762 Desktop)
+├── Modbus TCP Servers (:5000+)
+├── MQTT Brokers (:1883+)
+└── OCPP WebSocket Servers (:9000+)
 ```
 
-The simulator is a single Go application that runs all instances in one process. Much more efficient than running separate containers - and unlike the Heart of Gold, it doesn't require an Infinite Improbability Drive.
+**Dual-Mode Operation:**
+- **Desktop Mode** (`--desktop`): Native window via Wails + HTTP API
+- **Server Mode** (default): HTTP-only, ideal for Docker/headless
+
+The simulator is a single Go application that runs all protocol servers in one process. Much more efficient than running separate containers - and unlike the Heart of Gold, it doesn't require an Infinite Improbability Drive.
+
+## CI/CD
+
+Every push to `main` triggers a GitHub Actions workflow that:
+1. Builds desktop apps for macOS, Linux, and Windows
+2. Creates a GitHub Release with semantic versioning (v0.1.X)
+3. Uploads all platform binaries as release assets
+
+The desktop app checks for updates on startup and can self-update.
 
 ## Why "Mostly Harmless"?
 
