@@ -69,12 +69,12 @@ jobs:
             fi
 
             # Extract commit body (everything after first line, trimmed)
-            BODY=$(echo "$COMMIT_MSG" | tail -n +2 | sed '/./,$!d' | sed -e :a -e '/^\s*$/d;N;ba')
-            # Escape for GitHub Actions output
-            BODY="${BODY//'%'/'%25'}"
-            BODY="${BODY//$'\n'/'%0A'}"
-            BODY="${BODY//$'\r'/'%0D'}"
-            echo "release_body=$BODY" >> $GITHUB_OUTPUT
+            # Use heredoc for multiline output (GitHub Actions recommended approach)
+            {
+              echo 'release_body<<EOF'
+              echo "$COMMIT_MSG" | tail -n +2 | sed '/./,$!d' | sed -e :a -e '/^\s*$/d;N;ba' | grep -v "^Co-Authored-By:"
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
           fi
 
       - name: Calculate new version
@@ -312,7 +312,7 @@ jobs:
             artifacts/Device-Simulator-linux/Device-Simulator-linux-amd64.tar.gz
             artifacts/Device-Simulator-windows/Device-Simulator-windows-amd64.zip
           body: |
-            ## ${{ needs.check-release.outputs.release_title }}
+            ## In this version:
 
             ${{ needs.check-release.outputs.release_body }}
 
