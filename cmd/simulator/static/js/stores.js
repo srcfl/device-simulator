@@ -1,14 +1,44 @@
 // Alpine Stores - Must load before Alpine.js (not a module)
 
-// API Layer
+// Wails detection - window.go is set when running in Wails desktop mode
+const isWails = typeof window.go !== 'undefined';
+
+// Wails event listeners for real-time updates (replaces polling in desktop mode)
+if (isWails && window.runtime) {
+    // Listen for simulator updates
+    window.runtime.EventsOn('simulator:updated', () => {
+        if (typeof Alpine !== 'undefined' && Alpine.store('app')) {
+            Alpine.store('app').loadSimulators();
+        }
+    });
+
+    // Listen for site updates
+    window.runtime.EventsOn('site:updated', () => {
+        if (typeof Alpine !== 'undefined' && Alpine.store('site')) {
+            Alpine.store('site').loadSites();
+            if (Alpine.store('site').selectedId) {
+                Alpine.store('site').loadSiteData();
+            }
+        }
+    });
+}
+
+// Wails API wrapper - uses bindings when available, falls back to fetch
 const api = {
     async getSimulators() {
+        if (isWails) {
+            const data = await window.go.main.App.GetSimulators({});
+            return Array.isArray(data) ? data : [];
+        }
         const resp = await fetch('/api/simulators');
         const data = await resp.json();
         return Array.isArray(data) ? data : [];
     },
 
     async createSimulator(type) {
+        if (isWails) {
+            return await window.go.main.App.CreateSimulator(type);
+        }
         const resp = await fetch('/api/simulators', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -22,6 +52,10 @@ const api = {
     },
 
     async deleteSimulator(id) {
+        if (isWails) {
+            await window.go.main.App.DeleteSimulator(id);
+            return;
+        }
         const resp = await fetch(`/api/simulators/${id}`, { method: 'DELETE' });
         if (!resp.ok) {
             const text = await resp.text();
@@ -30,11 +64,18 @@ const api = {
     },
 
     async getSimulator(id) {
+        if (isWails) {
+            return await window.go.main.App.GetSimulator(id);
+        }
         const resp = await fetch(`/api/simulators/${id}`);
         return resp.json();
     },
 
     async updateConfig(id, config) {
+        if (isWails) {
+            await window.go.main.App.UpdateConfig(id, config);
+            return;
+        }
         await fetch(`/api/simulators/${id}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -43,11 +84,18 @@ const api = {
     },
 
     async getRegisters(id) {
+        if (isWails) {
+            return await window.go.main.App.GetRegisters(id);
+        }
         const resp = await fetch(`/api/simulators/${id}/registers`);
         return resp.json();
     },
 
     async writeRegister(id, address, value) {
+        if (isWails) {
+            await window.go.main.App.WriteRegister(id, address, value);
+            return;
+        }
         await fetch(`/api/simulators/${id}/registers/${address}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -56,33 +104,58 @@ const api = {
     },
 
     async getLogs(id, limit = 50) {
+        if (isWails) {
+            return await window.go.main.App.GetLogs(id, limit);
+        }
         const resp = await fetch(`/api/simulators/${id}/logs?limit=${limit}`);
         return resp.json();
     },
 
     async getProfiles(id) {
+        if (isWails) {
+            return await window.go.main.App.GetProfiles(id);
+        }
         const resp = await fetch(`/api/simulators/${id}/profiles`);
         return resp.json();
     },
 
     async applyProfile(id, name) {
+        if (isWails) {
+            await window.go.main.App.ApplyProfile(id, name);
+            return;
+        }
         await fetch(`/api/simulators/${id}/profiles/${name}/apply`, { method: 'POST' });
     },
 
     async getAutomation(id) {
+        if (isWails) {
+            return await window.go.main.App.GetAutomation(id);
+        }
         const resp = await fetch(`/api/simulators/${id}/automation`);
         return resp.json();
     },
 
     async startAutomation(id) {
+        if (isWails) {
+            await window.go.main.App.StartAutomation(id);
+            return;
+        }
         await fetch(`/api/simulators/${id}/automation/start`, { method: 'POST' });
     },
 
     async stopAutomation(id) {
+        if (isWails) {
+            await window.go.main.App.StopAutomation(id);
+            return;
+        }
         await fetch(`/api/simulators/${id}/automation/stop`, { method: 'POST' });
     },
 
     async updateAutomationConfig(id, config) {
+        if (isWails) {
+            await window.go.main.App.UpdateAutomationConfig(id, config);
+            return;
+        }
         await fetch(`/api/simulators/${id}/automation/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -92,14 +165,26 @@ const api = {
 
     // New emulator/simulation endpoints
     async startEmulator(id) {
+        if (isWails) {
+            await window.go.main.App.StartEmulator(id);
+            return;
+        }
         await fetch(`/api/simulators/${id}/start`, { method: 'POST' });
     },
 
     async stopEmulator(id) {
+        if (isWails) {
+            await window.go.main.App.StopEmulator(id);
+            return;
+        }
         await fetch(`/api/simulators/${id}/stop`, { method: 'POST' });
     },
 
     async startSimulation(id) {
+        if (isWails) {
+            await window.go.main.App.StartSimulation(id);
+            return;
+        }
         const resp = await fetch(`/api/simulators/${id}/simulation/start`, { method: 'POST' });
         if (!resp.ok) {
             const text = await resp.text();
@@ -108,10 +193,18 @@ const api = {
     },
 
     async stopSimulation(id) {
+        if (isWails) {
+            await window.go.main.App.StopSimulation(id);
+            return;
+        }
         await fetch(`/api/simulators/${id}/simulation/stop`, { method: 'POST' });
     },
 
     async setState(id, key, value) {
+        if (isWails) {
+            await window.go.main.App.SetState(id, key, value);
+            return;
+        }
         await fetch(`/api/simulators/${id}/state`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -120,11 +213,18 @@ const api = {
     },
 
     async getClients(id) {
+        if (isWails) {
+            return await window.go.main.App.GetClients(id);
+        }
         const resp = await fetch(`/api/simulators/${id}/clients`);
         return resp.json();
     },
 
     async wakeUp(id, wake) {
+        if (isWails) {
+            await window.go.main.App.WakeUp(id, wake);
+            return;
+        }
         await fetch(`/api/simulators/${id}/wakeup`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -133,6 +233,10 @@ const api = {
     },
 
     async setPower(id, power) {
+        if (isWails) {
+            await window.go.main.App.SetPower(id, power);
+            return;
+        }
         await fetch(`/api/simulators/${id}/power`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -141,11 +245,18 @@ const api = {
     },
 
     async getDebugMeterValues(id) {
+        if (isWails) {
+            return await window.go.main.App.GetDebugMeterValues(id);
+        }
         const resp = await fetch(`/api/simulators/${id}/debug/meter-values`);
         return resp.json();
     },
 
     async reset(id) {
+        if (isWails) {
+            await window.go.main.App.Reset(id);
+            return;
+        }
         const resp = await fetch(`/api/simulators/${id}/reset`, { method: 'POST' });
         if (!resp.ok) {
             const text = await resp.text();
@@ -157,12 +268,19 @@ const api = {
 // Site API Layer
 const siteApi = {
     async getSites() {
+        if (isWails) {
+            const data = await window.go.main.App.GetSites();
+            return Array.isArray(data) ? data : [];
+        }
         const resp = await fetch('/api/sites');
         const data = await resp.json();
         return Array.isArray(data) ? data : [];
     },
 
     async createSite(name, meterId, simulatorIds, baseLoadW) {
+        if (isWails) {
+            return await window.go.main.App.CreateSite(name, meterId, simulatorIds || [], baseLoadW);
+        }
         const resp = await fetch('/api/sites', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -181,6 +299,10 @@ const siteApi = {
     },
 
     async deleteSite(id) {
+        if (isWails) {
+            await window.go.main.App.DeleteSite(id);
+            return;
+        }
         const resp = await fetch(`/api/sites/${id}`, { method: 'DELETE' });
         if (!resp.ok) {
             const text = await resp.text();
@@ -189,11 +311,18 @@ const siteApi = {
     },
 
     async getSite(id) {
+        if (isWails) {
+            return await window.go.main.App.GetSite(id);
+        }
         const resp = await fetch(`/api/sites/${id}`);
         return resp.json();
     },
 
     async updateSiteConfig(id, config) {
+        if (isWails) {
+            await window.go.main.App.UpdateSiteConfig(id, config);
+            return;
+        }
         await fetch(`/api/sites/${id}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -202,6 +331,10 @@ const siteApi = {
     },
 
     async setSiteMeter(id, meterId) {
+        if (isWails) {
+            await window.go.main.App.SetSiteMeter(id, meterId);
+            return;
+        }
         await fetch(`/api/sites/${id}/meter`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -210,6 +343,10 @@ const siteApi = {
     },
 
     async addSimulatorToSite(siteId, simulatorId) {
+        if (isWails) {
+            await window.go.main.App.AddSimulatorToSite(siteId, simulatorId);
+            return;
+        }
         const resp = await fetch(`/api/sites/${siteId}/simulators`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -222,6 +359,10 @@ const siteApi = {
     },
 
     async removeSimulatorFromSite(siteId, simulatorId) {
+        if (isWails) {
+            await window.go.main.App.RemoveSimulatorFromSite(siteId, simulatorId);
+            return;
+        }
         const resp = await fetch(`/api/sites/${siteId}/simulators/${simulatorId}`, {
             method: 'DELETE'
         });
@@ -232,6 +373,10 @@ const siteApi = {
     },
 
     async enableSite(id) {
+        if (isWails) {
+            await window.go.main.App.EnableSite(id);
+            return;
+        }
         const resp = await fetch(`/api/sites/${id}/enable`, { method: 'POST' });
         if (!resp.ok) {
             const text = await resp.text();
@@ -240,10 +385,17 @@ const siteApi = {
     },
 
     async disableSite(id) {
+        if (isWails) {
+            await window.go.main.App.DisableSite(id);
+            return;
+        }
         await fetch(`/api/sites/${id}/disable`, { method: 'POST' });
     },
 
     async setP1Mode(id, mode) {
+        if (isWails) {
+            return await window.go.main.App.SetP1Mode(id, mode);
+        }
         const resp = await fetch(`/api/sites/${id}/p1-mode`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -257,12 +409,19 @@ const siteApi = {
     },
 
     async getVirtualDevices(siteId) {
+        if (isWails) {
+            const data = await window.go.main.App.GetVirtualDevices(siteId);
+            return data.virtual_devices || [];
+        }
         const resp = await fetch(`/api/sites/${siteId}/virtual-devices`);
         const data = await resp.json();
         return data.virtual_devices || [];
     },
 
     async writeVirtualDevice(siteId, deviceType, data) {
+        if (isWails) {
+            return await window.go.main.App.WriteVirtualDevice(siteId, deviceType, data);
+        }
         const resp = await fetch(`/api/sites/${siteId}/virtual-devices/${deviceType}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -24,6 +25,9 @@ import (
 	"github.com/srcfl/device-simulator/internal/mqtt"
 	"github.com/srcfl/device-simulator/internal/ocpp"
 	"github.com/srcfl/device-simulator/internal/profiles"
+	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
 //go:embed templates/* static/*
@@ -183,7 +187,8 @@ func main() {
 	modbusBasePort := flag.Int("modbus-base", 5000, "Base port for Modbus servers")
 	mqttBasePort := flag.Int("mqtt-base", 1883, "Base port for MQTT brokers")
 	ocppBasePort := flag.Int("ocpp-base", 9000, "Base port for OCPP servers")
-	httpPort := flag.Int("http", 8080, "HTTP server port")
+	httpPort := flag.Int("http", 8762, "HTTP server port")
+	desktopMode := flag.Bool("desktop", false, "Run in desktop mode (Wails)")
 	flag.Parse()
 
 	// Environment variable overrides
@@ -207,9 +212,12 @@ func main() {
 			*httpPort = n
 		}
 	}
+	// WAILS_DESKTOP env var overrides flag
+	if os.Getenv("WAILS_DESKTOP") == "1" {
+		*desktopMode = true
+	}
 
 	log.Printf("Starting Device Simulator")
-	log.Printf("HTTP port: %d", *httpPort)
 	log.Printf("Port ranges: Modbus %d+, MQTT %d+, OCPP %d+", *modbusBasePort, *mqttBasePort, *ocppBasePort)
 
 	// Initialize port allocator
@@ -219,8 +227,21 @@ func main() {
 	simulators = make([]*Simulator, 0)
 	nextSimulatorID = 1
 
+	if *desktopMode {
+		// Desktop mode: Run Wails application
+		log.Println("Running in desktop mode")
+		runWailsApp(*httpPort)
+	} else {
+		// Server mode: Run HTTP server
+		log.Printf("HTTP port: %d", *httpPort)
+		runHTTPServer(*httpPort)
+	}
+}
+
+// runHTTPServer runs the HTTP server mode (for Docker/browser)
+func runHTTPServer(httpPort int) {
 	// Start HTTP server
-	go startHTTPServer(*httpPort)
+	go startHTTPServer(httpPort)
 
 	log.Println("Ready. Use the web UI to create simulators.")
 
@@ -235,6 +256,100 @@ func main() {
 		stopSimulatorServer(sim)
 	}
 	simulatorsMu.RUnlock()
+}
+
+// runWailsApp runs the Wails desktop application
+func runWailsApp(httpPort int) {
+	// Create App instance
+	app := NewApp()
+
+	// Create custom asset handler for Go templates
+	assetHandler := &templateAssetHandler{
+		staticFS: embeddedFS,
+	}
+
+	// Run Wails application
+	err := wails.Run(&options.App{
+		Title:  "Device Simulator",
+		Width:  1400,
+		Height: 900,
+		AssetServer: &assetserver.Options{
+			Handler: assetHandler,
+		},
+		OnStartup: func(ctx context.Context) {
+			// Start HTTP server after Wails is initialized (not during binding generation)
+			go startHTTPServer(httpPort)
+			app.startup(ctx)
+		},
+		Bind: []interface{}{
+			app,
+		},
+	})
+
+	if err != nil {
+		log.Fatal("Error running Wails app:", err)
+	}
+
+	// Cleanup on exit
+	log.Println("Shutting down...")
+	simulatorsMu.RLock()
+	for _, sim := range simulators {
+		stopSimulatorServer(sim)
+	}
+	simulatorsMu.RUnlock()
+}
+
+// templateAssetHandler serves the embedded frontend assets with template support
+type templateAssetHandler struct {
+	staticFS embed.FS
+}
+
+func (h *templateAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	if path == "/" || path == "" {
+		path = "/index.html"
+	}
+
+	// Handle index.html with template rendering
+	if path == "/index.html" {
+		tmpl, err := template.ParseFS(h.staticFS, "templates/index.html")
+		if err != nil {
+			http.Error(w, "Template error", http.StatusInternalServerError)
+			log.Printf("Template error: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		tmpl.Execute(w, nil)
+		return
+	}
+
+	// Handle static files
+	if strings.HasPrefix(path, "/static/") {
+		staticPath := strings.TrimPrefix(path, "/")
+		content, err := h.staticFS.ReadFile(staticPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Set content type based on file extension
+		switch {
+		case strings.HasSuffix(path, ".css"):
+			w.Header().Set("Content-Type", "text/css")
+		case strings.HasSuffix(path, ".js"):
+			w.Header().Set("Content-Type", "application/javascript")
+		case strings.HasSuffix(path, ".svg"):
+			w.Header().Set("Content-Type", "image/svg+xml")
+		case strings.HasSuffix(path, ".png"):
+			w.Header().Set("Content-Type", "image/png")
+		case strings.HasSuffix(path, ".ico"):
+			w.Header().Set("Content-Type", "image/x-icon")
+		}
+		w.Write(content)
+		return
+	}
+
+	http.NotFound(w, r)
 }
 
 // createSimulator creates a new simulator of the given type

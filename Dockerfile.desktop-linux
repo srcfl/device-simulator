@@ -1,0 +1,28 @@
+# Dockerfile for building Linux desktop app
+# Usage: docker build -f Dockerfile.desktop-linux -o build/linux .
+
+FROM golang:1.22 AS builder
+
+# Install Linux desktop dependencies
+RUN apt-get update && apt-get install -y \
+    libgtk-3-dev \
+    libwebkit2gtk-4.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+# Build desktop binary
+RUN CGO_ENABLED=1 go build -tags "desktop,production" -ldflags "-s -w" \
+    -o device-simulator ./cmd/simulator/
+
+# Create launcher script
+RUN echo '#!/bin/bash\nDIR="$(cd "$(dirname "$0")" && pwd)"\nexec "$DIR/device-simulator" --desktop "$@"' > device-simulator.sh \
+    && chmod +x device-simulator.sh
+
+# Output stage - extract just the binaries
+FROM scratch AS export
+COPY --from=builder /build/device-simulator /
+COPY --from=builder /build/device-simulator.sh /

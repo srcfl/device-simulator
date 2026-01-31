@@ -1,0 +1,1099 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/srcfl/device-simulator/internal/modbus"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+// App struct holds the Wails application context
+type App struct {
+	ctx context.Context
+}
+
+// NewApp creates a new App struct
+func NewApp() *App {
+	return &App{}
+}
+
+// startup is called when the app starts
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+}
+
+// SimulatorInfo represents the data returned for a simulator
+type SimulatorInfo struct {
+	ID         int                    `json:"id"`
+	Serial     string                 `json:"serial"`
+	Protocol   string                 `json:"protocol"`
+	Category   string                 `json:"category"`
+	Port       int                    `json:"port"`
+	Running    bool                   `json:"running"`
+	Automation bool                   `json:"automation"`
+	Profile    string                 `json:"profile"`
+	Extra      map[string]interface{} `json:"extra,omitempty"`
+}
+
+// SiteInfo represents the data returned for a site
+type SiteInfo struct {
+	ID           int          `json:"id"`
+	Name         string       `json:"name"`
+	MeterID      int          `json:"meter_id"`
+	SimulatorIDs []int        `json:"simulator_ids"`
+	BaseLoadW    float64      `json:"base_load_w"`
+	Enabled      bool         `json:"enabled"`
+	FuseSize     int          `json:"fuse_size"`
+	PhaseFactors PhaseFactors `json:"phase_factors"`
+	BoundMeter   bool         `json:"bound_meter"`
+}
+
+// ========== SIMULATOR METHODS ==========
+
+// GetSimulators returns all simulators with optional filters
+func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} {
+	protocolFilter := filters["protocol"]
+	categoryFilter := filters["category"]
+
+	simulatorsMu.RLock()
+	defer simulatorsMu.RUnlock()
+
+	var list []map[string]interface{}
+	for _, sim := range simulators {
+		if protocolFilter != "" && sim.Protocol != protocolFilter {
+			continue
+		}
+		if categoryFilter != "" && sim.Category != categoryFilter {
+			continue
+		}
+
+		sim.mu.RLock()
+		entry := map[string]interface{}{
+			"id":         sim.ID,
+			"serial":     sim.Serial,
+			"protocol":   sim.Protocol,
+			"category":   sim.Category,
+			"port":       sim.Port,
+			"running":    sim.Running,
+			"automation": sim.Automation.Enabled,
+			"profile":    sim.ProfilesManager.GetActiveName(),
+		}
+
+		switch sim.Protocol {
+		case "modbus":
+			entry["slave_id"] = sim.SlaveID
+			if sim.Category == "energy_meter" {
+				entry["meter"] = getRegisterValue(sim.Server, 5600)
+			} else {
+				entry["pv_power"] = getRegisterValue(sim.Server, 5016)
+				entry["soc"] = getRegisterValue(sim.Server, 13022)
+				entry["load"] = getRegisterValue(sim.Server, 13007)
+				entry["meter"] = getRegisterValue(sim.Server, 5600)
+			}
+		case "mqtt":
+			state := sim.MQTTServer.GetState()
+			entry["session_state"] = state["sessionState"]
+			entry["power_ac"] = state["powerAc"]
+			entry["soc"] = state["soc"]
+			entry["ev_connected"] = state["evConnected"]
+		case "ocpp":
+			state := sim.OCPPServer.GetState()
+			entry["connected"] = state["connected"]
+			entry["connectors"] = state["connectors"]
+			entry["ev_connected"] = state["evConnected"]
+			entry["total_power"] = state["totalPower"]
+			entry["has_active_transaction"] = state["hasActiveTransaction"]
+			entry["max_power_kw"] = state["maxPowerKW"]
+		}
+		sim.mu.RUnlock()
+		list = append(list, entry)
+	}
+
+	if list == nil {
+		list = []map[string]interface{}{}
+	}
+	return list
+}
+
+// CreateSimulator creates a new simulator of the given type
+func (a *App) CreateSimulator(simType string) (map[string]interface{}, error) {
+	sim, err := createSimulator(simType)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]interface{}{
+		"id":       sim.ID,
+		"serial":   sim.Serial,
+		"protocol": sim.Protocol,
+		"category": sim.Category,
+		"port":     sim.Port,
+		"running":  sim.Running,
+	}
+
+	// Emit event for UI update
+	a.emitSimulatorUpdate()
+
+	return result, nil
+}
+
+// DeleteSimulator deletes a simulator by ID
+func (a *App) DeleteSimulator(id int) error {
+	err := deleteSimulator(id)
+	if err == nil {
+		a.emitSimulatorUpdate()
+	}
+	return err
+}
+
+// GetSimulator returns detailed info for a single simulator
+func (a *App) GetSimulator(id int) (map[string]interface{}, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+
+	result := map[string]interface{}{
+		"id":       sim.ID,
+		"serial":   sim.Serial,
+		"protocol": sim.Protocol,
+		"category": sim.Category,
+		"port":     sim.Port,
+		"running":  sim.Running,
+		"slave_id": sim.SlaveID,
+		"profile":  sim.ProfilesManager.GetActiveName(),
+		"automation": map[string]interface{}{
+			"enabled":         sim.Automation.Enabled,
+			"time_multiplier": sim.Automation.TimeMultiplier,
+			"simulated_time":  sim.Automation.SimulatedTime.Format("2006-01-02 15:04:05"),
+			"scenario":        sim.Automation.Scenario,
+		},
+	}
+
+	// Protocol-specific state
+	switch sim.Protocol {
+	case "mqtt":
+		result["state"] = sim.MQTTServer.GetState()
+	case "ocpp":
+		state := sim.OCPPServer.GetState()
+		result["state"] = state
+		result["ocpp_url"] = sim.OCPPServer.GetOCPPURL()
+	}
+
+	return result, nil
+}
+
+// UpdateConfig updates simulator configuration
+func (a *App) UpdateConfig(id int, config map[string]interface{}) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	if serial, ok := config["serial"].(string); ok && serial != "" {
+		sim.Serial = serial
+		if sim.Server != nil {
+			sim.Server.SetSerialNumber(serial)
+		}
+	}
+	if slaveID, ok := config["slave_id"].(float64); ok {
+		sim.SlaveID = uint8(slaveID)
+	}
+	if ocppURL, ok := config["ocpp_url"].(string); ok && sim.OCPPServer != nil {
+		sim.OCPPServer.SetOCPPURL(ocppURL)
+	}
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// GetRegisters returns all registers for a Modbus simulator
+func (a *App) GetRegisters(id int) ([]*modbus.RegisterPayload, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	if sim.Protocol != "modbus" {
+		return nil, fmt.Errorf("simulator is not a Modbus device")
+	}
+
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+
+	// Get active profile for category filtering
+	activeProfile := sim.ProfilesManager.GetActive()
+	var activeCategories []string
+	if activeProfile != nil {
+		activeCategories = activeProfile.Categories
+	}
+
+	var payloads []*modbus.RegisterPayload
+	for _, def := range modbus.RegisterDefinitions {
+		// Filter by profile categories if set
+		if len(activeCategories) > 0 && !containsCategory(activeCategories, def.Category) {
+			continue
+		}
+
+		var regs []uint16
+		if def.UseHolding {
+			regs = sim.Server.GetHoldingRegisters(def.Address, def.Words)
+		} else {
+			regs = sim.Server.GetInputRegisters(def.Address, def.Words)
+		}
+
+		payload, err := def.ToPayload(regs)
+		if err != nil {
+			continue
+		}
+		payloads = append(payloads, payload)
+	}
+
+	return payloads, nil
+}
+
+// WriteRegister writes a value to a specific register
+func (a *App) WriteRegister(id int, address uint16, value float64) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	if sim.Protocol != "modbus" {
+		return fmt.Errorf("simulator is not a Modbus device")
+	}
+
+	def := modbus.RegisterLookup[address]
+	if def == nil {
+		return fmt.Errorf("register %d not found", address)
+	}
+
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	return sim.Server.WriteRegisterValue(def, value)
+}
+
+// GetLogs returns operation logs for a simulator
+func (a *App) GetLogs(id int, limit int) (map[string]interface{}, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+
+	var logs interface{}
+
+	switch sim.Protocol {
+	case "modbus":
+		logs = sim.Server.GetLogs(limit)
+	case "mqtt":
+		logs = sim.MQTTServer.GetLogs(limit)
+	case "ocpp":
+		logs = sim.OCPPServer.GetLogs(limit)
+	}
+
+	return map[string]interface{}{"logs": logs}, nil
+}
+
+// GetProfiles returns available profiles for a simulator
+func (a *App) GetProfiles(id int) (map[string]interface{}, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+
+	profiles := sim.ProfilesManager.ListByProtocol(sim.Protocol)
+	active := sim.ProfilesManager.GetActiveName()
+
+	return map[string]interface{}{
+		"profiles": profiles,
+		"active":   active,
+	}, nil
+}
+
+// ApplyProfile applies a profile to a simulator
+func (a *App) ApplyProfile(id int, name string) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	profile := sim.ProfilesManager.Get(name)
+	if profile == nil {
+		return fmt.Errorf("profile %s not found", name)
+	}
+
+	sim.ProfilesManager.SetActive(name)
+
+	// Apply profile defaults based on protocol
+	if sim.Protocol == "modbus" && sim.Server != nil {
+		for addr, value := range profile.Defaults {
+			def := modbus.RegisterLookup[addr]
+			if def != nil {
+				sim.Server.WriteRegisterValue(def, value)
+			}
+		}
+	}
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// GetAutomation returns automation status for a simulator
+func (a *App) GetAutomation(id int) (map[string]interface{}, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.Automation.mu.RLock()
+	defer sim.Automation.mu.RUnlock()
+
+	return map[string]interface{}{
+		"enabled":         sim.Automation.Enabled,
+		"time_multiplier": sim.Automation.TimeMultiplier,
+		"simulated_time":  sim.Automation.SimulatedTime.Format("2006-01-02 15:04:05"),
+		"profile":         sim.Automation.Profile,
+		"scenario":        sim.Automation.Scenario,
+	}, nil
+}
+
+// StartAutomation starts the automation for a simulator
+func (a *App) StartAutomation(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	// Start the server if not running
+	if !sim.Running {
+		if err := startSimulatorServer(sim); err != nil {
+			return err
+		}
+	}
+
+	// Start automation
+	sim.Automation.mu.Lock()
+	if !sim.Automation.Enabled {
+		sim.Automation.Enabled = true
+		sim.Automation.stopChan = make(chan struct{})
+		sim.Automation.SimulatedTime = time.Now()
+		go runAutomationLoop(sim)
+	}
+	sim.Automation.mu.Unlock()
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// StopAutomation stops the automation for a simulator
+func (a *App) StopAutomation(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	// Stop automation first
+	sim.Automation.mu.Lock()
+	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
+		close(sim.Automation.stopChan)
+		sim.Automation.Enabled = false
+	}
+	sim.Automation.mu.Unlock()
+
+	// Then stop the server
+	stopSimulatorServer(sim)
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// UpdateAutomationConfig updates automation configuration
+func (a *App) UpdateAutomationConfig(id int, config map[string]interface{}) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.Automation.mu.Lock()
+	defer sim.Automation.mu.Unlock()
+
+	if mult, ok := config["time_multiplier"].(float64); ok {
+		sim.Automation.TimeMultiplier = mult
+	}
+	if scenario, ok := config["scenario"].(string); ok {
+		sim.Automation.Scenario = scenario
+	}
+
+	return nil
+}
+
+// StartEmulator starts the protocol server for a simulator
+func (a *App) StartEmulator(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	err := startSimulatorServer(sim)
+	if err == nil {
+		a.emitSimulatorUpdate()
+	}
+	return err
+}
+
+// StopEmulator stops the protocol server for a simulator
+func (a *App) StopEmulator(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	stopSimulatorServer(sim)
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// StartSimulation starts the data simulation for a simulator
+func (a *App) StartSimulation(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	if !sim.Running {
+		return fmt.Errorf("server must be running to start simulation")
+	}
+
+	// Start automation
+	sim.Automation.mu.Lock()
+	if !sim.Automation.Enabled {
+		sim.Automation.Enabled = true
+		sim.Automation.stopChan = make(chan struct{})
+		sim.Automation.SimulatedTime = time.Now()
+		go runAutomationLoop(sim)
+	}
+	sim.Automation.mu.Unlock()
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// StopSimulation stops the data simulation for a simulator
+func (a *App) StopSimulation(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	// Stop automation
+	sim.Automation.mu.Lock()
+	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
+		close(sim.Automation.stopChan)
+		sim.Automation.Enabled = false
+	}
+	sim.Automation.mu.Unlock()
+
+	return nil
+}
+
+// SetState sets a state value for a simulator
+func (a *App) SetState(id int, key string, value interface{}) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	var err error
+	switch sim.Protocol {
+	case "mqtt":
+		if sim.MQTTServer != nil {
+			err = sim.MQTTServer.SetValue(key, value)
+		}
+	case "ocpp":
+		if sim.OCPPServer != nil {
+			err = sim.OCPPServer.SetValue(key, value)
+		}
+	default:
+		return fmt.Errorf("state changes not supported for this protocol")
+	}
+
+	return err
+}
+
+// GetClients returns connected clients for a simulator
+func (a *App) GetClients(id int) (map[string]interface{}, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+
+	var clients interface{}
+	var count int
+
+	switch sim.Protocol {
+	case "modbus":
+		modbusClients := sim.Server.GetClients()
+		clients = modbusClients
+		count = len(modbusClients)
+	case "mqtt":
+		mqttClients := sim.MQTTServer.GetClients()
+		clients = mqttClients
+		count = len(mqttClients)
+	default:
+		return map[string]interface{}{"clients": []interface{}{}, "count": 0}, nil
+	}
+
+	return map[string]interface{}{"clients": clients, "count": count}, nil
+}
+
+// WakeUp wakes up or puts to sleep a V2X charger
+func (a *App) WakeUp(id int, wake bool) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	if sim.Protocol == "mqtt" && sim.MQTTServer != nil {
+		sim.MQTTServer.WakeUp(wake)
+	}
+
+	return nil
+}
+
+// SetPower sets the power for an MQTT V2X charger
+func (a *App) SetPower(id int, power float64) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	if sim.Protocol == "mqtt" && sim.MQTTServer != nil {
+		sim.MQTTServer.SetTargetPower(power)
+	}
+
+	return nil
+}
+
+// GetDebugMeterValues returns debug meter values for OCPP simulator
+func (a *App) GetDebugMeterValues(id int) (interface{}, error) {
+	sim := getSimulator(id)
+	if sim == nil {
+		return nil, fmt.Errorf("simulator %d not found", id)
+	}
+
+	if sim.Protocol != "ocpp" || sim.OCPPServer == nil {
+		return nil, fmt.Errorf("not an OCPP simulator")
+	}
+
+	return sim.OCPPServer.GetMeterValuesDebug(), nil
+}
+
+// Reset resets a simulator to defaults
+func (a *App) Reset(id int) error {
+	sim := getSimulator(id)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", id)
+	}
+
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	if sim.Protocol == "modbus" && sim.Server != nil {
+		sim.Server.InitDefaults()
+	}
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// ========== SITE METHODS ==========
+
+// GetSites returns all sites
+func (a *App) GetSites() []map[string]interface{} {
+	sitesMu.RLock()
+	defer sitesMu.RUnlock()
+
+	var list []map[string]interface{}
+	for _, site := range sites {
+		site.mu.RLock()
+		entry := map[string]interface{}{
+			"id":            site.ID,
+			"name":          site.Name,
+			"meter_id":      site.MeterID,
+			"simulator_ids": site.SimulatorIDs,
+			"base_load_w":   site.BaseLoadW,
+			"enabled":       site.Enabled,
+			"fuse_size":     site.FuseSize,
+			"phase_factors": site.PhaseFactors,
+			"bound_meter":   site.BoundMeter,
+		}
+		site.mu.RUnlock()
+		list = append(list, entry)
+	}
+
+	if list == nil {
+		list = []map[string]interface{}{}
+	}
+	return list
+}
+
+// CreateSite creates a new site
+func (a *App) CreateSite(name string, meterId int, simulatorIds []int, baseLoadW float64) (map[string]interface{}, error) {
+	site, err := createSite(name, meterId, simulatorIds, baseLoadW)
+	if err != nil {
+		return nil, err
+	}
+
+	a.emitSiteUpdate()
+
+	return map[string]interface{}{
+		"id":            site.ID,
+		"name":          site.Name,
+		"meter_id":      site.MeterID,
+		"simulator_ids": site.SimulatorIDs,
+		"base_load_w":   site.BaseLoadW,
+		"enabled":       site.Enabled,
+	}, nil
+}
+
+// DeleteSite deletes a site by ID
+func (a *App) DeleteSite(id int) error {
+	err := deleteSite(id)
+	if err == nil {
+		a.emitSiteUpdate()
+	}
+	return err
+}
+
+// GetSite returns detailed info for a single site
+func (a *App) GetSite(id int) (map[string]interface{}, error) {
+	site := getSite(id)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", id)
+	}
+
+	site.mu.RLock()
+	p1Mode := P1ModeDirect
+	if site.P1Buffer != nil {
+		p1Mode = site.P1Buffer.Mode
+	}
+
+	result := map[string]interface{}{
+		"id":            site.ID,
+		"name":          site.Name,
+		"meter_id":      site.MeterID,
+		"simulator_ids": site.SimulatorIDs,
+		"base_load_w":   site.BaseLoadW,
+		"enabled":       site.Enabled,
+		"fuse_size":     site.FuseSize,
+		"phase_factors": site.PhaseFactors,
+		"bound_meter":   site.BoundMeter,
+		"p1_mode":       string(p1Mode),
+	}
+
+	meterID := site.MeterID
+	simIDs := make([]int, len(site.SimulatorIDs))
+	copy(simIDs, site.SimulatorIDs)
+	baseLoad := site.BaseLoadW
+	site.mu.RUnlock()
+
+	// Add current meter reading if meter is valid
+	meterSim := getSimulator(meterID)
+	if meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
+		result["meter_power"] = getRegisterValue(meterSim.Server, 5600)
+		result["phase_currents"] = PhaseCurrents{
+			L1: getRegisterValue(meterSim.Server, 6),
+			L2: getRegisterValue(meterSim.Server, 8),
+			L3: getRegisterValue(meterSim.Server, 10),
+		}
+
+		// Include virtual devices if meter is an inverter
+		if meterSim.Category == "inverter" && meterSim.Running {
+			pvPower := getRegisterValue(meterSim.Server, 5016)
+			batteryPower := getRegisterValue(meterSim.Server, 13021)
+			batterySoc := getRegisterValue(meterSim.Server, 13022)
+			batteryCmd := getRegisterValue(meterSim.Server, 13050)
+
+			batteryDirection := "idle"
+			if batteryCmd == 170 {
+				batteryDirection = "charging"
+			} else if batteryCmd == 187 {
+				batteryDirection = "discharging"
+			}
+
+			result["virtual_devices"] = []map[string]interface{}{
+				{"type": "pv", "power": pvPower},
+				{"type": "battery", "power": batteryPower, "soc": batterySoc, "direction": batteryDirection},
+			}
+		}
+	}
+
+	// Add power contributions from each simulator
+	powerContributions := make(map[int]float64)
+	for _, simID := range simIDs {
+		if simID == meterID {
+			continue
+		}
+		sim := getSimulator(simID)
+		if sim != nil {
+			powerContributions[simID] = getPowerContribution(sim)
+		}
+	}
+	result["power_contributions"] = powerContributions
+
+	// Calculate total power
+	var totalPower float64 = baseLoad
+	for _, power := range powerContributions {
+		totalPower += power
+	}
+	result["total_power"] = totalPower
+
+	return result, nil
+}
+
+// UpdateSiteConfig updates site configuration
+func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	site.mu.Lock()
+	defer site.mu.Unlock()
+
+	if name, ok := config["name"].(string); ok && name != "" {
+		site.Name = name
+	}
+	if baseLoad, ok := config["base_load_w"].(float64); ok {
+		site.BaseLoadW = baseLoad
+	}
+	if fuseSize, ok := config["fuse_size"].(float64); ok {
+		site.FuseSize = int(fuseSize)
+	}
+	if pf, ok := config["phase_factors"].(map[string]interface{}); ok {
+		if l1, ok := pf["l1"].(float64); ok {
+			site.PhaseFactors.L1 = l1
+		}
+		if l2, ok := pf["l2"].(float64); ok {
+			site.PhaseFactors.L2 = l2
+		}
+		if l3, ok := pf["l3"].(float64); ok {
+			site.PhaseFactors.L3 = l3
+		}
+	}
+
+	a.emitSiteUpdate()
+	return nil
+}
+
+// SetSiteMeter sets the meter for a site
+func (a *App) SetSiteMeter(id int, meterId int) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	site.mu.Lock()
+	site.MeterID = meterId
+	site.mu.Unlock()
+
+	a.emitSiteUpdate()
+	return nil
+}
+
+// AddSimulatorToSite adds a simulator to a site
+func (a *App) AddSimulatorToSite(siteId int, simulatorId int) error {
+	site := getSite(siteId)
+	if site == nil {
+		return fmt.Errorf("site %d not found", siteId)
+	}
+
+	sim := getSimulator(simulatorId)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", simulatorId)
+	}
+
+	// Check if already in this site
+	site.mu.Lock()
+	for _, id := range site.SimulatorIDs {
+		if id == simulatorId {
+			site.mu.Unlock()
+			return fmt.Errorf("simulator already in site")
+		}
+	}
+
+	// Check if in another site
+	sitesMu.RLock()
+	for _, otherSite := range sites {
+		if otherSite.ID == site.ID {
+			continue
+		}
+		otherSite.mu.RLock()
+		for _, id := range otherSite.SimulatorIDs {
+			if id == simulatorId {
+				otherSite.mu.RUnlock()
+				sitesMu.RUnlock()
+				site.mu.Unlock()
+				return fmt.Errorf("simulator already in site %d", otherSite.ID)
+			}
+		}
+		otherSite.mu.RUnlock()
+	}
+	sitesMu.RUnlock()
+
+	site.SimulatorIDs = append(site.SimulatorIDs, simulatorId)
+	site.mu.Unlock()
+
+	a.emitSiteUpdate()
+	return nil
+}
+
+// RemoveSimulatorFromSite removes a simulator from a site
+func (a *App) RemoveSimulatorFromSite(siteId int, simulatorId int) error {
+	site := getSite(siteId)
+	if site == nil {
+		return fmt.Errorf("site %d not found", siteId)
+	}
+
+	site.mu.Lock()
+	found := false
+	newIDs := make([]int, 0, len(site.SimulatorIDs))
+	for _, id := range site.SimulatorIDs {
+		if id == simulatorId {
+			found = true
+		} else {
+			newIDs = append(newIDs, id)
+		}
+	}
+	if !found {
+		site.mu.Unlock()
+		return fmt.Errorf("simulator not in site")
+	}
+	site.SimulatorIDs = newIDs
+	site.mu.Unlock()
+
+	a.emitSiteUpdate()
+	return nil
+}
+
+// EnableSite enables aggregation for a site
+func (a *App) EnableSite(id int) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	site.mu.RLock()
+	meterID := site.MeterID
+	site.mu.RUnlock()
+
+	if meterID == 0 {
+		return fmt.Errorf("no meter configured for site")
+	}
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil || meterSim.Protocol != "modbus" {
+		return fmt.Errorf("invalid meter simulator")
+	}
+
+	startSiteAggregation(site)
+	a.emitSiteUpdate()
+	return nil
+}
+
+// DisableSite disables aggregation for a site
+func (a *App) DisableSite(id int) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	stopSiteAggregation(site)
+	a.emitSiteUpdate()
+	return nil
+}
+
+// SetP1Mode sets the P1 port update mode for a site
+func (a *App) SetP1Mode(id int, mode string) (map[string]interface{}, error) {
+	site := getSite(id)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", id)
+	}
+
+	// Validate mode
+	var p1Mode P1UpdateMode
+	switch mode {
+	case "direct":
+		p1Mode = P1ModeDirect
+	case "1s":
+		p1Mode = P1Mode1s
+	case "10s":
+		p1Mode = P1Mode10s
+	default:
+		return nil, fmt.Errorf("invalid mode. Must be 'direct', '1s', or '10s'")
+	}
+
+	site.mu.Lock()
+	if site.P1Buffer == nil {
+		site.P1Buffer = newP1IntervalBuffer()
+	}
+	site.P1Buffer.Mode = p1Mode
+	site.P1Buffer.resetEnergy()
+	site.mu.Unlock()
+
+	return map[string]interface{}{"mode": mode}, nil
+}
+
+// GetVirtualDevices returns virtual devices for a site
+func (a *App) GetVirtualDevices(siteId int) (map[string]interface{}, error) {
+	site := getSite(siteId)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", siteId)
+	}
+
+	site.mu.RLock()
+	meterID := site.MeterID
+	site.mu.RUnlock()
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil {
+		return map[string]interface{}{"virtual_devices": []interface{}{}}, nil
+	}
+
+	meterSim.mu.RLock()
+	category := meterSim.Category
+	running := meterSim.Running
+	server := meterSim.Server
+	meterSim.mu.RUnlock()
+
+	if category != "inverter" || !running || server == nil {
+		return map[string]interface{}{"virtual_devices": []interface{}{}}, nil
+	}
+
+	pvPower := getRegisterValue(server, 5016)
+	batteryPower := getRegisterValue(server, 13021)
+	batterySoc := getRegisterValue(server, 13022)
+	batteryCmd := getRegisterValue(server, 13050)
+
+	batteryDirection := "idle"
+	if batteryCmd == 170 {
+		batteryDirection = "charging"
+	} else if batteryCmd == 187 {
+		batteryDirection = "discharging"
+	}
+
+	virtualDevices := []map[string]interface{}{
+		{"type": "pv", "power": pvPower},
+		{"type": "battery", "power": batteryPower, "soc": batterySoc, "direction": batteryDirection},
+	}
+
+	return map[string]interface{}{"virtual_devices": virtualDevices}, nil
+}
+
+// WriteVirtualDevice writes to a virtual device
+func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]interface{}) (map[string]interface{}, error) {
+	site := getSite(siteId)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", siteId)
+	}
+
+	site.mu.RLock()
+	meterID := site.MeterID
+	site.mu.RUnlock()
+
+	meterSim := getSimulator(meterID)
+	if meterSim == nil || meterSim.Category != "inverter" {
+		return nil, fmt.Errorf("meter is not an inverter")
+	}
+
+	meterSim.mu.Lock()
+	defer meterSim.mu.Unlock()
+
+	if meterSim.Server == nil {
+		return nil, fmt.Errorf("meter server not available")
+	}
+
+	switch deviceType {
+	case "pv":
+		if power, ok := data["power"].(float64); ok {
+			if def := modbus.RegisterLookup[5016]; def != nil {
+				meterSim.Server.WriteRegisterValue(def, power)
+			}
+		}
+	case "battery":
+		if power, ok := data["power"].(float64); ok {
+			if def := modbus.RegisterLookup[13021]; def != nil {
+				meterSim.Server.WriteRegisterValue(def, power)
+			}
+		}
+		if soc, ok := data["soc"].(float64); ok {
+			if def := modbus.RegisterLookup[13022]; def != nil {
+				meterSim.Server.WriteRegisterValue(def, soc)
+			}
+		}
+		if direction, ok := data["direction"].(string); ok {
+			var cmd float64
+			switch direction {
+			case "charging":
+				cmd = 170
+			case "discharging":
+				cmd = 187
+			default:
+				cmd = 0 // idle
+			}
+			if def := modbus.RegisterLookup[13050]; def != nil {
+				meterSim.Server.WriteRegisterValue(def, cmd)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unknown device type: %s", deviceType)
+	}
+
+	return map[string]interface{}{"status": "ok"}, nil
+}
+
+// ========== EVENT EMITTERS ==========
+
+func (a *App) emitSimulatorUpdate() {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "simulator:updated")
+	}
+}
+
+func (a *App) emitSiteUpdate() {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "site:updated")
+	}
+}
+
+// GetSystemInfo returns system information
+func (a *App) GetSystemInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"local_ip": getLocalIP(),
+	}
+}

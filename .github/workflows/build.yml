@@ -1,0 +1,226 @@
+name: Build Desktop Apps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build macOS App
+        run: |
+          mkdir -p build/macos
+
+          # Build binary
+          CGO_ENABLED=1 CGO_LDFLAGS="-framework UniformTypeIdentifiers" \
+            go build -tags "desktop,production" -ldflags "-s -w" \
+            -o build/macos/device-simulator \
+            ./cmd/simulator/
+
+          # Create .app bundle
+          APP_NAME="Device Simulator"
+          mkdir -p "build/macos/${APP_NAME}.app/Contents/MacOS"
+          mkdir -p "build/macos/${APP_NAME}.app/Contents/Resources"
+          mv build/macos/device-simulator "build/macos/${APP_NAME}.app/Contents/MacOS/"
+
+          # Create wrapper script for desktop mode
+          cat > "build/macos/${APP_NAME}.app/Contents/MacOS/device-simulator-wrapper" << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "$DIR/device-simulator" --desktop "$@"
+          EOF
+          chmod +x "build/macos/${APP_NAME}.app/Contents/MacOS/device-simulator-wrapper"
+
+          # Create Info.plist
+          cat > "build/macos/${APP_NAME}.app/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>device-simulator-wrapper</string>
+              <key>CFBundleIdentifier</key>
+              <string>io.srcful.device-simulator</string>
+              <key>CFBundleName</key>
+              <string>Device Simulator</string>
+              <key>CFBundleDisplayName</key>
+              <string>Device Simulator</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundleVersion</key>
+              <string>${GITHUB_RUN_NUMBER}</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.15</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          # Create zip for artifact
+          cd build/macos && zip -r "../Device-Simulator-macos.zip" "${APP_NAME}.app"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Device-Simulator-macos
+          path: build/Device-Simulator-macos.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Build Linux App
+        run: |
+          mkdir -p build/linux
+
+          # Build desktop binary
+          CGO_ENABLED=1 go build -tags "desktop,production" -ldflags "-s -w" \
+            -o build/linux/device-simulator \
+            ./cmd/simulator/
+
+          # Create launcher script
+          cat > build/linux/device-simulator.sh << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          exec "$DIR/device-simulator" --desktop "$@"
+          EOF
+          chmod +x build/linux/device-simulator.sh
+
+          # Create .desktop file for Linux desktop integration
+          cat > build/linux/device-simulator.desktop << 'EOF'
+          [Desktop Entry]
+          Name=Device Simulator
+          Comment=Multi-protocol device simulator for energy systems
+          Exec=device-simulator --desktop
+          Terminal=false
+          Type=Application
+          Categories=Development;
+          EOF
+
+          # Create tarball
+          cd build && tar -czvf Device-Simulator-linux-amd64.tar.gz linux/
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Device-Simulator-linux
+          path: build/Device-Simulator-linux-amd64.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install WebView2
+        shell: pwsh
+        run: |
+          # WebView2 is included in Windows 11 and recent Windows 10
+          # For older systems, it will auto-install on first run
+
+      - name: Build Windows App
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build\windows
+
+          $env:CGO_ENABLED = "1"
+          go build -tags "desktop,production" -ldflags "-s -w -H windowsgui" `
+            -o build\windows\device-simulator.exe `
+            .\cmd\simulator\
+
+          # Create launcher batch file
+          @"
+          @echo off
+          start "" "%~dp0device-simulator.exe" --desktop %*
+          "@ | Out-File -FilePath build\windows\Device-Simulator.bat -Encoding ASCII
+
+          # Create zip
+          Compress-Archive -Path build\windows\* -DestinationPath build\Device-Simulator-windows-amd64.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Device-Simulator-windows
+          path: build/Device-Simulator-windows-amd64.zip
+
+  release:
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          draft: false
+          prerelease: true
+          files: |
+            artifacts/Device-Simulator-macos/Device-Simulator-macos.zip
+            artifacts/Device-Simulator-linux/Device-Simulator-linux-amd64.tar.gz
+            artifacts/Device-Simulator-windows/Device-Simulator-windows-amd64.zip
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            ## Downloads
+            - **macOS**: Device-Simulator-macos.zip (Universal app bundle)
+            - **Linux**: Device-Simulator-linux-amd64.tar.gz (x86_64, requires GTK3 & WebKit2GTK)
+            - **Windows**: Device-Simulator-windows-amd64.zip (x86_64, requires WebView2)
+
+            ## Installation
+
+            ### macOS
+            1. Unzip and drag `Device Simulator.app` to Applications
+            2. First run: Right-click → Open (to bypass Gatekeeper)
+
+            ### Linux
+            ```bash
+            tar -xzf Device-Simulator-linux-amd64.tar.gz
+            sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37  # Debian/Ubuntu
+            ./linux/device-simulator.sh
+            ```
+
+            ### Windows
+            1. Unzip and run `Device-Simulator.bat` or `device-simulator.exe --desktop`
+            2. WebView2 will auto-install if needed
