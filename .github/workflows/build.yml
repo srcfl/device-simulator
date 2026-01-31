@@ -19,6 +19,11 @@ on:
         required: true
         default: 'Manual release'
 
+# Ensure only one release workflow runs at a time (queue others)
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   GO_VERSION: '1.22'
 
