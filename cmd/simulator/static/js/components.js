@@ -1619,4 +1619,7 @@ document.addEventListener('alpine:init', () => {
             }
         }
     }));
+
+    // Confirmation modal component (just a wrapper, logic is in store)
+    Alpine.data('confirmModal', () => ({}));
 });

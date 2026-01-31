@@ -676,6 +676,33 @@ const categories = {
 
 // Register Alpine stores on alpine:init
 document.addEventListener('alpine:init', () => {
+    // Confirmation dialog store
+    Alpine.store('confirm', {
+        show: false,
+        title: '',
+        message: '',
+        _resolve: null,
+
+        async prompt(title, message) {
+            this.title = title;
+            this.message = message;
+            this.show = true;
+            return new Promise(resolve => {
+                this._resolve = resolve;
+            });
+        },
+
+        ok() {
+            this.show = false;
+            if (this._resolve) this._resolve(true);
+        },
+
+        cancel() {
+            this.show = false;
+            if (this._resolve) this._resolve(false);
+        }
+    });
+
     // Main app store
     Alpine.store('app', {
         simulators: [],
@@ -824,7 +851,12 @@ document.addEventListener('alpine:init', () => {
         },
 
         async deleteSimulator(id, serial) {
-            if (!confirm(`Delete simulator ${serial}?`)) return;
+            const confirmed = await Alpine.store('confirm').prompt(
+                'Delete Simulator',
+                `Are you sure you want to delete simulator ${serial}?`
+            );
+            if (!confirmed) return;
+
             try {
                 await api.deleteSimulator(id);
                 storage.remove(serial);
