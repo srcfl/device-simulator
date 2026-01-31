@@ -12,6 +12,9 @@ import (
 // Version is set at build time via ldflags
 var Version = "0.0.0-dev"
 
+// GitHubToken is set at build time via ldflags for private repo access
+var GitHubToken = ""
+
 const (
 	// GitHub repository for updates
 	repoOwner = "srcfl"
@@ -28,6 +31,15 @@ type UpdateInfo struct {
 	AssetURL       string `json:"asset_url"`
 }
 
+// getUpdater returns a configured selfupdate.Updater with token if available
+func getUpdater() (*selfupdate.Updater, error) {
+	config := selfupdate.Config{}
+	if GitHubToken != "" {
+		config.APIToken = GitHubToken
+	}
+	return selfupdate.NewUpdater(config)
+}
+
 // CheckForUpdate checks GitHub releases for a newer version
 func CheckForUpdate() (*UpdateInfo, error) {
 	info := &UpdateInfo{
@@ -35,35 +47,43 @@ func CheckForUpdate() (*UpdateInfo, error) {
 		CurrentVersion: Version,
 	}
 
-	// Parse current version
-	current, err := semver.Parse(Version)
+	// Parse current version (may fail for dev versions)
+	current, parseErr := semver.Parse(Version)
+	isDevVersion := parseErr != nil
+
+	// Get configured updater
+	updater, err := getUpdater()
 	if err != nil {
-		// Dev version, skip update check
-		log.Printf("Skipping update check for dev version: %s", Version)
+		log.Printf("Failed to create updater: %v", err)
+		info.LatestVersion = "error"
 		return info, nil
 	}
 
-	// Check for latest release
-	latest, found, err := selfupdate.DetectLatest(repoOwner + "/" + repoName)
+	// Check for latest release (do this even for dev versions to show latest)
+	latest, found, err := updater.DetectLatest(repoOwner + "/" + repoName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check for updates: %v", err)
+		log.Printf("Update check failed: %v", err)
+		info.LatestVersion = "unavailable"
+		info.ReleaseNotes = fmt.Sprintf("Could not check for updates: %v\n\nNote: Private repositories require authentication.", err)
+		return info, nil // Return info with error message instead of failing
 	}
 
 	if !found {
+		info.LatestVersion = "no releases"
 		return info, nil
 	}
 
 	info.LatestVersion = latest.Version.String()
 	info.ReleaseURL = latest.URL
 	info.ReleaseNotes = latest.ReleaseNotes
-
-	// Find the asset URL for the current platform
 	info.AssetURL = latest.AssetURL
 
-	// Compare versions
-	if latest.Version.GT(current) {
+	// Compare versions (only if we have a valid current version)
+	if !isDevVersion && latest.Version.GT(current) {
 		info.Available = true
 		log.Printf("Update available: %s -> %s", Version, latest.Version)
+	} else if isDevVersion {
+		log.Printf("Dev version detected, latest release is %s", latest.Version)
 	}
 
 	return info, nil
@@ -76,7 +96,12 @@ func DoUpdate() error {
 		return fmt.Errorf("cannot update dev version: %s", Version)
 	}
 
-	latest, found, err := selfupdate.DetectLatest(repoOwner + "/" + repoName)
+	updater, err := getUpdater()
+	if err != nil {
+		return fmt.Errorf("failed to create updater: %v", err)
+	}
+
+	latest, found, err := updater.DetectLatest(repoOwner + "/" + repoName)
 	if err != nil {
 		return fmt.Errorf("failed to detect latest version: %v", err)
 	}
@@ -91,13 +116,12 @@ func DoUpdate() error {
 
 	log.Printf("Updating to version %s...", latest.Version)
 
-	exe, err := selfupdate.UpdateSelf(latest.Version, repoOwner+"/"+repoName)
+	rel, err := updater.UpdateSelf(latest.Version, repoOwner+"/"+repoName)
 	if err != nil {
 		return fmt.Errorf("update failed: %v", err)
 	}
 
-	log.Printf("Successfully updated to version %s", latest.Version)
-	log.Printf("New executable: %s", exe)
+	log.Printf("Successfully updated to version %s", rel.Version)
 	log.Printf("Please restart the application to use the new version")
 
 	return nil

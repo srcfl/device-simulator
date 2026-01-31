@@ -26,6 +26,53 @@
     margin-top: var(--spacing-xs);
 }
 
+/* Update Check Button */
+.update-check-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast), background var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.update-check-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.update-check-btn.checking {
+    color: var(--color-primary);
+}
+
+.update-check-btn.has-update {
+    color: var(--color-success);
+}
+
+.update-check-btn.has-update::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    background: var(--color-success);
+    border-radius: 50%;
+}
+
+.update-check-btn .spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .simulator-list {
     flex: 1;
     overflow-y: auto;

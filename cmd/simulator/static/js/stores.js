@@ -719,6 +719,7 @@ document.addEventListener('alpine:init', () => {
         updateInfo: null,
         updateChecking: false,
         updateApplying: false,
+        showUpdateModal: false,
 
         async init() {
             // Fetch version and local IP from backend
