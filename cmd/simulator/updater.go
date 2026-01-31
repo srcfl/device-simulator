@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"runtime"
+	"strings"
 
 	"github.com/blang/semver"
+	"github.com/google/go-github/v50/github"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
+	"golang.org/x/oauth2"
 )
 
 // Version is set at build time via ldflags
@@ -40,6 +44,24 @@ func getUpdater() (*selfupdate.Updater, error) {
 	return selfupdate.NewUpdater(config)
 }
 
+// getGitHubClient returns a GitHub API client, with auth if token is available
+func getGitHubClient() *github.Client {
+	ctx := context.Background()
+	if GitHubToken != "" {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: GitHubToken})
+		tc := oauth2.NewClient(ctx, ts)
+		return github.NewClient(tc)
+	}
+	return github.NewClient(nil)
+}
+
+// fetchLatestRelease gets the latest release info directly from GitHub API
+func fetchLatestRelease() (*github.RepositoryRelease, error) {
+	client := getGitHubClient()
+	release, _, err := client.Repositories.GetLatestRelease(context.Background(), repoOwner, repoName)
+	return release, err
+}
+
 // CheckForUpdate checks GitHub releases for a newer version
 func CheckForUpdate() (*UpdateInfo, error) {
 	info := &UpdateInfo{
@@ -51,44 +73,74 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	current, parseErr := semver.Parse(Version)
 	isDevVersion := parseErr != nil
 
-	// Get configured updater
-	updater, err := getUpdater()
-	if err != nil {
-		log.Printf("Failed to create updater: %v", err)
-		info.LatestVersion = "error"
-		return info, nil
+	// Log token status for debugging
+	if GitHubToken == "" {
+		log.Printf("Update check: No GitHub token configured")
+	} else {
+		log.Printf("Update check: GitHub token configured (length: %d)", len(GitHubToken))
 	}
 
-	// Check for latest release (do this even for dev versions to show latest)
-	latest, found, err := updater.DetectLatest(repoOwner + "/" + repoName)
+	// Fetch latest release directly from GitHub API
+	release, err := fetchLatestRelease()
 	if err != nil {
 		log.Printf("Update check failed: %v", err)
-		info.LatestVersion = "unavailable"
-		info.ReleaseNotes = fmt.Sprintf("Could not check for updates: %v\n\nNote: Private repositories require authentication.", err)
-		return info, nil // Return info with error message instead of failing
-	}
-
-	if !found {
 		if GitHubToken == "" {
-			info.LatestVersion = "unknown"
-			info.ReleaseNotes = "Cannot check updates: No access token configured for private repository."
+			info.LatestVersion = "no token"
+			info.ReleaseNotes = "Cannot check updates: No access token configured.\n\nThis is a development build. Release builds have update checking enabled."
 		} else {
-			info.LatestVersion = "no releases found"
+			info.LatestVersion = "error"
+			info.ReleaseNotes = fmt.Sprintf("Could not check for updates: %v", err)
 		}
 		return info, nil
 	}
 
-	info.LatestVersion = latest.Version.String()
-	info.ReleaseURL = latest.URL
-	info.ReleaseNotes = latest.ReleaseNotes
-	info.AssetURL = latest.AssetURL
+	log.Printf("Fetched release: %+v", release)
+
+	if release == nil || release.TagName == nil {
+		log.Printf("No release or tag name found")
+		if GitHubToken == "" {
+			info.LatestVersion = "unknown"
+			info.ReleaseNotes = "Cannot check updates: No access token configured for private repository."
+		} else {
+			info.LatestVersion = "no releases"
+		}
+		return info, nil
+	}
+
+	// Parse the latest version from tag (strip 'v' prefix if present)
+	latestTag := *release.TagName
+	latestVersionStr := strings.TrimPrefix(latestTag, "v")
+	info.LatestVersion = latestVersionStr
+
+	if release.HTMLURL != nil {
+		info.ReleaseURL = *release.HTMLURL
+	}
+	if release.Body != nil {
+		info.ReleaseNotes = *release.Body
+	}
+
+	// Find asset URL for current platform
+	osName := runtime.GOOS
+	archName := runtime.GOARCH
+	for _, asset := range release.Assets {
+		if asset.Name != nil && asset.BrowserDownloadURL != nil {
+			name := strings.ToLower(*asset.Name)
+			if strings.Contains(name, osName) && strings.Contains(name, archName) {
+				info.AssetURL = *asset.BrowserDownloadURL
+				break
+			}
+		}
+	}
 
 	// Compare versions (only if we have a valid current version)
-	if !isDevVersion && latest.Version.GT(current) {
-		info.Available = true
-		log.Printf("Update available: %s -> %s", Version, latest.Version)
-	} else if isDevVersion {
-		log.Printf("Dev version detected, latest release is %s", latest.Version)
+	if !isDevVersion {
+		latestVersion, err := semver.Parse(latestVersionStr)
+		if err == nil && latestVersion.GT(current) {
+			info.Available = true
+			log.Printf("Update available: %s -> %s", Version, latestVersionStr)
+		}
+	} else {
+		log.Printf("Dev version detected, latest release is %s", latestVersionStr)
 	}
 
 	return info, nil
