@@ -39,6 +39,7 @@ type UpdateInfo struct {
 	ReleaseURL     string `json:"release_url"`
 	ReleaseNotes   string `json:"release_notes"`
 	AssetURL       string `json:"asset_url"`
+	AssetName      string `json:"asset_name"`
 }
 
 // getGitHubClient returns a GitHub API client, with auth if token is available
@@ -171,6 +172,8 @@ func CheckForUpdate() (*UpdateInfo, error) {
 			if asset.Name != nil {
 				name := strings.ToLower(*asset.Name)
 				if strings.Contains(name, osName) && strings.Contains(name, arch) {
+					// Store asset name for proper file extension handling
+					info.AssetName = *asset.Name
 					// Prefer API URL for private repo downloads (requires token)
 					if asset.URL != nil && GitHubToken != "" {
 						info.AssetURL = *asset.URL
@@ -226,7 +229,7 @@ func DoUpdate() error {
 	defer os.RemoveAll(tempDir)
 
 	// Download the asset
-	assetPath, err := downloadAsset(info.AssetURL, tempDir)
+	assetPath, err := downloadAsset(info.AssetURL, info.AssetName, tempDir)
 	if err != nil {
 		return fmt.Errorf("failed to download update: %v", err)
 	}
@@ -263,7 +266,7 @@ func DoUpdate() error {
 }
 
 // downloadAsset downloads the release asset to temp directory
-func downloadAsset(url string, destDir string) (string, error) {
+func downloadAsset(url string, assetName string, destDir string) (string, error) {
 	// For private repos, we need to use GitHub API to download assets
 	// The BrowserDownloadURL redirects to S3 and doesn't pass auth headers
 
@@ -301,8 +304,11 @@ func downloadAsset(url string, destDir string) (string, error) {
 		return "", fmt.Errorf("download failed with status %s: %s", resp.Status, string(body))
 	}
 
-	// Determine filename from URL
-	filename := filepath.Base(url)
+	// Use provided asset name (API URLs don't have the filename)
+	filename := assetName
+	if filename == "" {
+		filename = filepath.Base(url)
+	}
 	destPath := filepath.Join(destDir, filename)
 
 	// Create destination file
