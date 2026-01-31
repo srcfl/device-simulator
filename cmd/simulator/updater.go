@@ -109,11 +109,9 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	current, parseErr := semver.Parse(Version)
 	isDevVersion := parseErr != nil
 
-	// Log token status for debugging
+	// Only log token status in dev builds (no token means dev build)
 	if GitHubToken == "" {
-		log.Printf("Update check: No GitHub token configured")
-	} else {
-		log.Printf("Update check: GitHub token configured (length: %d)", len(GitHubToken))
+		log.Printf("Update check: No GitHub token (dev build)")
 	}
 
 	// Fetch latest release directly from GitHub API
@@ -129,8 +127,6 @@ func CheckForUpdate() (*UpdateInfo, error) {
 		}
 		return info, nil
 	}
-
-	log.Printf("Fetched release: %+v", release)
 
 	if release == nil || release.TagName == nil {
 		log.Printf("No release or tag name found")
