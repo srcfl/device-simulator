@@ -3,17 +3,120 @@ name: Build Desktop Apps
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type (patch, minor, major)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      release_title:
+        description: 'Release title'
+        required: true
+        default: 'Manual release'
 
 env:
   GO_VERSION: '1.22'
-  # Semantic version: 0.1.{run_number}
-  VERSION: 0.1.${{ github.run_number }}
 
 jobs:
+  # First job: Check if this is a release commit and calculate version
+  check-release:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      release_type: ${{ steps.check.outputs.release_type }}
+      release_title: ${{ steps.check.outputs.release_title }}
+      release_body: ${{ steps.check.outputs.release_body }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for tags
+
+      - name: Check commit message for release trigger
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
+            echo "release_title=${{ github.event.inputs.release_title }}" >> $GITHUB_OUTPUT
+            echo "release_body=" >> $GITHUB_OUTPUT
+          else
+            COMMIT_MSG=$(git log -1 --pretty=%B)
+            FIRST_LINE=$(echo "$COMMIT_MSG" | head -n 1)
+
+            # Check for release prefixes
+            if [[ "$FIRST_LINE" =~ ^patch:\ (.+)$ ]]; then
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "release_type=patch" >> $GITHUB_OUTPUT
+              echo "release_title=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            elif [[ "$FIRST_LINE" =~ ^minor:\ (.+)$ ]]; then
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "release_type=minor" >> $GITHUB_OUTPUT
+              echo "release_title=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            elif [[ "$FIRST_LINE" =~ ^major:\ (.+)$ ]]; then
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "release_type=major" >> $GITHUB_OUTPUT
+              echo "release_title=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            else
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "release_type=" >> $GITHUB_OUTPUT
+              echo "release_title=" >> $GITHUB_OUTPUT
+            fi
+
+            # Extract commit body (everything after first line, trimmed)
+            BODY=$(echo "$COMMIT_MSG" | tail -n +2 | sed '/./,$!d' | sed -e :a -e '/^\s*$/d;N;ba')
+            # Escape for GitHub Actions output
+            BODY="${BODY//'%'/'%25'}"
+            BODY="${BODY//$'\n'/'%0A'}"
+            BODY="${BODY//$'\r'/'%0D'}"
+            echo "release_body=$BODY" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Calculate new version
+        id: version
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          # Get latest tag or default to v0.0.0
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Strip 'v' prefix and parse version
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          # Default to 0 if parsing fails
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+
+          # Bump version based on release type
+          case "${{ steps.check.outputs.release_type }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
   build-macos:
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +128,7 @@ jobs:
 
       - name: Build macOS App
         env:
-          VERSION: ${{ env.VERSION }}
+          VERSION: ${{ needs.check-release.outputs.version }}
         run: |
           mkdir -p build/macos
 
@@ -51,7 +154,7 @@ jobs:
           chmod +x "build/macos/${APP_NAME}.app/Contents/MacOS/device-simulator-wrapper"
 
           # Create Info.plist
-          cat > "build/macos/${APP_NAME}.app/Contents/Info.plist" << 'EOF'
+          cat > "build/macos/${APP_NAME}.app/Contents/Info.plist" << EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -67,9 +170,9 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
+              <string>${VERSION}</string>
               <key>CFBundleVersion</key>
-              <string>${GITHUB_RUN_NUMBER}</string>
+              <string>${VERSION}</string>
               <key>LSMinimumSystemVersion</key>
               <string>10.15</string>
               <key>NSHighResolutionCapable</key>
@@ -88,6 +191,8 @@ jobs:
           path: build/Device-Simulator-macos.zip
 
   build-linux:
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
     runs-on: ubuntu-22.04  # Wails v2 requires webkit2gtk-4.0 (not available in 24.04)
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +209,7 @@ jobs:
 
       - name: Build Linux App
         env:
-          VERSION: ${{ env.VERSION }}
+          VERSION: ${{ needs.check-release.outputs.version }}
         run: |
           mkdir -p build/linux
 
@@ -143,6 +248,8 @@ jobs:
           path: build/Device-Simulator-linux-amd64.tar.gz
 
   build-windows:
+    needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,16 +259,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Install WebView2
-        shell: pwsh
-        run: |
-          # WebView2 is included in Windows 11 and recent Windows 10
-          # For older systems, it will auto-install on first run
-
       - name: Build Windows App
         shell: pwsh
         env:
-          VERSION: ${{ env.VERSION }}
+          VERSION: ${{ needs.check-release.outputs.version }}
         run: |
           New-Item -ItemType Directory -Force -Path build\windows
 
@@ -187,9 +288,8 @@ jobs:
           path: build/Device-Simulator-windows-amd64.zip
 
   release:
-    needs: [build-macos, build-linux, build-windows]
+    needs: [check-release, build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
       contents: write
     steps:
@@ -203,8 +303,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
+          tag_name: v${{ needs.check-release.outputs.version }}
+          name: v${{ needs.check-release.outputs.version }} - ${{ needs.check-release.outputs.release_title }}
           draft: false
           prerelease: false
           files: |
@@ -212,14 +312,17 @@ jobs:
             artifacts/Device-Simulator-linux/Device-Simulator-linux-amd64.tar.gz
             artifacts/Device-Simulator-windows/Device-Simulator-windows-amd64.zip
           body: |
-            ## Device Simulator v${{ env.VERSION }}
+            ## ${{ needs.check-release.outputs.release_title }}
 
-            Automated release from commit ${{ github.sha }}
+            ${{ needs.check-release.outputs.release_body }}
 
             ## Downloads
-            - **macOS**: Device-Simulator-macos.zip (Universal app bundle)
-            - **Linux**: Device-Simulator-linux-amd64.tar.gz (x86_64, requires GTK3 & WebKit2GTK)
-            - **Windows**: Device-Simulator-windows-amd64.zip (x86_64, requires WebView2)
+
+            | Platform | File | Requirements |
+            |----------|------|--------------|
+            | macOS | `Device-Simulator-macos.zip` | macOS 10.15+ |
+            | Linux | `Device-Simulator-linux-amd64.tar.gz` | GTK3, WebKit2GTK |
+            | Windows | `Device-Simulator-windows-amd64.zip` | WebView2 |
 
             ## Installation
 
