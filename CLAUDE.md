@@ -206,13 +206,36 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error)
 
 ## CI/CD (GitHub Actions)
 
-The `.github/workflows/build.yml` workflow runs on every push to `main`:
+The `.github/workflows/build.yml` workflow runs on every push to `main`.
+
+### Triggering Releases
+
+Releases are triggered by **commit message prefixes**:
+
+| Prefix | Version Bump | Example |
+|--------|--------------|---------|
+| `patch:` | 0.1.X → 0.1.(X+1) | `patch: Fix login bug` |
+| `minor:` | 0.X.0 → 0.(X+1).0 | `minor: Add new feature` |
+| `major:` | X.0.0 → (X+1).0.0 | `major: Breaking API change` |
+
+Commits without these prefixes **do not** create releases.
+
+**Example commit:**
+```bash
+git commit -m "patch: Fix WebSocket error handling
+
+Added error logging for failed message sends.
+This improves debugging of connection issues."
+```
+
+The commit body (after the first line) becomes the release notes under "In this version:".
+
+### Build Process
 
 1. **Parallel builds** for macOS, Linux, Windows
-2. **Version embedding** via ldflags (`-X main.Version=${VERSION}`)
-3. **Release creation** with semantic version tags (`v0.1.X`)
-
-**Version format:** `0.1.{github.run_number}` (e.g., v0.1.42)
+2. **Version calculation** from latest git tag + bump type
+3. **Version embedding** via ldflags (`-X main.Version=${VERSION}`)
+4. **Release creation** with semantic version tag and assets
 
 **Build matrix:**
 | Platform | Runner | Dependencies |
