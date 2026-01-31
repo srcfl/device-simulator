@@ -1186,6 +1186,424 @@
     z-index: 99;
 }
 
+/* ============================
+   Phase Visualization
+   ============================ */
+
+.phase-visualization {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: var(--spacing-md);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+}
+
+.phase-bar-container {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.phase-label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 28px;
+}
+
+.phase-bar-track {
+    flex: 1;
+    height: 24px;
+    background: rgba(100, 100, 100, 0.2);
+    border-radius: var(--radius-md);
+    position: relative;
+    overflow: visible;
+}
+
+.phase-bar-fill {
+    height: 100%;
+    background: var(--color-primary);
+    border-radius: var(--radius-md);
+    transition: width 0.3s ease;
+}
+
+.phase-bar-fill.warning {
+    background: var(--color-warning);
+}
+
+.phase-bar-fill.danger {
+    background: var(--color-error);
+}
+
+.fuse-limit-marker {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    left: 70%;
+    width: 3px;
+    background: white;
+    border-radius: 1px;
+    z-index: 1;
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+.phase-value {
+    font-size: var(--font-size-sm);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--text-primary);
+    min-width: 55px;
+    text-align: right;
+}
+
+.phase-legend {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: var(--spacing-sm);
+    border-top: 1px solid var(--border-color);
+    margin-top: var(--spacing-xs);
+}
+
+.fuse-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+.fuse-marker-icon {
+    width: 12px;
+    height: 3px;
+    background: white;
+    border-radius: 1px;
+    box-shadow: 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+/* Fuse Toggle (blown state indicator) */
+.fuse-toggle {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 200, 100, 0.2);
+    border: 2px solid var(--color-success);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.fuse-toggle:hover {
+    background: rgba(0, 200, 100, 0.3);
+    transform: scale(1.05);
+}
+
+.fuse-toggle-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-success);
+    transition: all var(--transition-fast);
+}
+
+.fuse-toggle.blown {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: var(--color-error);
+}
+
+.fuse-toggle.blown:hover {
+    background: rgba(239, 68, 68, 0.3);
+}
+
+.fuse-toggle.blown .fuse-toggle-indicator {
+    background: var(--color-error);
+    box-shadow: 0 0 6px var(--color-error);
+}
+
+/* Blown fuse phase styling */
+.phase-value.blown {
+    color: var(--color-error);
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.phase-bar-track.blown {
+    opacity: 0.4;
+}
+
+.phase-bar-track.blown .phase-bar-fill {
+    background: var(--color-error) !important;
+    width: 0% !important;
+}
+
+.meter-total {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--color-warning);
+}
+
+.meter-total.exporting {
+    color: var(--color-primary);
+}
+
+/* ============================
+   Settings Button & Modal
+   ============================ */
+
+.settings-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.settings-btn:hover {
+    color: var(--text-primary);
+    background: rgba(100, 100, 100, 0.2);
+}
+
+.site-settings-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.site-settings-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    min-width: 380px;
+    max-width: 480px;
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-lg);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: var(--text-primary);
+}
+
+.modal-info {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background: rgba(0, 200, 100, 0.1);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-body {
+    padding: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.modal-field label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.modal-field input,
+.modal-field select {
+    padding: var(--spacing-sm);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+}
+
+.modal-field input:focus,
+.modal-field select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+.modal-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.modal-field-group > label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.phase-inputs {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+.phase-input {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+    align-items: center;
+}
+
+.phase-input span {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+.phase-input input {
+    width: 100%;
+    padding: var(--spacing-sm);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    text-align: center;
+}
+
+.phase-input input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
+.phase-sum {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--spacing-xs);
+    background: rgba(100, 100, 100, 0.1);
+    border-radius: var(--radius-sm);
+}
+
+.phase-sum.invalid {
+    color: var(--color-error);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.phase-sum .error-hint {
+    color: var(--color-error);
+    font-weight: 500;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-md);
+    padding: var(--spacing-lg);
+    border-top: 1px solid var(--border-color);
+}
+
+.modal-footer .btn {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.modal-footer .btn-primary {
+    background: var(--color-primary);
+    border: none;
+    color: white;
+}
+
+.modal-footer .btn-primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+}
+
+.modal-footer .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.modal-footer .btn-secondary {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.modal-footer .btn-secondary:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* ============================
+   Bound Meter Styles
+   ============================ */
+
+.sim-item.bound-meter {
+    opacity: 0.8;
+    border-left: 2px solid var(--color-primary);
+    background: rgba(0, 200, 100, 0.05);
+}
+
+.bound-meter-icon {
+    font-size: 12px;
+    margin-right: var(--spacing-xs);
+}
+
+.bound-meter-badge {
+    font-size: 0.55rem;
+    color: var(--color-primary);
+    background: rgba(0, 200, 100, 0.2);
+    padding: 0.1rem 0.3rem;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
 /* P1 Mode Toggle */
 .p1-mode-toggle {
     display: flex;

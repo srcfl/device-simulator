@@ -46,10 +46,11 @@
                         <div class="category-items" :class="{ 'collapsed': $store.app.categories[cat].collapsed }">
                             <template x-for="sim in sims" :key="sim.id">
                                 <div class="sim-item"
-                                     :class="{ 'active': $store.app.selectedId === sim.id }"
+                                     :class="{ 'active': $store.app.selectedId === sim.id, 'bound-meter': $store.site.isBoundMeter(sim.id) }"
                                      @click="$store.app.selectSimulator(sim.id, sim.protocol)">
 
                                     <button class="sim-delete"
+                                            x-show="!$store.site.isBoundMeter(sim.id)"
                                             @click.stop="$store.app.deleteSimulator(sim.id, sim.serial)"
                                             title="Delete">
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -58,8 +59,13 @@
                                     </button>
 
                                     <div class="sim-header">
-                                        <span class="sim-profile" :class="{ 'inactive': !sim.profile }"
-                                              x-text="sim.profile || 'no profile'"></span>
+                                        <template x-if="$store.site.isBoundMeter(sim.id)">
+                                            <span class="bound-meter-badge">SITE METER</span>
+                                        </template>
+                                        <template x-if="!$store.site.isBoundMeter(sim.id)">
+                                            <span class="sim-profile" :class="{ 'inactive': !sim.profile }"
+                                                  x-text="sim.profile || 'no profile'"></span>
+                                        </template>
                                         <span class="protocol-badge" :class="sim.protocol" x-text="sim.protocol"></span>
                                     </div>
                                     <div class="sim-serial" x-text="sim.serial"></div>
@@ -151,53 +157,135 @@
             <!-- Site View - shown when site is selected but no simulator is selected -->
         <template x-if="$store.site.selectedId && $store.site.data && !$store.app.selectedId">
             <div x-data="siteView()">
-                <!-- Site Config Section -->
-                <div class="section">
-                    <div class="config-row">
-                        <div class="config-item">
-                            <label>Name</label>
-                            <input type="text"
-                                   :value="$store.site.data?.name || ''"
-                                   @change="$store.site.updateConfig({ name: $event.target.value })">
-                        </div>
+                <!-- Phase Visualization Section -->
+                <div class="section" x-data="phaseVisualization()">
+                    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Site Energy Balance</span>
+                        <button class="settings-btn" @click="showSettingsModal = true" title="Site Settings">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                            </svg>
+                        </button>
+                    </div>
 
-                        <div class="config-item">
-                            <label>Meter (Modbus)</label>
-                            <select @change="changeMeter(parseInt($event.target.value))">
-                                <option value="0">Select meter...</option>
-                                <template x-for="sim in $store.site.getModbusSimulators()" :key="sim.id">
-                                    <option :value="sim.id"
-                                            :selected="sim.id === $store.site.data?.meter_id"
-                                            x-text="`${sim.serial} (:${sim.port})`"></option>
-                                </template>
-                            </select>
+                    <!-- Phase Bars -->
+                    <div class="phase-visualization">
+                        <div class="phase-bar-container">
+                            <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l1 }" @click="toggleFuse('l1')" title="Click to toggle fuse">
+                                <div class="fuse-toggle-indicator"></div>
+                            </div>
+                            <div class="phase-label">L1</div>
+                            <div class="phase-bar-track">
+                                <div class="phase-bar-fill" :style="getPhaseBarStyle(getPhaseCurrents().l1, fuseBlown.l1)"></div>
+                                <div class="fuse-limit-marker"></div>
+                            </div>
+                            <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="`${getPhaseCurrents().l1.toFixed(1)} A`"></div>
+                        </div>
+                        <div class="phase-bar-container">
+                            <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l2 }" @click="toggleFuse('l2')" title="Click to toggle fuse">
+                                <div class="fuse-toggle-indicator"></div>
+                            </div>
+                            <div class="phase-label">L2</div>
+                            <div class="phase-bar-track">
+                                <div class="phase-bar-fill" :style="getPhaseBarStyle(getPhaseCurrents().l2, fuseBlown.l2)"></div>
+                                <div class="fuse-limit-marker"></div>
+                            </div>
+                            <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="`${getPhaseCurrents().l2.toFixed(1)} A`"></div>
+                        </div>
+                        <div class="phase-bar-container">
+                            <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l3 }" @click="toggleFuse('l3')" title="Click to toggle fuse">
+                                <div class="fuse-toggle-indicator"></div>
+                            </div>
+                            <div class="phase-label">L3</div>
+                            <div class="phase-bar-track">
+                                <div class="phase-bar-fill" :style="getPhaseBarStyle(getPhaseCurrents().l3, fuseBlown.l3)"></div>
+                                <div class="fuse-limit-marker"></div>
+                            </div>
+                            <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="`${getPhaseCurrents().l3.toFixed(1)} A`"></div>
+                        </div>
+                        <div class="phase-legend">
+                            <span class="fuse-indicator">
+                                <span class="fuse-marker-icon"></span>
+                                <span x-text="`Fuse limit (${$store.site.data?.fuse_size || 16}A)`"></span>
+                            </span>
+                            <span class="meter-total" :class="{ 'exporting': meterPower < 0 }" x-text="formatMeterPower()"></span>
                         </div>
                     </div>
-                </div>
 
-                <!-- Meter Reading Section -->
-                <div class="section">
-                    <div class="section-title">Site Energy Balance</div>
-                    <div class="state-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
-                        <div class="state-card highlight">
-                            <div class="state-label">Meter Reading</div>
-                            <div class="state-value"
-                                 :style="meterPower >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
-                                 x-text="formatMeterPower()"></div>
+                    <!-- Settings Modal -->
+                    <template x-if="showSettingsModal">
+                        <div class="site-settings-modal-backdrop" @click="showSettingsModal = false">
+                            <div class="site-settings-modal" @click.stop>
+                                <div class="modal-header">
+                                    <h3>Site Settings</h3>
+                                    <button class="modal-close" @click="showSettingsModal = false">×</button>
+                                </div>
+                                <div class="modal-info">Settings are stored locally in your browser</div>
+                                <div class="modal-body">
+                                    <div class="modal-field">
+                                        <label>Site Name</label>
+                                        <input type="text"
+                                               :value="$store.site.data?.name || ''"
+                                               @change="$store.site.updateConfig({ name: $event.target.value })">
+                                    </div>
+                                    <div class="modal-field">
+                                        <label>Fuse Size</label>
+                                        <select :value="$store.site.data?.fuse_size || 16"
+                                                @change="$store.site.updateConfig({ fuse_size: parseInt($event.target.value) })">
+                                            <option value="10">10 A</option>
+                                            <option value="16">16 A</option>
+                                            <option value="20">20 A</option>
+                                            <option value="25">25 A</option>
+                                            <option value="32">32 A</option>
+                                        </select>
+                                    </div>
+                                    <div class="modal-field-group">
+                                        <label>Phase Distribution</label>
+                                        <div class="phase-inputs">
+                                            <div class="phase-input">
+                                                <span>L1</span>
+                                                <input type="number" step="0.01" min="0" max="1"
+                                                       :value="localPhaseFactors.l1"
+                                                       @input="localPhaseFactors.l1 = parseFloat($event.target.value) || 0">
+                                            </div>
+                                            <div class="phase-input">
+                                                <span>L2</span>
+                                                <input type="number" step="0.01" min="0" max="1"
+                                                       :value="localPhaseFactors.l2"
+                                                       @input="localPhaseFactors.l2 = parseFloat($event.target.value) || 0">
+                                            </div>
+                                            <div class="phase-input">
+                                                <span>L3</span>
+                                                <input type="number" step="0.01" min="0" max="1"
+                                                       :value="localPhaseFactors.l3"
+                                                       @input="localPhaseFactors.l3 = parseFloat($event.target.value) || 0">
+                                            </div>
+                                        </div>
+                                        <div class="phase-sum" :class="{ 'invalid': !isPhaseFactorsValid() }">
+                                            Sum: <span x-text="(localPhaseFactors.l1 + localPhaseFactors.l2 + localPhaseFactors.l3).toFixed(3)"></span>
+                                            <span x-show="!isPhaseFactorsValid()" class="error-hint">(must equal 1.0)</span>
+                                        </div>
+                                    </div>
+                                    <div class="modal-field">
+                                        <label>P1 Update Mode</label>
+                                        <div class="p1-mode-toggle">
+                                            <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === 'direct' }"
+                                                    @click="$store.site.setP1Mode('direct')">Direct</button>
+                                            <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === '1s' }"
+                                                    @click="$store.site.setP1Mode('1s')">1s</button>
+                                            <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === '10s' }"
+                                                    @click="$store.site.setP1Mode('10s')">10s</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button class="btn btn-secondary" @click="showSettingsModal = false">Cancel</button>
+                                    <button class="btn btn-primary" :disabled="!isPhaseFactorsValid()" @click="savePhaseFactors()">Save</button>
+                                </div>
+                            </div>
                         </div>
-                        <div class="state-card">
-                            <div class="state-label">P1 Update Mode</div>
-                            <div class="state-value" x-text="($store.site.data?.p1_mode || 'direct').toUpperCase()"></div>
-                        </div>
-                        <div class="state-card">
-                            <div class="state-label">Total Power</div>
-                            <div class="state-value" x-text="`${($store.site.data?.total_power || 0).toFixed(0)} W`"></div>
-                        </div>
-                        <div class="state-card">
-                            <div class="state-label">Devices</div>
-                            <div class="state-value" x-text="($store.site.data?.simulator_ids || []).length"></div>
-                        </div>
-                    </div>
+                    </template>
                 </div>
 
                 <!-- Member Devices Section -->

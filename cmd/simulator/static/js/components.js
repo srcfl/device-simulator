@@ -1505,4 +1505,118 @@ document.addEventListener('alpine:init', () => {
             }
         }
     }));
+
+    // Phase Visualization Component
+    Alpine.data('phaseVisualization', () => ({
+        showSettingsModal: false,
+        localPhaseFactors: { l1: 0.333, l2: 0.333, l3: 0.334 },
+        fuseBlown: { l1: false, l2: false, l3: false },
+
+        init() {
+            // Initialize local phase factors from store
+            this.syncPhaseFactors();
+            this.$watch('$store.site.data', () => this.syncPhaseFactors());
+        },
+
+        syncPhaseFactors() {
+            const factors = Alpine.store('site').data?.phase_factors;
+            if (factors) {
+                this.localPhaseFactors = {
+                    l1: factors.l1 || 0.333,
+                    l2: factors.l2 || 0.333,
+                    l3: factors.l3 || 0.334
+                };
+            }
+        },
+
+        get meterPower() {
+            return Alpine.store('site').data?.meter_power || 0;
+        },
+
+        formatMeterPower() {
+            const power = this.meterPower;
+            const absPower = Math.abs(power);
+            const direction = power >= 0 ? 'IMPORTING' : 'EXPORTING';
+            if (absPower >= 1000) {
+                return `${(absPower / 1000).toFixed(2)} kW ${direction}`;
+            }
+            return `${absPower.toFixed(0)} W ${direction}`;
+        },
+
+        getPhaseCurrents() {
+            const currents = Alpine.store('site').data?.phase_currents || { l1: 0, l2: 0, l3: 0 };
+            return {
+                l1: currents.l1 || 0,
+                l2: currents.l2 || 0,
+                l3: currents.l3 || 0
+            };
+        },
+
+        getFuseSize() {
+            return Alpine.store('site').data?.fuse_size || 16;
+        },
+
+        toggleFuse(phase) {
+            this.fuseBlown[phase] = !this.fuseBlown[phase];
+        },
+
+        // Non-linear scale: 0-fuseSize = 70% of bar, fuseSize to 3*fuseSize = remaining 30%
+        getPhaseBarStyle(current, isBlown) {
+            if (isBlown) {
+                return 'width: 0%; background: transparent;';
+            }
+
+            const fuseSize = this.getFuseSize();
+            const maxOverload = fuseSize * 3; // 300% overload tolerance
+
+            let percentage;
+            let color;
+
+            if (current <= fuseSize) {
+                // Normal range: 0 to fuseSize maps to 0-70%
+                percentage = (current / fuseSize) * 70;
+                color = 'var(--color-success)'; // Green
+            } else {
+                // Overload range: fuseSize to 3*fuseSize maps to 70-100%
+                const overloadRatio = Math.min((current - fuseSize) / (maxOverload - fuseSize), 1);
+                percentage = 70 + (overloadRatio * 30);
+
+                // Color gradient: yellow (0%) -> orange (50%) -> red (100%)
+                if (overloadRatio < 0.5) {
+                    // Yellow to orange
+                    const t = overloadRatio * 2;
+                    const r = 245;
+                    const g = Math.round(158 - (t * 58)); // 158 -> 100
+                    const b = Math.round(11 + (t * 19)); // 11 -> 30
+                    color = `rgb(${r}, ${g}, ${b})`;
+                } else {
+                    // Orange to red
+                    const t = (overloadRatio - 0.5) * 2;
+                    const r = Math.round(245 - (t * 6)); // 245 -> 239
+                    const g = Math.round(100 - (t * 32)); // 100 -> 68
+                    const b = Math.round(30 + (t * 38)); // 30 -> 68
+                    color = `rgb(${r}, ${g}, ${b})`;
+                }
+            }
+
+            return `width: ${percentage}%; background: ${color};`;
+        },
+
+        isPhaseFactorsValid() {
+            const sum = this.localPhaseFactors.l1 + this.localPhaseFactors.l2 + this.localPhaseFactors.l3;
+            return sum >= 0.99 && sum <= 1.01;
+        },
+
+        async savePhaseFactors() {
+            if (!this.isPhaseFactorsValid()) return;
+            try {
+                await Alpine.store('site').updateConfig({
+                    phase_factors: this.localPhaseFactors
+                });
+                this.showSettingsModal = false;
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+    }));
 });

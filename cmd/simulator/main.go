@@ -117,26 +117,50 @@ const (
 	P1Mode10s    P1UpdateMode = "10s"    // Updates every 10 seconds with averaging
 )
 
+// PhasePowers represents power values per phase
+type PhasePowers struct {
+	L1 float64 `json:"l1"` // Phase 1 power in Watts
+	L2 float64 `json:"l2"` // Phase 2 power in Watts
+	L3 float64 `json:"l3"` // Phase 3 power in Watts
+}
+
 // P1IntervalBuffer holds state for interval-based P1 port updates
 type P1IntervalBuffer struct {
 	Mode              P1UpdateMode
-	LastPower         float64   // Last instant power value
-	LastPhasePower    float64   // Last instant phase power value
-	ImportEnergyDelta float64   // Accumulated import energy during interval (kWh)
-	ExportEnergyDelta float64   // Accumulated export energy during interval (kWh)
-	LastUpdateTime    time.Time // When registers were last written
-	IntervalStart     time.Time // Start of current interval
+	LastPower         float64     // Last instant power value
+	LastPhasePowers   PhasePowers // Last instant per-phase power values
+	ImportEnergyDelta float64     // Accumulated import energy during interval (kWh)
+	ExportEnergyDelta float64     // Accumulated export energy during interval (kWh)
+	LastUpdateTime    time.Time   // When registers were last written
+	IntervalStart     time.Time   // Start of current interval
+}
+
+// PhaseFactors represents the load distribution across three phases
+type PhaseFactors struct {
+	L1 float64 `json:"l1"` // Phase 1 factor (0.0-1.0)
+	L2 float64 `json:"l2"` // Phase 2 factor (0.0-1.0)
+	L3 float64 `json:"l3"` // Phase 3 factor (0.0-1.0)
+}
+
+// PhaseCurrents represents the calculated current per phase
+type PhaseCurrents struct {
+	L1 float64 `json:"l1"` // Phase 1 current in Amps
+	L2 float64 `json:"l2"` // Phase 2 current in Amps
+	L3 float64 `json:"l3"` // Phase 3 current in Amps
 }
 
 // Site represents a group of simulators with aggregated energy metering
 type Site struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	MeterID      int    `json:"meter_id"`      // Simulator ID acting as site meter
-	SimulatorIDs []int  `json:"simulator_ids"` // Member simulators
-	BaseLoadW    float64 `json:"base_load_w"`  // Configurable 0-10kW
-	Enabled      bool   `json:"enabled"`       // Aggregation enabled
-	P1Buffer     *P1IntervalBuffer             // P1 port interval buffer
+	ID           int          `json:"id"`
+	Name         string       `json:"name"`
+	MeterID      int          `json:"meter_id"`      // Simulator ID acting as site meter
+	SimulatorIDs []int        `json:"simulator_ids"` // Member simulators
+	BaseLoadW    float64      `json:"base_load_w"`   // Configurable 0-10kW
+	Enabled      bool         `json:"enabled"`       // Aggregation enabled
+	FuseSize     int          `json:"fuse_size"`     // Fuse size in Amps (10, 16, 20, 25, 32)
+	PhaseFactors PhaseFactors `json:"phase_factors"` // Per-phase load distribution
+	BoundMeter   bool         `json:"bound_meter"`   // True if meter was auto-created with site
+	P1Buffer     *P1IntervalBuffer                   // P1 port interval buffer
 	mu           sync.RWMutex
 	stopChan     chan struct{}
 }
@@ -339,7 +363,28 @@ func createSimulator(simType string) (*Simulator, error) {
 }
 
 // deleteSimulator removes a simulator
+// isSimulatorBoundMeter checks if a simulator is a bound meter for any site
+func isSimulatorBoundMeter(simID int) bool {
+	sitesMu.RLock()
+	defer sitesMu.RUnlock()
+
+	for _, site := range sites {
+		site.mu.RLock()
+		isBound := site.BoundMeter && site.MeterID == simID
+		site.mu.RUnlock()
+		if isBound {
+			return true
+		}
+	}
+	return false
+}
+
 func deleteSimulator(id int) error {
+	// Check if this is a bound meter - cannot delete
+	if isSimulatorBoundMeter(id) {
+		return fmt.Errorf("cannot delete bound meter - delete the site instead")
+	}
+
 	simulatorsMu.Lock()
 	defer simulatorsMu.Unlock()
 
@@ -1381,6 +1426,7 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 			"base_load_w":   site.BaseLoadW,
 			"enabled":       site.Enabled,
 			"p1_mode":       string(p1Mode),
+			"bound_meter":   site.BoundMeter,
 		}
 
 		// Add current meter reading if meter is valid
@@ -1511,12 +1557,22 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 		"base_load_w":   site.BaseLoadW,
 		"enabled":       site.Enabled,
 		"p1_mode":       string(p1Mode),
+		"fuse_size":     site.FuseSize,
+		"phase_factors": site.PhaseFactors,
+		"bound_meter":   site.BoundMeter,
 	}
 
 	// Add current meter reading if meter is valid
 	meterSim := getSimulator(site.MeterID)
 	if meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
 		status["meter_power"] = getRegisterValue(meterSim.Server, 5600)
+
+		// Add per-phase currents from meter registers
+		status["phase_currents"] = PhaseCurrents{
+			L1: getRegisterValue(meterSim.Server, 6),
+			L2: getRegisterValue(meterSim.Server, 8),
+			L3: getRegisterValue(meterSim.Server, 10),
+		}
 
 		// Include virtual devices if meter is an inverter
 		if meterSim.Category == "inverter" && meterSim.Running {
@@ -1602,8 +1658,10 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 	}
 
 	var config struct {
-		Name      *string  `json:"name"`
-		BaseLoadW *float64 `json:"base_load_w"`
+		Name         *string       `json:"name"`
+		BaseLoadW    *float64      `json:"base_load_w"`
+		FuseSize     *int          `json:"fuse_size"`
+		PhaseFactors *PhaseFactors `json:"phase_factors"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -1623,6 +1681,34 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		}
 		site.BaseLoadW = *config.BaseLoadW
 	}
+	if config.FuseSize != nil {
+		// Validate fuse size (common values: 10, 16, 20, 25, 32 Amps)
+		validFuses := map[int]bool{10: true, 16: true, 20: true, 25: true, 32: true}
+		if !validFuses[*config.FuseSize] {
+			site.mu.Unlock()
+			http.Error(w, "Fuse size must be 10, 16, 20, 25, or 32 Amps", http.StatusBadRequest)
+			return
+		}
+		site.FuseSize = *config.FuseSize
+	}
+	if config.PhaseFactors != nil {
+		// Validate phase factors sum to approximately 1.0
+		sum := config.PhaseFactors.L1 + config.PhaseFactors.L2 + config.PhaseFactors.L3
+		if sum < 0.99 || sum > 1.01 {
+			site.mu.Unlock()
+			http.Error(w, "Phase factors must sum to 1.0", http.StatusBadRequest)
+			return
+		}
+		// Validate individual factors are in valid range
+		if config.PhaseFactors.L1 < 0 || config.PhaseFactors.L1 > 1 ||
+			config.PhaseFactors.L2 < 0 || config.PhaseFactors.L2 > 1 ||
+			config.PhaseFactors.L3 < 0 || config.PhaseFactors.L3 > 1 {
+			site.mu.Unlock()
+			http.Error(w, "Each phase factor must be between 0 and 1", http.StatusBadRequest)
+			return
+		}
+		site.PhaseFactors = *config.PhaseFactors
+	}
 	site.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1634,6 +1720,15 @@ func handleSiteMeter(w http.ResponseWriter, r *http.Request, site *Site) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Block changing meter for sites with bound meters
+	site.mu.RLock()
+	if site.BoundMeter {
+		site.mu.RUnlock()
+		http.Error(w, "Cannot change meter for site with bound meter", http.StatusForbidden)
+		return
+	}
+	site.mu.RUnlock()
 
 	var req struct {
 		MeterID int `json:"meter_id"`
@@ -2275,6 +2370,7 @@ func calculateAndUpdateMeter(site *Site) {
 	copy(simIDs, site.SimulatorIDs)
 	baseLoad := site.BaseLoadW
 	p1Buffer := site.P1Buffer
+	phaseFactors := site.PhaseFactors
 	site.mu.RUnlock()
 
 	meterSim := getSimulator(meterID)
@@ -2295,9 +2391,9 @@ func calculateAndUpdateMeter(site *Site) {
 
 	// If meter is an inverter, read its PV/Battery values and include them in the calculation
 	if meterCategory == "inverter" {
-		pvPower := getRegisterValue(meterSim.Server, 5016)        // PV power
-		batteryPower := getRegisterValue(meterSim.Server, 13021)  // Battery power (absolute)
-		batteryCmd := getRegisterValue(meterSim.Server, 13050)    // Command register
+		pvPower := getRegisterValue(meterSim.Server, 5016)       // PV power
+		batteryPower := getRegisterValue(meterSim.Server, 13021) // Battery power (absolute)
+		batteryCmd := getRegisterValue(meterSim.Server, 13050)   // Command register
 
 		// Battery sign from command register: 170=charge (importing), 187=discharge (exporting)
 		// For site calculation: charging adds to consumption, discharging reduces consumption
@@ -2321,8 +2417,12 @@ func calculateAndUpdateMeter(site *Site) {
 		totalPower += getPowerContribution(sim)
 	}
 
-	// Distribute power across phases (simple 3-way split)
-	phasePower := totalPower / 3.0
+	// Distribute power across phases using configurable phase factors
+	phasePowers := PhasePowers{
+		L1: totalPower * phaseFactors.L1,
+		L2: totalPower * phaseFactors.L2,
+		L3: totalPower * phaseFactors.L3,
+	}
 
 	// Calculate energy delta for this 0.5s tick (kWh and Wh)
 	energyDeltaKWh := math.Abs(totalPower) / 1000.0 / 7200.0 // kWh per 0.5s
@@ -2331,7 +2431,7 @@ func calculateAndUpdateMeter(site *Site) {
 	// Handle P1 interval mode
 	if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
 		// Direct mode: write immediately
-		writeMeterRegisters(meterSim, totalPower, phasePower)
+		writeMeterRegisters(meterSim, totalPower, phasePowers)
 		updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
 	} else {
 		// Interval mode: accumulate energy internally, write only when interval elapses
@@ -2339,7 +2439,7 @@ func calculateAndUpdateMeter(site *Site) {
 
 		// Store current instant power values
 		p1Buffer.LastPower = totalPower
-		p1Buffer.LastPhasePower = phasePower
+		p1Buffer.LastPhasePowers = phasePowers
 
 		// Accumulate energy deltas continuously
 		if totalPower > 0 {
@@ -2353,7 +2453,7 @@ func calculateAndUpdateMeter(site *Site) {
 		if time.Since(p1Buffer.IntervalStart) >= intervalDuration {
 			// Get instant power values (not averaged)
 			instantPower := p1Buffer.LastPower
-			instantPhasePower := p1Buffer.LastPhasePower
+			instantPhasePowers := p1Buffer.LastPhasePowers
 			importDelta := p1Buffer.ImportEnergyDelta
 			exportDelta := p1Buffer.ExportEnergyDelta
 
@@ -2363,7 +2463,7 @@ func calculateAndUpdateMeter(site *Site) {
 			site.mu.Unlock()
 
 			// Write instant power values to registers
-			writeMeterRegisters(meterSim, instantPower, instantPhasePower)
+			writeMeterRegisters(meterSim, instantPower, instantPhasePowers)
 
 			// Write accumulated energy
 			if importDelta > 0 {
@@ -2393,7 +2493,7 @@ func calculateAndUpdateMeter(site *Site) {
 }
 
 // writeMeterRegisters writes power values to meter registers
-func writeMeterRegisters(meterSim *Simulator, totalPower, phasePower float64) {
+func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers) {
 	// Write to meter register 5600 (positive=import, negative=export)
 	if meterDef := modbus.RegisterLookup[5600]; meterDef != nil {
 		meterSim.Server.WriteRegisterValue(meterDef, totalPower)
@@ -2405,27 +2505,30 @@ func writeMeterRegisters(meterSim *Simulator, totalPower, phasePower float64) {
 		meterSim.Server.WriteRegisterValue(sdm630PowerDef, totalPower)
 	}
 
-	// Write phase powers
+	// Write per-phase powers
 	if l1PowerDef := modbus.RegisterLookup[12]; l1PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l1PowerDef, phasePower)
+		meterSim.Server.WriteRegisterValue(l1PowerDef, phasePowers.L1)
 	}
 	if l2PowerDef := modbus.RegisterLookup[14]; l2PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l2PowerDef, phasePower)
+		meterSim.Server.WriteRegisterValue(l2PowerDef, phasePowers.L2)
 	}
 	if l3PowerDef := modbus.RegisterLookup[16]; l3PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l3PowerDef, phasePower)
+		meterSim.Server.WriteRegisterValue(l3PowerDef, phasePowers.L3)
 	}
 
-	// Calculate current from power (I = P / V, assuming 230V)
-	phaseCurrent := math.Abs(phasePower) / 230.0
+	// Calculate per-phase currents from power (I = P / V, assuming 230V)
+	l1Current := math.Abs(phasePowers.L1) / 230.0
+	l2Current := math.Abs(phasePowers.L2) / 230.0
+	l3Current := math.Abs(phasePowers.L3) / 230.0
+
 	if l1CurrentDef := modbus.RegisterLookup[6]; l1CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l1CurrentDef, phaseCurrent)
+		meterSim.Server.WriteRegisterValue(l1CurrentDef, l1Current)
 	}
 	if l2CurrentDef := modbus.RegisterLookup[8]; l2CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l2CurrentDef, phaseCurrent)
+		meterSim.Server.WriteRegisterValue(l2CurrentDef, l2Current)
 	}
 	if l3CurrentDef := modbus.RegisterLookup[10]; l3CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l3CurrentDef, phaseCurrent)
+		meterSim.Server.WriteRegisterValue(l3CurrentDef, l3Current)
 	}
 
 	// Ensure voltage and frequency are always set (SDM630 registers)
@@ -2481,17 +2584,31 @@ func getSite(id int) *Site {
 }
 
 // createSite creates a new site
+// A site ALWAYS gets a dedicated SDM630 energy meter as its bound main meter.
+// The meterID parameter is ignored - bound meters are always auto-created.
 func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64) (*Site, error) {
-	// Validate meter exists and is Modbus (if meter is specified)
-	if meterID != 0 {
-		meterSim := getSimulator(meterID)
-		if meterSim == nil {
-			return nil, fmt.Errorf("meter simulator %d not found", meterID)
-		}
-		if meterSim.Protocol != "modbus" {
-			return nil, fmt.Errorf("meter must be a Modbus simulator")
-		}
+	// Always create a dedicated SDM630 energy meter as the site's bound meter
+	// This meter is the source of truth for site energy balance
+	meterSim, err := createSimulator("energy_meter")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bound meter: %v", err)
 	}
+
+	// Start the meter server
+	if err := startSimulatorServer(meterSim); err != nil {
+		// Cleanup on failure - use internal delete to bypass bound meter check
+		simulatorsMu.Lock()
+		for i, sim := range simulators {
+			if sim.ID == meterSim.ID {
+				simulators = append(simulators[:i], simulators[i+1:]...)
+				break
+			}
+		}
+		simulatorsMu.Unlock()
+		return nil, fmt.Errorf("failed to start bound meter: %v", err)
+	}
+
+	log.Printf("[Site] Created bound SDM630 meter (ID: %d, Serial: %s)", meterSim.ID, meterSim.Serial)
 
 	// Validate simulators exist
 	for _, simID := range simulatorIDs {
@@ -2521,32 +2638,54 @@ func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64)
 	site := &Site{
 		ID:           id,
 		Name:         name,
-		MeterID:      meterID,
+		MeterID:      meterSim.ID,
 		SimulatorIDs: simulatorIDs,
 		BaseLoadW:    baseLoadW,
 		Enabled:      false,
-		P1Buffer:     newP1IntervalBuffer(),
+		FuseSize:     16, // Default 16A fuse
+		PhaseFactors: PhaseFactors{
+			L1: 0.333,
+			L2: 0.333,
+			L3: 0.334,
+		},
+		BoundMeter: true, // Always true - sites always have a bound meter
+		P1Buffer:   newP1IntervalBuffer(),
 	}
 	sites = append(sites, site)
 	sitesMu.Unlock()
 
-	log.Printf("[Site %d] Created site '%s' with meter %d", id, name, meterID)
+	log.Printf("[Site %d] Created site '%s' with bound meter %d", id, name, meterSim.ID)
 	return site, nil
 }
 
 // deleteSite removes a site
 func deleteSite(id int) error {
 	sitesMu.Lock()
-	defer sitesMu.Unlock()
 
 	for i, site := range sites {
 		if site.ID == id {
 			stopSiteAggregation(site)
+
+			// If site has a bound meter, delete it too
+			boundMeter := site.BoundMeter
+			meterID := site.MeterID
+
 			sites = append(sites[:i], sites[i+1:]...)
+			sitesMu.Unlock()
+
+			if boundMeter && meterID != 0 {
+				if err := deleteSimulator(meterID); err != nil {
+					log.Printf("[Site %d] Warning: failed to delete bound meter %d: %v", id, meterID, err)
+				} else {
+					log.Printf("[Site %d] Deleted bound meter %d", id, meterID)
+				}
+			}
+
 			log.Printf("[Site %d] Deleted", id)
 			return nil
 		}
 	}
+	sitesMu.Unlock()
 	return fmt.Errorf("site %d not found", id)
 }
 

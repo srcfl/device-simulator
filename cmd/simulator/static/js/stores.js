@@ -278,12 +278,13 @@ const siteApi = {
 
 // Storage Layer
 const STORAGE_KEY = 'device-simulator-configs';
+const STORAGE_VERSION = 3;
 
 const storage = {
     load() {
         try {
             const data = localStorage.getItem(STORAGE_KEY);
-            if (!data) return { version: 2, simulators: [], sites: [] };
+            if (!data) return { version: STORAGE_VERSION, simulators: [], sites: [] };
             const parsed = JSON.parse(data);
             // Ensure sites array exists (migration)
             if (!parsed.sites) parsed.sites = [];
@@ -297,11 +298,23 @@ const storage = {
                     return sim;
                 });
                 parsed.version = 2;
+            }
+            // Migrate sites to add fuse_size, phase_factors, bound_meter (v3)
+            if (parsed.version < 3) {
+                parsed.sites = parsed.sites.map(site => {
+                    site.fuseSize = site.fuseSize || 16;
+                    site.phaseFactors = site.phaseFactors || { l1: 0.333, l2: 0.333, l3: 0.334 };
+                    site.boundMeter = site.boundMeter ?? false;
+                    return site;
+                });
+                parsed.version = 3;
+            }
+            if (parsed.version !== STORAGE_VERSION) {
                 this.save(parsed);
             }
             return parsed;
         } catch (e) {
-            return { version: 2, simulators: [], sites: [] };
+            return { version: STORAGE_VERSION, simulators: [], sites: [] };
         }
     },
 
@@ -433,6 +446,9 @@ const storage = {
                     simulatorIds: site.simulator_ids || [],
                     baseLoadW: site.base_load_w || 1000,
                     enabled: site.enabled || false,
+                    fuseSize: site.fuse_size || 16,
+                    phaseFactors: site.phase_factors || { l1: 0.333, l2: 0.333, l3: 0.334 },
+                    boundMeter: site.bound_meter || false,
                     createdAt: new Date().toISOString(),
                     lastModified: new Date().toISOString()
                 });
@@ -443,6 +459,9 @@ const storage = {
                 existing.simulatorIds = site.simulator_ids || [];
                 existing.baseLoadW = site.base_load_w;
                 existing.enabled = site.enabled;
+                existing.fuseSize = site.fuse_size || 16;
+                existing.phaseFactors = site.phase_factors || { l1: 0.333, l2: 0.333, l3: 0.334 };
+                existing.boundMeter = site.bound_meter || false;
                 existing.lastModified = new Date().toISOString();
             }
         }
@@ -1280,6 +1299,18 @@ document.addEventListener('alpine:init', () => {
                 if (a.category !== 'energy_meter' && b.category === 'energy_meter') return 1;
                 return 0;
             });
+        },
+
+        // Check if a simulator is a bound meter for any site
+        isBoundMeter(simId) {
+            return this.sites.some(site => site.bound_meter && site.meter_id === simId);
+        },
+
+        // Check if current site's meter is an inverter (for virtual device display)
+        isMeterInverter() {
+            if (!this.data?.meter_id) return false;
+            const sim = Alpine.store('app').simulators.find(s => s.id === this.data.meter_id);
+            return sim?.category === 'inverter';
         },
 
         async setP1Mode(mode) {
