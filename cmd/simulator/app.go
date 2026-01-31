@@ -1097,3 +1097,18 @@ func (a *App) GetSystemInfo() map[string]interface{} {
 		"local_ip": getLocalIP(),
 	}
 }
+
+// GetVersionInfo returns the current app version and platform info
+func (a *App) GetVersionInfo() map[string]string {
+	return GetVersionInfo()
+}
+
+// CheckForUpdate checks if a newer version is available on GitHub
+func (a *App) CheckForUpdate() (*UpdateInfo, error) {
+	return CheckForUpdate()
+}
+
+// ApplyUpdate downloads and applies the latest update
+func (a *App) ApplyUpdate() error {
+	return DoUpdate()
+}

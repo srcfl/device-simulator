@@ -923,6 +923,26 @@
                             </div>
                         </div>
 
+                        <!-- Version & Update -->
+                        <div class="config-item">
+                            <label>Version</label>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-family: monospace; font-size: 12px;" x-text="$store.app.version"></span>
+                                <template x-if="$store.app.updateAvailable">
+                                    <button class="update-btn"
+                                            @click="$store.app.applyUpdate()"
+                                            :disabled="$store.app.updateApplying"
+                                            style="background: #22c55e; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                                        <span x-show="!$store.app.updateApplying">Update to <span x-text="$store.app.updateInfo?.latest_version"></span></span>
+                                        <span x-show="$store.app.updateApplying">Updating...</span>
+                                    </button>
+                                </template>
+                                <template x-if="$store.app.updateChecking">
+                                    <span style="font-size: 11px; color: #666;">Checking...</span>
+                                </template>
+                            </div>
+                        </div>
+
                         <!-- Emulator Toggle (server only) -->
                         <div class="config-item">
                             <label>Emulator</label>

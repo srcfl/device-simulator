@@ -270,6 +270,30 @@ const api = {
         }
         const resp = await fetch('/api/system');
         return resp.json();
+    },
+
+    async getVersionInfo() {
+        if (isWails) {
+            return await window.go.main.App.GetVersionInfo();
+        }
+        const resp = await fetch('/api/version');
+        return resp.json();
+    },
+
+    async checkForUpdate() {
+        if (isWails) {
+            return await window.go.main.App.CheckForUpdate();
+        }
+        const resp = await fetch('/api/update/check');
+        return resp.json();
+    },
+
+    async applyUpdate() {
+        if (isWails) {
+            return await window.go.main.App.ApplyUpdate();
+        }
+        const resp = await fetch('/api/update/apply', { method: 'POST' });
+        return resp.json();
     }
 };
 
@@ -662,18 +686,33 @@ document.addEventListener('alpine:init', () => {
         categories: categories,
         addMenuOpen: false,
         refreshInterval: null,
+        // Version and update state
+        version: '0.0.0',
+        updateAvailable: false,
+        updateInfo: null,
+        updateChecking: false,
+        updateApplying: false,
 
         async init() {
-            // Fetch local IP from backend
+            // Fetch version and local IP from backend
             try {
-                const sysInfo = await api.getSystemInfo();
+                const [sysInfo, versionInfo] = await Promise.all([
+                    api.getSystemInfo(),
+                    api.getVersionInfo()
+                ]);
                 if (sysInfo && (sysInfo.local_ip || sysInfo.localIP)) {
                     this.localIP = sysInfo.local_ip || sysInfo.localIP;
+                }
+                if (versionInfo && versionInfo.version) {
+                    this.version = versionInfo.version;
                 }
             } catch (e) {
                 console.error('Failed to get system info:', e);
                 this.localIP = window.location.hostname || '--';
             }
+
+            // Check for updates (non-blocking)
+            this.checkForUpdate();
 
             try {
                 const serverSims = await api.getSimulators();
@@ -866,6 +905,37 @@ document.addEventListener('alpine:init', () => {
                 await navigator.clipboard.writeText(this.localIP);
             } catch (e) {
                 console.error('Copy error:', e);
+            }
+        },
+
+        async checkForUpdate() {
+            if (this.updateChecking) return;
+            this.updateChecking = true;
+            try {
+                const info = await api.checkForUpdate();
+                this.updateInfo = info;
+                this.updateAvailable = info && info.available;
+                if (this.updateAvailable) {
+                    console.log(`Update available: ${info.current_version} -> ${info.latest_version}`);
+                }
+            } catch (e) {
+                console.error('Update check failed:', e);
+            } finally {
+                this.updateChecking = false;
+            }
+        },
+
+        async applyUpdate() {
+            if (this.updateApplying || !this.updateAvailable) return;
+            this.updateApplying = true;
+            try {
+                await api.applyUpdate();
+                alert('Update applied successfully! Please restart the application.');
+            } catch (e) {
+                console.error('Update failed:', e);
+                alert('Update failed: ' + e.message);
+            } finally {
+                this.updateApplying = false;
             }
         }
     });
