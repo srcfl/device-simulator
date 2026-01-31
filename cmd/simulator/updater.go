@@ -158,18 +158,31 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	// Use API URL for private repos (works with token auth), browser URL as fallback
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
-	for _, asset := range release.Assets {
-		if asset.Name != nil {
-			name := strings.ToLower(*asset.Name)
-			if strings.Contains(name, osName) && strings.Contains(name, archName) {
-				// Prefer API URL for private repo downloads (requires token)
-				if asset.URL != nil && GitHubToken != "" {
-					info.AssetURL = *asset.URL
-				} else if asset.BrowserDownloadURL != nil {
-					info.AssetURL = *asset.BrowserDownloadURL
+
+	// Build list of acceptable architectures (with fallbacks)
+	archOptions := []string{archName}
+	// On Apple Silicon (darwin/arm64), also accept amd64 (runs via Rosetta 2)
+	if osName == "darwin" && archName == "arm64" {
+		archOptions = append(archOptions, "amd64")
+	}
+
+	for _, arch := range archOptions {
+		for _, asset := range release.Assets {
+			if asset.Name != nil {
+				name := strings.ToLower(*asset.Name)
+				if strings.Contains(name, osName) && strings.Contains(name, arch) {
+					// Prefer API URL for private repo downloads (requires token)
+					if asset.URL != nil && GitHubToken != "" {
+						info.AssetURL = *asset.URL
+					} else if asset.BrowserDownloadURL != nil {
+						info.AssetURL = *asset.BrowserDownloadURL
+					}
+					break
 				}
-				break
 			}
+		}
+		if info.AssetURL != "" {
+			break
 		}
 	}
 
