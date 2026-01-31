@@ -262,6 +262,14 @@ const api = {
             const text = await resp.text();
             throw new Error(text);
         }
+    },
+
+    async getSystemInfo() {
+        if (isWails) {
+            return await window.go.main.App.GetSystemInfo();
+        }
+        const resp = await fetch('/api/system');
+        return resp.json();
     }
 };
 
@@ -650,12 +658,23 @@ document.addEventListener('alpine:init', () => {
         selectedId: null,
         selectedProtocol: null,
         selectedSerial: null,
-        localIP: window.location.hostname || '--',
+        localIP: '--',
         categories: categories,
         addMenuOpen: false,
         refreshInterval: null,
 
         async init() {
+            // Fetch local IP from backend
+            try {
+                const sysInfo = await api.getSystemInfo();
+                if (sysInfo && (sysInfo.local_ip || sysInfo.localIP)) {
+                    this.localIP = sysInfo.local_ip || sysInfo.localIP;
+                }
+            } catch (e) {
+                console.error('Failed to get system info:', e);
+                this.localIP = window.location.hostname || '--';
+            }
+
             try {
                 const serverSims = await api.getSimulators();
                 if (serverSims.length === 0) {
