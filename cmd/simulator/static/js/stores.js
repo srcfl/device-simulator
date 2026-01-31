@@ -973,7 +973,8 @@ document.addEventListener('alpine:init', () => {
                 this.updateAvailable = false;
             } catch (e) {
                 console.error('Update failed:', e);
-                this.updateError = e.message || 'Unknown error occurred';
+                // Extract error message - Wails errors may be strings or have message property
+                this.updateError = typeof e === 'string' ? e : (e.message || e.toString() || 'Unknown error occurred');
             } finally {
                 this.updateApplying = false;
             }

@@ -155,13 +155,19 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	}
 
 	// Find asset URL for current platform
+	// Use API URL for private repos (works with token auth), browser URL as fallback
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
 	for _, asset := range release.Assets {
-		if asset.Name != nil && asset.BrowserDownloadURL != nil {
+		if asset.Name != nil {
 			name := strings.ToLower(*asset.Name)
 			if strings.Contains(name, osName) && strings.Contains(name, archName) {
-				info.AssetURL = *asset.BrowserDownloadURL
+				// Prefer API URL for private repo downloads (requires token)
+				if asset.URL != nil && GitHubToken != "" {
+					info.AssetURL = *asset.URL
+				} else if asset.BrowserDownloadURL != nil {
+					info.AssetURL = *asset.BrowserDownloadURL
+				}
 				break
 			}
 		}
@@ -245,8 +251,21 @@ func DoUpdate() error {
 
 // downloadAsset downloads the release asset to temp directory
 func downloadAsset(url string, destDir string) (string, error) {
-	// Create HTTP client with auth if token available
-	client := &http.Client{}
+	// For private repos, we need to use GitHub API to download assets
+	// The BrowserDownloadURL redirects to S3 and doesn't pass auth headers
+
+	// Create HTTP client that doesn't follow redirects automatically
+	// so we can add auth to the redirected request
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Add auth header to redirected requests if we have a token
+			if GitHubToken != "" && len(via) > 0 {
+				req.Header.Set("Authorization", "token "+GitHubToken)
+			}
+			return nil
+		},
+	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
@@ -264,7 +283,9 @@ func downloadAsset(url string, destDir string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download failed with status: %s", resp.Status)
+		// Read body for error details
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("download failed with status %s: %s", resp.Status, string(body))
 	}
 
 	// Determine filename from URL
