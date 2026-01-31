@@ -62,6 +62,44 @@ func fetchLatestRelease() (*github.RepositoryRelease, error) {
 	return release, err
 }
 
+// extractChangelog extracts and cleans up the changelog from release notes
+func extractChangelog(body string) string {
+	lines := strings.Split(body, "\n")
+	var changelog []string
+	inChangelog := false
+
+	for _, line := range lines {
+		// Start capturing after "In this version:" header
+		if strings.Contains(line, "In this version:") {
+			inChangelog = true
+			continue
+		}
+		// Stop at next section header
+		if inChangelog && strings.HasPrefix(line, "## ") {
+			break
+		}
+		// Capture changelog lines
+		if inChangelog {
+			// Clean up the line
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Convert markdown bullet to clean bullet
+			if strings.HasPrefix(line, "- ") {
+				line = "• " + strings.TrimPrefix(line, "- ")
+			}
+			changelog = append(changelog, line)
+		}
+	}
+
+	if len(changelog) == 0 {
+		return ""
+	}
+
+	return strings.Join(changelog, "\n")
+}
+
 // CheckForUpdate checks GitHub releases for a newer version
 func CheckForUpdate() (*UpdateInfo, error) {
 	info := &UpdateInfo{
@@ -116,7 +154,7 @@ func CheckForUpdate() (*UpdateInfo, error) {
 		info.ReleaseURL = *release.HTMLURL
 	}
 	if release.Body != nil {
-		info.ReleaseNotes = *release.Body
+		info.ReleaseNotes = extractChangelog(*release.Body)
 	}
 
 	// Find asset URL for current platform

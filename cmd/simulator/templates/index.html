@@ -1501,15 +1501,23 @@
                     </p>
                 </template>
 
-                <template x-if="!$store.app.updateAvailable && !$store.app.updateChecking && $store.app.updateInfo && $store.app.updateInfo.release_notes">
-                    <p style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(255,180,0,0.1); border-radius: var(--radius-md); color: #e6a700; font-size: 0.875rem;"
-                       x-text="$store.app.updateInfo.release_notes">
-                    </p>
+                <template x-if="!$store.app.updateAvailable && !$store.app.updateChecking && $store.app.updateInfo && $store.app.updateInfo.latest_version?.match(/^[\d.]/)">
+                    <div style="margin: 0 0 1rem 0;">
+                        <p style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 0.875rem; margin: 0;">
+                            ✓ You're running the latest version.
+                        </p>
+                        <template x-if="$store.app.updateInfo.release_notes">
+                            <div style="margin-top: 0.75rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: var(--radius-md); font-size: 0.8rem;">
+                                <div style="color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">What's new:</div>
+                                <div style="color: var(--text-secondary); white-space: pre-line;" x-text="$store.app.updateInfo.release_notes"></div>
+                            </div>
+                        </template>
+                    </div>
                 </template>
 
-                <template x-if="!$store.app.updateAvailable && !$store.app.updateChecking && $store.app.updateInfo && !$store.app.updateInfo.release_notes && $store.app.updateInfo.latest_version?.match(/^[\d.]/)">
-                    <p style="margin: 0 0 1rem 0; padding: 0.75rem; background: var(--bg-tertiary); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 0.875rem;">
-                        You're running the latest version.
+                <template x-if="!$store.app.updateAvailable && !$store.app.updateChecking && $store.app.updateInfo && $store.app.updateInfo.release_notes && !$store.app.updateInfo.latest_version?.match(/^[\d.]/)">
+                    <p style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(255,180,0,0.1); border-radius: var(--radius-md); color: #e6a700; font-size: 0.875rem;"
+                       x-text="$store.app.updateInfo.release_notes">
                     </p>
                 </template>
 
