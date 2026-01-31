@@ -1496,9 +1496,17 @@
                 </div>
 
                 <template x-if="$store.app.updateAvailable && !$store.app.updateApplying">
-                    <p style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(var(--color-success-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-success); font-size: 0.875rem;">
-                        A new version is available! Click Update to download and install.
-                    </p>
+                    <div style="margin: 0 0 1rem 0;">
+                        <p style="padding: 0.75rem; background: rgba(var(--color-success-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-success); font-size: 0.875rem; margin: 0;">
+                            A new version is available! Click Download to get it.
+                        </p>
+                        <template x-if="$store.app.updateInfo.release_notes">
+                            <div style="margin-top: 0.75rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: var(--radius-md); font-size: 0.8rem;">
+                                <div style="color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">What's new:</div>
+                                <div style="color: var(--text-secondary); white-space: pre-line;" x-text="$store.app.updateInfo.release_notes"></div>
+                            </div>
+                        </template>
+                    </div>
                 </template>
 
                 <template x-if="!$store.app.updateAvailable && !$store.app.updateChecking && $store.app.updateInfo && $store.app.updateInfo.latest_version?.match(/^[\d.]/)">
@@ -1523,8 +1531,23 @@
 
                 <template x-if="$store.app.updateApplying">
                     <p style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(var(--color-primary-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-primary); font-size: 0.875rem;">
+                        <span style="display: inline-block; animation: spin 1s linear infinite; margin-right: 0.5rem;">⟳</span>
                         Downloading and installing update...
                     </p>
+                </template>
+
+                <template x-if="$store.app.updateSuccess">
+                    <div style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(var(--color-success-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-success); font-size: 0.875rem;">
+                        <p style="margin: 0 0 0.5rem 0; font-weight: 600;">✓ Update installed successfully!</p>
+                        <p style="margin: 0;">Please restart the application to use the new version.</p>
+                    </div>
+                </template>
+
+                <template x-if="$store.app.updateError">
+                    <div style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(var(--color-error-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-error); font-size: 0.875rem;">
+                        <p style="margin: 0 0 0.5rem 0; font-weight: 600;">✗ Update failed</p>
+                        <p style="margin: 0;" x-text="$store.app.updateError"></p>
+                    </div>
                 </template>
 
                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
@@ -1541,7 +1564,7 @@
                     <button @click="$store.app.applyUpdate()"
                             x-show="$store.app.updateAvailable && !$store.app.updateApplying"
                             style="padding: 0.5rem 1rem; background: var(--color-success); border: none; border-radius: var(--radius-md); color: white; cursor: pointer; font-weight: 600;">
-                        Update
+                        Update Now
                     </button>
                 </div>
             </div>

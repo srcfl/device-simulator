@@ -719,6 +719,8 @@ document.addEventListener('alpine:init', () => {
         updateInfo: null,
         updateChecking: false,
         updateApplying: false,
+        updateSuccess: false,
+        updateError: null,
         showUpdateModal: false,
 
         async init() {
@@ -944,6 +946,8 @@ document.addEventListener('alpine:init', () => {
         async checkForUpdate() {
             if (this.updateChecking) return;
             this.updateChecking = true;
+            this.updateSuccess = false;
+            this.updateError = null;
             try {
                 const info = await api.checkForUpdate();
                 this.updateInfo = info;
@@ -961,12 +965,15 @@ document.addEventListener('alpine:init', () => {
         async applyUpdate() {
             if (this.updateApplying || !this.updateAvailable) return;
             this.updateApplying = true;
+            this.updateSuccess = false;
+            this.updateError = null;
             try {
                 await api.applyUpdate();
-                alert('Update applied successfully! Please restart the application.');
+                this.updateSuccess = true;
+                this.updateAvailable = false;
             } catch (e) {
                 console.error('Update failed:', e);
-                alert('Update failed: ' + e.message);
+                this.updateError = e.message || 'Unknown error occurred';
             } finally {
                 this.updateApplying = false;
             }

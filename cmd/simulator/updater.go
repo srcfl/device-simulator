@@ -1,15 +1,21 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/blang/semver"
 	"github.com/google/go-github/v50/github"
-	"github.com/rhysd/go-github-selfupdate/selfupdate"
 	"golang.org/x/oauth2"
 )
 
@@ -33,15 +39,6 @@ type UpdateInfo struct {
 	ReleaseURL     string `json:"release_url"`
 	ReleaseNotes   string `json:"release_notes"`
 	AssetURL       string `json:"asset_url"`
-}
-
-// getUpdater returns a configured selfupdate.Updater with token if available
-func getUpdater() (*selfupdate.Updater, error) {
-	config := selfupdate.Config{}
-	if GitHubToken != "" {
-		config.APIToken = GitHubToken
-	}
-	return selfupdate.NewUpdater(config)
 }
 
 // getGitHubClient returns a GitHub API client, with auth if token is available
@@ -186,38 +183,436 @@ func CheckForUpdate() (*UpdateInfo, error) {
 
 // DoUpdate downloads and applies the update
 func DoUpdate() error {
-	current, err := semver.Parse(Version)
+	// First check for update to get asset URL
+	info, err := CheckForUpdate()
 	if err != nil {
-		return fmt.Errorf("cannot update dev version: %s", Version)
+		return fmt.Errorf("failed to check for update: %v", err)
 	}
 
-	updater, err := getUpdater()
+	if !info.Available {
+		return fmt.Errorf("no update available")
+	}
+
+	if info.AssetURL == "" {
+		return fmt.Errorf("no download asset found for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	log.Printf("Downloading update from: %s", info.AssetURL)
+
+	// Create temp directory for download
+	tempDir, err := os.MkdirTemp("", "device-simulator-update-")
 	if err != nil {
-		return fmt.Errorf("failed to create updater: %v", err)
+		return fmt.Errorf("failed to create temp directory: %v", err)
 	}
+	defer os.RemoveAll(tempDir)
 
-	latest, found, err := updater.DetectLatest(repoOwner + "/" + repoName)
+	// Download the asset
+	assetPath, err := downloadAsset(info.AssetURL, tempDir)
 	if err != nil {
-		return fmt.Errorf("failed to detect latest version: %v", err)
+		return fmt.Errorf("failed to download update: %v", err)
+	}
+	log.Printf("Downloaded to: %s", assetPath)
+
+	// Extract the archive
+	extractDir := filepath.Join(tempDir, "extracted")
+	if err := os.MkdirAll(extractDir, 0755); err != nil {
+		return fmt.Errorf("failed to create extract directory: %v", err)
 	}
 
-	if !found {
-		return fmt.Errorf("no releases found")
+	if strings.HasSuffix(assetPath, ".zip") {
+		if err := extractZip(assetPath, extractDir); err != nil {
+			return fmt.Errorf("failed to extract zip: %v", err)
+		}
+	} else if strings.HasSuffix(assetPath, ".tar.gz") {
+		if err := extractTarGz(assetPath, extractDir); err != nil {
+			return fmt.Errorf("failed to extract tar.gz: %v", err)
+		}
+	} else {
+		return fmt.Errorf("unknown archive format: %s", assetPath)
+	}
+	log.Printf("Extracted to: %s", extractDir)
+
+	// Apply the update based on platform
+	if err := applyUpdate(extractDir); err != nil {
+		return fmt.Errorf("failed to apply update: %v", err)
 	}
 
-	if !latest.Version.GT(current) {
-		return fmt.Errorf("already up to date (current: %s, latest: %s)", Version, latest.Version)
-	}
-
-	log.Printf("Updating to version %s...", latest.Version)
-
-	rel, err := updater.UpdateSelf(latest.Version, repoOwner+"/"+repoName)
-	if err != nil {
-		return fmt.Errorf("update failed: %v", err)
-	}
-
-	log.Printf("Successfully updated to version %s", rel.Version)
+	log.Printf("Successfully updated to version %s", info.LatestVersion)
 	log.Printf("Please restart the application to use the new version")
+
+	return nil
+}
+
+// downloadAsset downloads the release asset to temp directory
+func downloadAsset(url string, destDir string) (string, error) {
+	// Create HTTP client with auth if token available
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	if GitHubToken != "" {
+		req.Header.Set("Authorization", "token "+GitHubToken)
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download failed with status: %s", resp.Status)
+	}
+
+	// Determine filename from URL
+	filename := filepath.Base(url)
+	destPath := filepath.Join(destDir, filename)
+
+	// Create destination file
+	out, err := os.Create(destPath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	// Copy with progress logging
+	written, err := io.Copy(out, resp.Body)
+	if err != nil {
+		return "", err
+	}
+	log.Printf("Downloaded %d bytes", written)
+
+	return destPath, nil
+}
+
+// extractZip extracts a zip archive
+func extractZip(src string, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		fpath := filepath.Join(dest, f.Name)
+
+		// Security check: prevent zip slip
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("invalid file path in zip: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+			continue
+		}
+
+		// Create parent directories
+		if err := os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return err
+		}
+
+		// Extract file
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractTarGz extracts a tar.gz archive
+func extractTarGz(src string, dest string) error {
+	file, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		fpath := filepath.Join(dest, header.Name)
+
+		// Security check: prevent path traversal
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("invalid file path in tar: %s", header.Name)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(fpath, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+				return err
+			}
+
+			outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+
+			if _, err := io.Copy(outFile, tr); err != nil {
+				outFile.Close()
+				return err
+			}
+			outFile.Close()
+		case tar.TypeSymlink:
+			if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+				return err
+			}
+			if err := os.Symlink(header.Linkname, fpath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// applyUpdate replaces the current application with the extracted update
+func applyUpdate(extractDir string) error {
+	// Get path to current executable
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve executable path: %v", err)
+	}
+
+	log.Printf("Current executable: %s", execPath)
+
+	switch runtime.GOOS {
+	case "darwin":
+		return applyUpdateMacOS(extractDir, execPath)
+	case "linux":
+		return applyUpdateLinux(extractDir, execPath)
+	case "windows":
+		return applyUpdateWindows(extractDir, execPath)
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+}
+
+// applyUpdateMacOS replaces the .app bundle on macOS
+func applyUpdateMacOS(extractDir string, execPath string) error {
+	// Find the .app bundle containing our executable
+	// execPath is like: /Applications/Device Simulator.app/Contents/MacOS/device-simulator
+	appBundlePath := execPath
+	for i := 0; i < 4; i++ {
+		appBundlePath = filepath.Dir(appBundlePath)
+		if strings.HasSuffix(appBundlePath, ".app") {
+			break
+		}
+	}
+
+	if !strings.HasSuffix(appBundlePath, ".app") {
+		// Not running from .app bundle, just replace the binary
+		return replaceExecutable(extractDir, execPath)
+	}
+
+	log.Printf("App bundle path: %s", appBundlePath)
+
+	// Find the new .app in extracted files
+	var newAppPath string
+	err := filepath.Walk(extractDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() && strings.HasSuffix(info.Name(), ".app") {
+			newAppPath = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if newAppPath == "" {
+		return fmt.Errorf("no .app bundle found in update")
+	}
+
+	log.Printf("New app bundle: %s", newAppPath)
+
+	// Create backup of current app
+	backupPath := appBundlePath + ".backup"
+	os.RemoveAll(backupPath) // Remove any existing backup
+
+	// Rename current app to backup
+	if err := os.Rename(appBundlePath, backupPath); err != nil {
+		return fmt.Errorf("failed to backup current app: %v", err)
+	}
+
+	// Move new app into place
+	if err := os.Rename(newAppPath, appBundlePath); err != nil {
+		// Try to restore backup
+		os.Rename(backupPath, appBundlePath)
+		return fmt.Errorf("failed to install new app: %v", err)
+	}
+
+	// Remove backup on success
+	os.RemoveAll(backupPath)
+
+	log.Printf("macOS app bundle updated successfully")
+	return nil
+}
+
+// applyUpdateLinux replaces the executable on Linux
+func applyUpdateLinux(extractDir string, execPath string) error {
+	// Find the new executable in extracted files (in linux/ subdirectory)
+	var newExecPath string
+	err := filepath.Walk(extractDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && info.Name() == "device-simulator" && info.Mode().IsRegular() {
+			newExecPath = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if newExecPath == "" {
+		return fmt.Errorf("no device-simulator executable found in update")
+	}
+
+	return replaceExecutable(newExecPath, execPath)
+}
+
+// applyUpdateWindows replaces the executable on Windows
+func applyUpdateWindows(extractDir string, execPath string) error {
+	// Find the new executable in extracted files
+	var newExecPath string
+	err := filepath.Walk(extractDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.EqualFold(info.Name(), "device-simulator.exe") {
+			newExecPath = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if newExecPath == "" {
+		return fmt.Errorf("no device-simulator.exe found in update")
+	}
+
+	// On Windows, we can't replace a running executable directly
+	// Rename current to .old, copy new, schedule .old for deletion on restart
+	oldPath := execPath + ".old"
+	os.Remove(oldPath) // Remove any existing .old file
+
+	if err := os.Rename(execPath, oldPath); err != nil {
+		return fmt.Errorf("failed to rename current executable: %v", err)
+	}
+
+	// Copy new executable
+	if err := copyFile(newExecPath, execPath); err != nil {
+		// Try to restore
+		os.Rename(oldPath, execPath)
+		return fmt.Errorf("failed to copy new executable: %v", err)
+	}
+
+	log.Printf("Windows executable updated successfully")
+	return nil
+}
+
+// replaceExecutable replaces a single executable file
+func replaceExecutable(newPath string, currentPath string) error {
+	// Create backup
+	backupPath := currentPath + ".backup"
+	os.Remove(backupPath)
+
+	if err := os.Rename(currentPath, backupPath); err != nil {
+		return fmt.Errorf("failed to backup current executable: %v", err)
+	}
+
+	// Copy new executable
+	if err := copyFile(newPath, currentPath); err != nil {
+		// Try to restore backup
+		os.Rename(backupPath, currentPath)
+		return fmt.Errorf("failed to copy new executable: %v", err)
+	}
+
+	// Make executable
+	if err := os.Chmod(currentPath, 0755); err != nil {
+		log.Printf("Warning: failed to set executable permission: %v", err)
+	}
+
+	// Remove backup
+	os.Remove(backupPath)
+
+	log.Printf("Executable updated successfully")
+	return nil
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return err
+	}
+
+	// Preserve file mode
+	sourceInfo, err := os.Stat(src)
+	if err == nil {
+		os.Chmod(dst, sourceInfo.Mode())
+	}
 
 	return nil
 }
