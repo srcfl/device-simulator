@@ -871,7 +871,9 @@ func (s *Server) sendResponse(messageId string, payload interface{}) {
 
 	// Serialize WebSocket writes
 	s.writeMu.Lock()
-	conn.WriteMessage(websocket.TextMessage, msg)
+	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		log.Printf("[%s] Failed to send response: %v", s.serialNumber, err)
+	}
 	s.writeMu.Unlock()
 }
 
@@ -891,7 +893,9 @@ func (s *Server) sendError(messageId, errorCode, errorDescription string, errorD
 
 	// Serialize WebSocket writes
 	s.writeMu.Lock()
-	conn.WriteMessage(websocket.TextMessage, msg)
+	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		log.Printf("[%s] Failed to send error response: %v", s.serialNumber, err)
+	}
 	s.writeMu.Unlock()
 }
 

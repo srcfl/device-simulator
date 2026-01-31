@@ -1613,13 +1613,6 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        // Check if the current site's meter is an inverter
-        isMeterInverter() {
-            if (!this.data?.meter_id) return false;
-            const meter = Alpine.store('app').simulators.find(s => s.id === this.data.meter_id);
-            return meter?.category === 'inverter';
-        },
-
         // Get virtual devices from site data
         getVirtualDevices() {
             return this.data?.virtual_devices || [];
