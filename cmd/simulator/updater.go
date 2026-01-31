@@ -69,7 +69,12 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	}
 
 	if !found {
-		info.LatestVersion = "no releases"
+		if GitHubToken == "" {
+			info.LatestVersion = "unknown"
+			info.ReleaseNotes = "Cannot check updates: No access token configured for private repository."
+		} else {
+			info.LatestVersion = "no releases found"
+		}
 		return info, nil
 	}
 

@@ -182,14 +182,14 @@ jobs:
           </plist>
           EOF
 
-          # Create zip for artifact
-          cd build/macos && zip -r "../Device-Simulator-macos.zip" "${APP_NAME}.app"
+          # Create zip for artifact (use darwin naming for selfupdate compatibility)
+          cd build/macos && zip -r "../device-simulator_darwin_amd64.zip" "${APP_NAME}.app"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Device-Simulator-macos
-          path: build/Device-Simulator-macos.zip
+          name: device-simulator-darwin
+          path: build/device-simulator_darwin_amd64.zip
 
   build-linux:
     needs: check-release
@@ -240,14 +240,14 @@ jobs:
           Categories=Development;
           EOF
 
-          # Create tarball
-          cd build && tar -czvf Device-Simulator-linux-amd64.tar.gz linux/
+          # Create tarball (use consistent naming for selfupdate compatibility)
+          cd build && tar -czvf device-simulator_linux_amd64.tar.gz linux/
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Device-Simulator-linux
-          path: build/Device-Simulator-linux-amd64.tar.gz
+          name: device-simulator-linux
+          path: build/device-simulator_linux_amd64.tar.gz
 
   build-windows:
     needs: check-release
@@ -281,14 +281,14 @@ jobs:
           start "" "%~dp0device-simulator.exe" --desktop %*
           "@ | Out-File -FilePath build\windows\Device-Simulator.bat -Encoding ASCII
 
-          # Create zip
-          Compress-Archive -Path build\windows\* -DestinationPath build\Device-Simulator-windows-amd64.zip
+          # Create zip (use consistent naming for selfupdate compatibility)
+          Compress-Archive -Path build\windows\* -DestinationPath build\device-simulator_windows_amd64.zip
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Device-Simulator-windows
-          path: build/Device-Simulator-windows-amd64.zip
+          name: device-simulator-windows
+          path: build/device-simulator_windows_amd64.zip
 
   release:
     needs: [check-release, build-macos, build-linux, build-windows]
@@ -311,9 +311,9 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            artifacts/Device-Simulator-macos/Device-Simulator-macos.zip
-            artifacts/Device-Simulator-linux/Device-Simulator-linux-amd64.tar.gz
-            artifacts/Device-Simulator-windows/Device-Simulator-windows-amd64.zip
+            artifacts/device-simulator-darwin/device-simulator_darwin_amd64.zip
+            artifacts/device-simulator-linux/device-simulator_linux_amd64.tar.gz
+            artifacts/device-simulator-windows/device-simulator_windows_amd64.zip
           body: |
             ## In this version:
 
@@ -323,9 +323,9 @@ jobs:
 
             | Platform | File | Requirements |
             |----------|------|--------------|
-            | macOS | `Device-Simulator-macos.zip` | macOS 10.15+ |
-            | Linux | `Device-Simulator-linux-amd64.tar.gz` | GTK3, WebKit2GTK |
-            | Windows | `Device-Simulator-windows-amd64.zip` | WebView2 |
+            | macOS | `device-simulator_darwin_amd64.zip` | macOS 10.15+ |
+            | Linux | `device-simulator_linux_amd64.tar.gz` | GTK3, WebKit2GTK |
+            | Windows | `device-simulator_windows_amd64.zip` | WebView2 |
 
             ## Installation
 
@@ -335,7 +335,7 @@ jobs:
 
             ### Linux
             ```bash
-            tar -xzf Device-Simulator-linux-amd64.tar.gz
+            tar -xzf device-simulator_linux_amd64.tar.gz
             sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37  # Debian/Ubuntu
             ./linux/device-simulator.sh
             ```

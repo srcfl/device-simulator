@@ -12,15 +12,15 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 | Platform | Download |
 |----------|----------|
-| macOS | `Device-Simulator-macos.zip` |
-| Linux | `Device-Simulator-linux-amd64.tar.gz` |
-| Windows | `Device-Simulator-windows-amd64.zip` |
+| macOS | `device-simulator_darwin_amd64.zip` |
+| Linux | `device-simulator_linux_amd64.tar.gz` |
+| Windows | `device-simulator_windows_amd64.zip` |
 
 **macOS:** Unzip, drag to Applications, right-click → Open (first time only)
 
 **Linux:**
 ```bash
-tar -xzf Device-Simulator-linux-amd64.tar.gz
+tar -xzf device-simulator_linux_amd64.tar.gz
 sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37  # Debian/Ubuntu
 ./linux/device-simulator.sh
 ```
