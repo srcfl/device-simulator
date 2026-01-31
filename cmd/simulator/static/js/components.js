@@ -378,8 +378,16 @@ document.addEventListener('alpine:init', () => {
                 val = 0;
                 event.target.value = 0;
             }
+            const previousValue = this.powerSliderValue;
             this.powerSliderValue = val;
-            await Alpine.store('simulator').setPower(val);
+            try {
+                await Alpine.store('simulator').setPower(val);
+                await Alpine.store('simulator').loadAllData();
+            } catch (e) {
+                console.error('Set power error:', e);
+                // Rollback on error
+                this.powerSliderValue = previousValue;
+            }
         },
 
         onSocInput(event) {
@@ -389,8 +397,15 @@ document.addEventListener('alpine:init', () => {
 
         async onSocChange(event) {
             this.socDragging = false;
+            const previousValue = this.socSliderValue;
             this.socSliderValue = parseInt(event.target.value);
-            await Alpine.store('simulator').setState('soc', this.socSliderValue);
+            try {
+                await Alpine.store('simulator').setState('soc', this.socSliderValue);
+            } catch (e) {
+                console.error('Set SOC error:', e);
+                // Rollback on error
+                this.socSliderValue = previousValue;
+            }
         },
 
         async toggleEVConnected() {
@@ -550,6 +565,7 @@ document.addEventListener('alpine:init', () => {
 
         async toggleEVConnected() {
             await Alpine.store('simulator').setState('evConnected', !this.evConnected);
+            await Alpine.store('simulator').loadAllData();
         }
     }));
 
@@ -701,6 +717,22 @@ document.addEventListener('alpine:init', () => {
         socSliderValue: 50,
         powerDragging: false,
         socDragging: false,
+        // Locking state to prevent double-click race conditions
+        toggleLocks: {},
+
+        isToggleLocked(key) {
+            return this.toggleLocks[key] || false;
+        },
+
+        async withToggleLock(key, fn) {
+            if (this.toggleLocks[key]) return;
+            this.toggleLocks[key] = true;
+            try {
+                await fn();
+            } finally {
+                this.toggleLocks[key] = false;
+            }
+        },
 
         getSimulator(simId) {
             const app = Alpine.store('app');
@@ -745,9 +777,15 @@ document.addEventListener('alpine:init', () => {
         },
 
         async toggleMqttEvConnected(simId) {
-            const current = this.getMqttEvConnected(simId);
-            await api.setState(simId, 'evConnected', !current);
-            await Alpine.store('app').loadSimulators();
+            await this.withToggleLock(`mqtt-ev-${simId}`, async () => {
+                try {
+                    const current = this.getMqttEvConnected(simId);
+                    await api.setState(simId, 'evConnected', !current);
+                    await Alpine.store('app').loadSimulators();
+                } catch (e) {
+                    console.error('Toggle MQTT EV connected error:', e);
+                }
+            });
         },
 
         async setMqttPower(simId, power) {
@@ -780,9 +818,15 @@ document.addEventListener('alpine:init', () => {
         },
 
         async toggleOcppEvConnected(simId) {
-            const current = this.getOcppEvConnected(simId);
-            await api.setState(simId, 'evConnected', !current);
-            await Alpine.store('app').loadSimulators();
+            await this.withToggleLock(`ocpp-ev-${simId}`, async () => {
+                try {
+                    const current = this.getOcppEvConnected(simId);
+                    await api.setState(simId, 'evConnected', !current);
+                    await Alpine.store('app').loadSimulators();
+                } catch (e) {
+                    console.error('Toggle OCPP EV connected error:', e);
+                }
+            });
         },
 
         async setOcppPower(simId, power) {
@@ -810,13 +854,19 @@ document.addEventListener('alpine:init', () => {
         },
 
         async toggleModbusRunning(simId) {
-            const current = this.getModbusRunning(simId);
-            if (current) {
-                await api.stopAutomation(simId);
-            } else {
-                await api.startAutomation(simId);
-            }
-            await Alpine.store('app').loadSimulators();
+            await this.withToggleLock(`modbus-${simId}`, async () => {
+                try {
+                    const current = this.getModbusRunning(simId);
+                    if (current) {
+                        await api.stopAutomation(simId);
+                    } else {
+                        await api.startAutomation(simId);
+                    }
+                    await Alpine.store('app').loadSimulators();
+                } catch (e) {
+                    console.error('Toggle Modbus running error:', e);
+                }
+            });
         },
 
         // Home Load controls
@@ -1516,6 +1566,37 @@ document.addEventListener('alpine:init', () => {
             // Initialize local phase factors from store
             this.syncPhaseFactors();
             this.$watch('$store.site.data', () => this.syncPhaseFactors());
+
+            // Load fuse state from localStorage
+            this.loadFuseState();
+        },
+
+        loadFuseState() {
+            const siteId = Alpine.store('site').selectedId;
+            if (!siteId) return;
+            try {
+                const saved = localStorage.getItem(`fuse-state-${siteId}`);
+                if (saved) {
+                    const state = JSON.parse(saved);
+                    this.fuseBlown = {
+                        l1: state.l1 || false,
+                        l2: state.l2 || false,
+                        l3: state.l3 || false
+                    };
+                }
+            } catch (e) {
+                console.error('Load fuse state error:', e);
+            }
+        },
+
+        saveFuseState() {
+            const siteId = Alpine.store('site').selectedId;
+            if (!siteId) return;
+            try {
+                localStorage.setItem(`fuse-state-${siteId}`, JSON.stringify(this.fuseBlown));
+            } catch (e) {
+                console.error('Save fuse state error:', e);
+            }
         },
 
         syncPhaseFactors() {
@@ -1558,6 +1639,7 @@ document.addEventListener('alpine:init', () => {
 
         toggleFuse(phase) {
             this.fuseBlown[phase] = !this.fuseBlown[phase];
+            this.saveFuseState();
         },
 
         // Non-linear scale: 0-fuseSize = 70% of bar, fuseSize to 3*fuseSize = remaining 30%

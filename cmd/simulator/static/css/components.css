@@ -127,6 +127,7 @@
     background: #fff;
     border-radius: 50%;
     transition: transform var(--transition-fast);
+    pointer-events: none;
 }
 
 .toggle-switch-track.on .toggle-switch-thumb {
@@ -617,6 +618,7 @@
     background: #fff;
     border-radius: 50%;
     transition: transform var(--transition-fast);
+    pointer-events: none;
 }
 
 .mini-toggle.on .mini-toggle-thumb {

@@ -922,19 +922,22 @@ document.addEventListener('alpine:init', () => {
 
         // Toggle emulator (server) only - for sidebar toggle
         async toggleEmulatorRunning(id, currentState) {
-            if (currentState) {
+            // Get fresh state from the simulators list instead of using potentially stale param
+            const sim = this.simulators.find(s => s.id === id);
+            const freshState = sim?.running || false;
+
+            if (freshState) {
                 await api.stopEmulator(id);
             } else {
                 await api.startEmulator(id);
             }
 
-            const sim = this.simulators.find(s => s.id === id);
             if (sim) {
                 const saved = storage.load();
                 const config = saved.simulators.find(s => s.serial === sim.serial);
                 if (config) {
                     if (!config.automation) config.automation = {};
-                    config.automation.wasRunning = !currentState;
+                    config.automation.wasRunning = !freshState;
                     storage.save(saved);
                 }
             }

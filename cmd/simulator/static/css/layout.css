@@ -190,6 +190,7 @@
     background: #fff;
     border-radius: 50%;
     transition: transform var(--transition-fast);
+    pointer-events: none;
 }
 
 .sim-toggle-track.on .sim-toggle-thumb {
