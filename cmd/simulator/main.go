@@ -433,7 +433,9 @@ func createSimulator(simType string) (*Simulator, error) {
 			if profile := pm.GetActive(); profile != nil {
 				for addr, value := range profile.Defaults {
 					if def := modbus.RegisterLookup[addr]; def != nil {
-						server.WriteRegisterValue(def, value)
+						if err := server.WriteRegisterValue(def, value); err != nil {
+							log.Printf("[%d] Failed to write register %d: %v", id, addr, err)
+						}
 					}
 				}
 			}
@@ -1200,7 +1202,9 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 			for addr, value := range profile.Defaults {
 				def := modbus.RegisterLookup[addr]
 				if def != nil {
-					sim.Server.WriteRegisterValue(def, value)
+					if err := sim.Server.WriteRegisterValue(def, value); err != nil {
+						log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
+					}
 				}
 			}
 		case "ocpp":

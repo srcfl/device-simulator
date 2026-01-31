@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/modbus"
@@ -351,7 +352,9 @@ func (a *App) ApplyProfile(id int, name string) error {
 		for addr, value := range profile.Defaults {
 			def := modbus.RegisterLookup[addr]
 			if def != nil {
-				sim.Server.WriteRegisterValue(def, value)
+				if err := sim.Server.WriteRegisterValue(def, value); err != nil {
+					log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
+				}
 			}
 		}
 	}
