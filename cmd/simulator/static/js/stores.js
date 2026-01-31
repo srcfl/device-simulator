@@ -713,6 +713,7 @@ document.addEventListener('alpine:init', () => {
         categories: categories,
         addMenuOpen: false,
         refreshInterval: null,
+        globalRefreshInterval: null,
         // Version and update state
         version: '0.0.0',
         updateAvailable: false,
@@ -761,7 +762,12 @@ document.addEventListener('alpine:init', () => {
             }
             await this.loadSimulators();
             await Alpine.store('site').loadSites();
-            setInterval(() => {
+
+            // Clear any existing global refresh interval before creating new one
+            if (this.globalRefreshInterval) {
+                clearInterval(this.globalRefreshInterval);
+            }
+            this.globalRefreshInterval = setInterval(() => {
                 this.loadSimulators();
                 Alpine.store('site').loadSites();
             }, 3000);
