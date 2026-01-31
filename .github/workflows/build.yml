@@ -81,6 +81,9 @@ jobs:
         id: version
         if: steps.check.outputs.should_release == 'true'
         run: |
+          # Fetch all tags from remote (tags created by releases may not be in checkout)
+          git fetch --tags --force
+
           # Get latest tag or default to v0.0.0
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Latest tag: $LATEST_TAG"
