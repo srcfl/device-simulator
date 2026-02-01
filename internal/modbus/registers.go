@@ -56,7 +56,7 @@ var RegisterDefinitions = []RegisterDef{
 	{Address: 13073, Name: "PV Command", Description: "PV power limit", Unit: "W", Category: "pv", DataType: U16, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
 
 	// Battery Registers
-	{Address: 13021, Name: "Battery Power", Description: "Battery power magnitude", Unit: "W", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13021, Name: "Battery Power", Description: "Battery power (positive=charge, negative=discharge)", Unit: "W", Category: "battery", DataType: I16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 13022, Name: "Battery SoC", Description: "Battery state of charge", Unit: "%", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 13000, Name: "Battery Flags", Description: "Bit1: charging, Bit2: discharging", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
 	{Address: 13050, Name: "Charge/Discharge Cmd", Description: "170=charge; 187=discharge; 204=stop", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},

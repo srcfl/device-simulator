@@ -7,6 +7,14 @@ body {
     color: var(--text-primary);
     height: 100vh;
     display: flex;
+    flex-direction: column;
+}
+
+/* App Container - holds sidebar and main */
+.app-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
 }
 
 /* Section Styles */

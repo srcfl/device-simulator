@@ -19,6 +19,10 @@ if (isWails && window.runtime) {
             if (Alpine.store('site').selectedId) {
                 Alpine.store('site').loadSiteData();
             }
+            // Also refresh simulators to ensure getSimInfo() has current data
+            if (Alpine.store('app')) {
+                Alpine.store('app').loadSimulators();
+            }
         }
     });
 }
@@ -464,12 +468,87 @@ const siteApi = {
             throw new Error(text);
         }
         return resp.json();
+    },
+
+    // Site Simulation API methods
+    async startSiteSimulation(siteId) {
+        if (isWails) {
+            await window.go.main.App.StartSiteSimulation(siteId);
+            return;
+        }
+        const resp = await fetch(`/api/sites/${siteId}/simulation/start`, { method: 'POST' });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+    },
+
+    async stopSiteSimulation(siteId) {
+        if (isWails) {
+            await window.go.main.App.StopSiteSimulation(siteId);
+            return;
+        }
+        await fetch(`/api/sites/${siteId}/simulation/stop`, { method: 'POST' });
+    },
+
+    async updateSiteSimulationConfig(siteId, config) {
+        if (isWails) {
+            await window.go.main.App.UpdateSiteSimulationConfig(siteId, config);
+            return;
+        }
+        await fetch(`/api/sites/${siteId}/simulation/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+    },
+
+    async setDevicePowerState(siteId, simulatorId, deviceOn) {
+        if (isWails) {
+            await window.go.main.App.SetDevicePowerState(simulatorId, deviceOn);
+            return;
+        }
+        const resp = await fetch(`/api/sites/${siteId}/device-power`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ simulator_id: simulatorId, device_on: deviceOn })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+    },
+
+    async createSimulatorInSite(siteId, simType) {
+        if (isWails) {
+            return await window.go.main.App.CreateSimulatorInSite(siteId, simType);
+        }
+        // Fallback: create simulator then add to site
+        const sim = await api.createSimulator(simType);
+        await this.addSimulatorToSite(siteId, sim.id);
+        return sim;
+    },
+
+    async addMeterToSite(siteId, meterId) {
+        if (isWails) {
+            await window.go.main.App.AddMeterToSite(siteId, meterId);
+            return;
+        }
+        const resp = await fetch(`/api/sites/${siteId}/meters`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meter_id: meterId })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
     }
 };
 
 // Storage Layer
 const STORAGE_KEY = 'device-simulator-configs';
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 
 const storage = {
     load() {
@@ -499,6 +578,23 @@ const storage = {
                     return site;
                 });
                 parsed.version = 3;
+            }
+            // Migrate to v4: add simulation state to sites, siteId to simulators
+            if (parsed.version < 4) {
+                parsed.sites = parsed.sites.map(site => {
+                    site.simulationState = site.simulationState || {
+                        timeMultiplier: 1,
+                        scenario: 'sunny'
+                    };
+                    site.meterIds = site.meterIds || [];
+                    return site;
+                });
+                parsed.simulators = parsed.simulators.map(sim => {
+                    sim.siteId = sim.siteId || 0;
+                    sim.deviceOn = sim.deviceOn ?? true;
+                    return sim;
+                });
+                parsed.version = 4;
             }
             if (parsed.version !== STORAGE_VERSION) {
                 this.save(parsed);
@@ -830,6 +926,57 @@ document.addEventListener('alpine:init', () => {
                 grouped[cat] = this.simulators.filter(s => s.category === cat);
             }
             return grouped;
+        },
+
+        // Get simulators for selected site only
+        getSiteSimulators() {
+            const siteStore = Alpine.store('site');
+            if (!siteStore.selectedId || !siteStore.data) return [];
+            const siteSimIds = siteStore.data.simulator_ids || [];
+            const meterIds = siteStore.data.meter_ids || [];
+            const primaryMeterId = siteStore.data.meter_id;
+            // Include simulator_ids + meter_ids + primary meter_id
+            const allIds = new Set([...siteSimIds, ...meterIds]);
+            if (primaryMeterId) allIds.add(primaryMeterId);
+            return this.simulators.filter(s => allIds.has(s.id));
+        },
+
+        // Get simulators grouped by category for selected site only
+        getSiteGroupedSimulators() {
+            const siteSimulators = this.getSiteSimulators();
+            const grouped = {};
+            for (const cat of Object.keys(categories)) {
+                grouped[cat] = siteSimulators.filter(s => s.category === cat);
+            }
+            return grouped;
+        },
+
+        // Add new simulator to current site
+        async addSimulatorToSite(type) {
+            this.addMenuOpen = false;
+            const siteStore = Alpine.store('site');
+            if (!siteStore.selectedId) {
+                alert('Please select a site first');
+                return;
+            }
+            try {
+                const newSim = await siteApi.createSimulatorInSite(siteStore.selectedId, type);
+                storage.saveSimulatorConfig({
+                    clientId: storage.generateClientId(),
+                    type: type,
+                    serial: newSim.serial,
+                    slaveId: newSim.slave_id || 1,
+                    profile: newSim.profile || null,
+                    siteId: siteStore.selectedId,
+                    deviceOn: true,
+                    automation: { wasRunning: false, timeMultiplier: 1, scenario: 'sunny' }
+                });
+                await this.loadSimulators();
+                await siteStore.loadSiteData();
+            } catch (e) {
+                console.error('Add to site error:', e);
+                alert('Failed: ' + e.message);
+            }
         },
 
         toggleCategory(cat) {
@@ -1174,10 +1321,15 @@ document.addEventListener('alpine:init', () => {
                 }
             }
 
-            if (isRunning) {
-                await api.stopEmulator(this.id);
-            } else {
-                await api.startEmulator(this.id);
+            try {
+                if (isRunning) {
+                    await api.stopEmulator(this.id);
+                } else {
+                    await api.startEmulator(this.id);
+                }
+            } catch (e) {
+                console.error('Toggle emulator error:', e);
+                alert('Error toggling emulator: ' + e.message);
             }
 
             const app = Alpine.store('app');
@@ -1535,7 +1687,11 @@ document.addEventListener('alpine:init', () => {
             if (!this.selectedId) return;
             try {
                 await siteApi.addSimulatorToSite(this.selectedId, simulatorId);
-                await this.loadSiteData();
+                // Refresh both site data and simulator list to ensure getSimInfo() works
+                await Promise.all([
+                    this.loadSiteData(),
+                    Alpine.store('app').loadSimulators()
+                ]);
                 this.syncCurrentSiteToStorage();
             } catch (e) {
                 console.error('Add simulator error:', e);
@@ -1547,7 +1703,11 @@ document.addEventListener('alpine:init', () => {
             if (!this.selectedId) return;
             try {
                 await siteApi.removeSimulatorFromSite(this.selectedId, simulatorId);
-                await this.loadSiteData();
+                // Refresh both site data and simulator list
+                await Promise.all([
+                    this.loadSiteData(),
+                    Alpine.store('app').loadSimulators()
+                ]);
                 this.syncCurrentSiteToStorage();
             } catch (e) {
                 console.error('Remove simulator error:', e);
@@ -1641,6 +1801,147 @@ document.addEventListener('alpine:init', () => {
         // Find site that has this simulator as its meter
         getSiteWithMeter(simulatorId) {
             return this.sites.find(s => s.meter_id === simulatorId);
+        },
+
+        // ========== SITE SIMULATION METHODS ==========
+
+        // Start simulation for this site (data generation for all devices)
+        async startSimulation() {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.startSiteSimulation(this.selectedId);
+                await this.loadSiteData();
+                await this.loadSites();
+            } catch (e) {
+                console.error('Start simulation error:', e);
+                alert('Error: ' + e.message);
+            }
+        },
+
+        // Stop simulation for this site
+        async stopSimulation() {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.stopSiteSimulation(this.selectedId);
+                await this.loadSiteData();
+                await this.loadSites();
+            } catch (e) {
+                console.error('Stop simulation error:', e);
+            }
+        },
+
+        // Toggle simulation running state
+        async toggleSimulation() {
+            if (!this.data) return;
+            if (this.data.sim_running) {
+                await this.stopSimulation();
+            } else {
+                await this.startSimulation();
+            }
+        },
+
+        // Update simulation configuration (time multiplier, scenario)
+        async updateSimulationConfig(config) {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.updateSiteSimulationConfig(this.selectedId, config);
+                await this.loadSiteData();
+            } catch (e) {
+                console.error('Update simulation config error:', e);
+            }
+        },
+
+        // Set time multiplier
+        async setTimeMultiplier(multiplier) {
+            await this.updateSimulationConfig({ time_multiplier: multiplier });
+        },
+
+        // Set weather scenario
+        async setScenario(scenario) {
+            await this.updateSimulationConfig({ scenario: scenario });
+        },
+
+        // Toggle a device's power state (on/off within the site)
+        async setDevicePowerState(simulatorId, deviceOn) {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.setDevicePowerState(this.selectedId, simulatorId, deviceOn);
+                await Promise.all([
+                    this.loadSiteData(),
+                    Alpine.store('app').loadSimulators()
+                ]);
+            } catch (e) {
+                console.error('Set device power state error:', e);
+            }
+        },
+
+        // Create a new simulator directly within this site
+        async createSimulatorInSite(simType) {
+            if (!this.selectedId) return;
+            try {
+                const newSim = await siteApi.createSimulatorInSite(this.selectedId, simType);
+                storage.saveSimulatorConfig({
+                    clientId: storage.generateClientId(),
+                    type: simType,
+                    serial: newSim.serial,
+                    slaveId: newSim.slave_id || 1,
+                    profile: newSim.profile || null,
+                    siteId: this.selectedId,
+                    automation: { wasRunning: false, timeMultiplier: 1, scenario: 'sunny' }
+                });
+                await Promise.all([
+                    this.loadSiteData(),
+                    Alpine.store('app').loadSimulators()
+                ]);
+                return newSim;
+            } catch (e) {
+                console.error('Create simulator in site error:', e);
+                throw e;
+            }
+        },
+
+        // Add an additional meter to the site
+        async addMeter(meterId) {
+            if (!this.selectedId) return;
+            try {
+                await siteApi.addMeterToSite(this.selectedId, meterId);
+                await this.loadSiteData();
+            } catch (e) {
+                console.error('Add meter error:', e);
+                throw e;
+            }
+        },
+
+        // Get simulators that belong to this site
+        getSiteSimulators() {
+            if (!this.data?.simulator_ids) return [];
+            const app = Alpine.store('app');
+            return app.simulators.filter(s => this.data.simulator_ids.includes(s.id));
+        },
+
+        // Get devices grouped by category for this site
+        getSiteDevicesByCategory() {
+            const grouped = {};
+            const siteSimulators = this.getSiteSimulators();
+
+            for (const sim of siteSimulators) {
+                if (!grouped[sim.category]) {
+                    grouped[sim.category] = [];
+                }
+                grouped[sim.category].push(sim);
+            }
+
+            return grouped;
+        },
+
+        // Format simulated time for display
+        getFormattedSimulatedTime() {
+            return this.data?.simulated_time || 'Not started';
+        },
+
+        // Check if simulation is running
+        isSimulationRunning() {
+            return this.data?.sim_running || false;
         }
     });
 });

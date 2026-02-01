@@ -201,10 +201,87 @@ document.addEventListener('alpine:init', () => {
         onOCPPUrlInput(event) {
             this.localOcppUrl = event.target.value;
             this.onOcppUrlInput();
+        },
+
+        // Toggle emulator - delegates to the simulator store
+        async toggleEmulator() {
+            const store = Alpine.store('simulator');
+            if (store && typeof store.toggleEmulator === 'function') {
+                await store.toggleEmulator();
+            } else {
+                console.error('Simulator store or toggleEmulator not found');
+            }
         }
     }));
 
-    // Modbus Controls
+    // Site Simulation Status (for device detail view - synced with site)
+    Alpine.data('siteSimulationStatus', () => ({
+        scenarioLabels: {
+            'sunny': '☀️ Sunny',
+            'cloudy': '⛅ Cloudy',
+            'overcast': '☁️ Overcast',
+            'rainy': '🌧️ Rainy',
+            'night': '🌙 Night',
+            'peak_load': '⚡ Peak Load'
+        },
+
+        get connectedSiteId() {
+            const simId = Alpine.store('simulator').id;
+            const sites = Alpine.store('site').sites || [];
+            const site = sites.find(s =>
+                s.meter_id === simId ||
+                (s.meter_ids || []).includes(simId) ||
+                (s.simulator_ids || []).includes(simId)
+            );
+            return site?.id || null;
+        },
+
+        get connectedSite() {
+            if (!this.connectedSiteId) return null;
+            const sites = Alpine.store('site').sites || [];
+            return sites.find(s => s.id === this.connectedSiteId) || null;
+        },
+
+        get connectedSiteName() {
+            return this.connectedSite?.name || 'Unknown';
+        },
+
+        get siteSimRunning() {
+            return this.connectedSite?.sim_running || false;
+        },
+
+        get siteSimulatedTime() {
+            return this.connectedSite?.simulated_time || null;
+        },
+
+        get siteScenario() {
+            return this.connectedSite?.scenario || 'sunny';
+        },
+
+        get siteScenarioLabel() {
+            return this.scenarioLabels[this.siteScenario] || this.siteScenario;
+        },
+
+        get siteTimeMultiplier() {
+            return this.connectedSite?.time_multiplier || 1;
+        },
+
+        async toggleSiteSimulation() {
+            if (!this.connectedSiteId) return;
+            try {
+                if (this.siteSimRunning) {
+                    await siteApi.stopSiteSimulation(this.connectedSiteId);
+                } else {
+                    await siteApi.startSiteSimulation(this.connectedSiteId);
+                }
+                await Alpine.store('site').loadSites();
+            } catch (e) {
+                console.error('Toggle site simulation error:', e);
+            }
+        }
+    }));
+
+    // Modbus Controls (legacy - kept for compatibility)
     Alpine.data('modbusControls', () => ({
         scenario: 'sunny',
         timeMultiplier: 1,
@@ -719,6 +796,15 @@ document.addEventListener('alpine:init', () => {
         socDragging: false,
         // Locking state to prevent double-click race conditions
         toggleLocks: {},
+        // Reactive trigger that updates when simulators change
+        simulatorsVersion: 0,
+
+        init() {
+            // Watch for simulator changes to trigger reactivity
+            this.$watch('$store.app.simulators', () => {
+                this.simulatorsVersion++;
+            });
+        },
 
         isToggleLocked(key) {
             return this.toggleLocks[key] || false;
@@ -737,6 +823,107 @@ document.addEventListener('alpine:init', () => {
         getSimulator(simId) {
             const app = Alpine.store('app');
             return app.simulators.find(s => s.id === simId) || null;
+        },
+
+        // Get simulator info with reactivity for non-inverter cards
+        getSimInfo(simId) {
+            // Access simulatorsVersion to trigger Alpine reactivity when simulators change
+            void this.simulatorsVersion;
+            const app = Alpine.store('app');
+            const sim = app.simulators.find(s => s.id === simId);
+            return sim || { serial: `ID ${simId}`, protocol: 'unknown', running: false };
+        },
+
+        // Check if site simulation is currently running
+        isSiteSimulating() {
+            return Alpine.store('site').data?.sim_running || false;
+        },
+
+        // Get inverters from site's simulator_ids
+        getSiteInverters() {
+            // Access simulatorsVersion to trigger Alpine reactivity when simulators change
+            void this.simulatorsVersion;
+            const siteData = Alpine.store('site').data;
+            if (!siteData?.simulator_ids) return [];
+            const app = Alpine.store('app');
+            return siteData.simulator_ids
+                .map(id => app.simulators.find(s => s.id === id))
+                .filter(s => s && s.category === 'inverter');
+        },
+
+        // Get non-inverter simulator ids (for the generic device loop)
+        getNonInverterSimulatorIds() {
+            // Access simulatorsVersion to trigger Alpine reactivity when simulators change
+            void this.simulatorsVersion;
+            const siteData = Alpine.store('site').data;
+            if (!siteData?.simulator_ids) return [];
+            const app = Alpine.store('app');
+            return siteData.simulator_ids.filter(id => {
+                const sim = app.simulators.find(s => s.id === id);
+                return sim && sim.category !== 'inverter';
+            });
+        },
+
+        // Inverter PV/Battery helpers
+        formatInverterPvPower(inv) {
+            const power = inv?.pv_power || 0;
+            if (power >= 1000) {
+                return `${(power / 1000).toFixed(1)} kW`;
+            }
+            return `${power.toFixed(0)} W`;
+        },
+
+        formatInverterBatteryPower(inv) {
+            const power = inv?.load || 0;
+            const absP = Math.abs(power);
+            if (absP >= 1000) {
+                return `${(absP / 1000).toFixed(1)} kW`;
+            }
+            return `${absP.toFixed(0)} W`;
+        },
+
+        getInverterBatteryPowerClass(inv) {
+            // Use battery_direction from backend (based on command register 13050)
+            const direction = inv?.battery_direction;
+            if (direction === 'charging') return 'charging';
+            if (direction === 'discharging') return 'discharging';
+            return 'idle';
+        },
+
+        // Get signed battery power for slider value (charging = negative, discharging = positive)
+        getInverterBatterySliderValue(inv) {
+            const power = inv?.load || 0;
+            const direction = inv?.battery_direction;
+            if (direction === 'charging') return -power;
+            if (direction === 'discharging') return power;
+            return 0;
+        },
+
+        async setInverterPvPower(simId, value) {
+            try {
+                // Write to PV power register (5016 is common for inverters)
+                await api.writeRegister(simId, 5016, value);
+                await Alpine.store('app').loadSimulators();
+            } catch (e) {
+                console.error('Set inverter PV power error:', e);
+            }
+        },
+
+        async setInverterBatteryPower(simId, value) {
+            try {
+                // Write absolute power value to register 13021
+                await api.writeRegister(simId, 13021, Math.abs(value));
+
+                // Write command register 13050: 170=charge, 187=discharge, 204=stop
+                let cmd = 204; // stop/idle
+                if (value < 0) cmd = 170; // charge (negative = consuming)
+                else if (value > 0) cmd = 187; // discharge (positive = generating)
+                await api.writeRegister(simId, 13050, cmd);
+
+                await Alpine.store('app').loadSimulators();
+            } catch (e) {
+                console.error('Set inverter battery power error:', e);
+            }
         },
 
         // Navigate to full simulator view
@@ -939,7 +1126,7 @@ document.addEventListener('alpine:init', () => {
             const battery = this.virtualDevices.find(d => d.type === 'battery');
             if (!battery) return 0;
             const power = battery.power || 0;
-            // charging = positive (consuming), discharging = negative (generating)
+            // For power balance: charging = positive (consuming like load), discharging = negative (generating like solar)
             return battery.direction === 'charging' ? power : -power;
         },
 
@@ -1003,9 +1190,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         updateSelectedSite() {
-            const meterId = Alpine.store('simulator').id;
+            const simId = Alpine.store('simulator').id;
             const sites = Alpine.store('site').sites || [];
-            const connectedSite = sites.find(s => s.meter_id === meterId);
+            // Check meter_id, meter_ids array, and simulator_ids array
+            const connectedSite = sites.find(s =>
+                s.meter_id === simId ||
+                (s.meter_ids || []).includes(simId) ||
+                (s.simulator_ids || []).includes(simId)
+            );
             this.selectedSiteId = connectedSite?.id || null;
         },
 
@@ -1013,10 +1205,14 @@ document.addEventListener('alpine:init', () => {
             return Alpine.store('site').sites || [];
         },
 
-        get connectedSiteName() {
+        getSiteName() {
             if (!this.selectedSiteId) return null;
             const site = this.sites.find(s => s.id === this.selectedSiteId);
             return site?.name || null;
+        },
+
+        get connectedSiteName() {
+            return this.getSiteName();
         },
 
         async onSiteChange(siteId) {
@@ -1039,6 +1235,9 @@ document.addEventListener('alpine:init', () => {
                     await Alpine.store('site').loadSites();
                     this.selectedSiteId = newSiteId;
                 }
+                // Refresh simulator data to ensure UI stays in sync
+                await Alpine.store('simulator').loadAllData();
+                await Alpine.store('app').loadSimulators();
             } finally {
                 this.changingSite = false;
             }
@@ -1112,9 +1311,14 @@ document.addEventListener('alpine:init', () => {
         },
 
         updateSelectedSite() {
-            const inverterId = Alpine.store('simulator').id;
+            const simId = Alpine.store('simulator').id;
             const sites = Alpine.store('site').sites || [];
-            const connectedSite = sites.find(s => s.meter_id === inverterId);
+            // Check meter_id, meter_ids array, and simulator_ids array
+            const connectedSite = sites.find(s =>
+                s.meter_id === simId ||
+                (s.meter_ids || []).includes(simId) ||
+                (s.simulator_ids || []).includes(simId)
+            );
             this.selectedSiteId = connectedSite?.id || null;
         },
 
@@ -1122,10 +1326,14 @@ document.addEventListener('alpine:init', () => {
             return Alpine.store('site').sites || [];
         },
 
-        get connectedSiteName() {
+        getSiteName() {
             if (!this.selectedSiteId) return null;
             const site = this.sites.find(s => s.id === this.selectedSiteId);
             return site?.name || null;
+        },
+
+        get connectedSiteName() {
+            return this.getSiteName();
         },
 
         async onSiteChange(siteId) {
@@ -1148,6 +1356,9 @@ document.addEventListener('alpine:init', () => {
                     await Alpine.store('site').loadSites();
                     this.selectedSiteId = newSiteId;
                 }
+                // Refresh simulator data to ensure UI stays in sync
+                await Alpine.store('simulator').loadAllData();
+                await Alpine.store('app').loadSimulators();
             } finally {
                 this.changingSite = false;
             }

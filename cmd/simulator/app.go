@@ -80,6 +80,8 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 			"running":    sim.Running,
 			"automation": sim.Automation.Enabled,
 			"profile":    sim.ProfilesManager.GetActiveName(),
+			"site_id":    sim.SiteID,
+			"device_on":  sim.DeviceOn,
 		}
 
 		switch sim.Protocol {
@@ -90,8 +92,17 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 			} else {
 				entry["pv_power"] = getRegisterValue(sim.Server, 5016)
 				entry["soc"] = getRegisterValue(sim.Server, 13022)
-				entry["load"] = getRegisterValue(sim.Server, 13007)
+				entry["load"] = getRegisterValue(sim.Server, 13021)
 				entry["meter"] = getRegisterValue(sim.Server, 5600)
+				// Add battery direction based on command register
+				batteryCmd := getRegisterValue(sim.Server, 13050)
+				if batteryCmd == 170 {
+					entry["battery_direction"] = "charging"
+				} else if batteryCmd == 187 {
+					entry["battery_direction"] = "discharging"
+				} else {
+					entry["battery_direction"] = "idle"
+				}
 			}
 		case "mqtt":
 			state := sim.MQTTServer.GetState()
@@ -645,15 +656,20 @@ func (a *App) GetSites() []map[string]interface{} {
 	for _, site := range sites {
 		site.mu.RLock()
 		entry := map[string]interface{}{
-			"id":            site.ID,
-			"name":          site.Name,
-			"meter_id":      site.MeterID,
-			"simulator_ids": site.SimulatorIDs,
-			"base_load_w":   site.BaseLoadW,
-			"enabled":       site.Enabled,
-			"fuse_size":     site.FuseSize,
-			"phase_factors": site.PhaseFactors,
-			"bound_meter":   site.BoundMeter,
+			"id":              site.ID,
+			"name":            site.Name,
+			"meter_id":        site.MeterID,
+			"meter_ids":       site.MeterIDs,
+			"simulator_ids":   site.SimulatorIDs,
+			"base_load_w":     site.BaseLoadW,
+			"enabled":         site.Enabled,
+			"fuse_size":       site.FuseSize,
+			"phase_factors":   site.PhaseFactors,
+			"bound_meter":     site.BoundMeter,
+			"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
+			"time_multiplier": site.TimeMultiplier,
+			"sim_running":     site.SimRunning,
+			"scenario":        site.Scenario,
 		}
 		site.mu.RUnlock()
 		list = append(list, entry)
@@ -707,16 +723,21 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 	}
 
 	result := map[string]interface{}{
-		"id":            site.ID,
-		"name":          site.Name,
-		"meter_id":      site.MeterID,
-		"simulator_ids": site.SimulatorIDs,
-		"base_load_w":   site.BaseLoadW,
-		"enabled":       site.Enabled,
-		"fuse_size":     site.FuseSize,
-		"phase_factors": site.PhaseFactors,
-		"bound_meter":   site.BoundMeter,
-		"p1_mode":       string(p1Mode),
+		"id":              site.ID,
+		"name":            site.Name,
+		"meter_id":        site.MeterID,
+		"meter_ids":       site.MeterIDs,
+		"simulator_ids":   site.SimulatorIDs,
+		"base_load_w":     site.BaseLoadW,
+		"enabled":         site.Enabled,
+		"fuse_size":       site.FuseSize,
+		"phase_factors":   site.PhaseFactors,
+		"bound_meter":     site.BoundMeter,
+		"p1_mode":         string(p1Mode),
+		"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
+		"time_multiplier": site.TimeMultiplier,
+		"sim_running":     site.SimRunning,
+		"scenario":        site.Scenario,
 	}
 
 	meterID := site.MeterID
@@ -900,6 +921,14 @@ func (a *App) RemoveSimulatorFromSite(siteId int, simulatorId int) error {
 	site.SimulatorIDs = newIDs
 	site.mu.Unlock()
 
+	// Reset simulator's SiteID
+	sim := getSimulator(simulatorId)
+	if sim != nil {
+		sim.mu.Lock()
+		sim.SiteID = 0
+		sim.mu.Unlock()
+	}
+
 	a.emitSiteUpdate()
 	return nil
 }
@@ -936,7 +965,176 @@ func (a *App) DisableSite(id int) error {
 		return fmt.Errorf("site %d not found", id)
 	}
 
+	stopSiteSimulation(site)
 	stopSiteAggregation(site)
+	a.emitSiteUpdate()
+	return nil
+}
+
+// StartSiteSimulation starts data generation for all devices in a site
+func (a *App) StartSiteSimulation(id int) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	// Auto-enable aggregation if not already running
+	site.mu.RLock()
+	enabled := site.Enabled
+	meterID := site.MeterID
+	simIDs := make([]int, len(site.SimulatorIDs))
+	copy(simIDs, site.SimulatorIDs)
+	site.mu.RUnlock()
+
+	if !enabled {
+		startSiteAggregation(site)
+	}
+
+	// Start meter server
+	if meterSim := getSimulator(meterID); meterSim != nil {
+		if err := startSimulatorServer(meterSim); err != nil {
+			log.Printf("[Site %d] Failed to start meter server: %v", id, err)
+		}
+	}
+
+	// Start device servers
+	for _, simID := range simIDs {
+		sim := getSimulator(simID)
+		if sim != nil {
+			sim.mu.RLock()
+			deviceOn := sim.DeviceOn
+			sim.mu.RUnlock()
+
+			if deviceOn {
+				if err := startSimulatorServer(sim); err != nil {
+					log.Printf("[Site %d] Failed to start simulator %d: %v", id, simID, err)
+				}
+			}
+		}
+	}
+
+	if err := startSiteSimulation(site); err != nil {
+		return err
+	}
+
+	a.emitSiteUpdate()
+	return nil
+}
+
+// StopSiteSimulation stops data generation for a site
+func (a *App) StopSiteSimulation(id int) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	stopSiteSimulation(site)
+	a.emitSiteUpdate()
+	return nil
+}
+
+// UpdateSiteSimulationConfig updates simulation parameters for a site
+func (a *App) UpdateSiteSimulationConfig(id int, config map[string]interface{}) error {
+	site := getSite(id)
+	if site == nil {
+		return fmt.Errorf("site %d not found", id)
+	}
+
+	site.mu.Lock()
+	if mult, ok := config["time_multiplier"].(float64); ok && mult > 0 {
+		site.TimeMultiplier = mult
+	}
+	if scenario, ok := config["scenario"].(string); ok && scenario != "" {
+		site.Scenario = scenario
+	}
+	site.mu.Unlock()
+
+	a.emitSiteUpdate()
+	return nil
+}
+
+// SetDevicePowerState toggles a device's power state within a site
+func (a *App) SetDevicePowerState(simId int, deviceOn bool) error {
+	sim := getSimulator(simId)
+	if sim == nil {
+		return fmt.Errorf("simulator %d not found", simId)
+	}
+
+	sim.mu.Lock()
+	sim.DeviceOn = deviceOn
+	sim.mu.Unlock()
+
+	// If turning device off, stop its server
+	if !deviceOn {
+		stopSimulatorServer(sim)
+	}
+
+	a.emitSimulatorUpdate()
+	return nil
+}
+
+// CreateSimulatorInSite creates a new simulator and adds it to a site
+func (a *App) CreateSimulatorInSite(siteId int, simType string) (map[string]interface{}, error) {
+	site := getSite(siteId)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", siteId)
+	}
+
+	sim, err := createSimulator(simType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add to site
+	site.mu.Lock()
+	site.SimulatorIDs = append(site.SimulatorIDs, sim.ID)
+	site.mu.Unlock()
+
+	// Update simulator's site ID
+	sim.mu.Lock()
+	sim.SiteID = siteId
+	sim.mu.Unlock()
+
+	a.emitSimulatorUpdate()
+	a.emitSiteUpdate()
+
+	return map[string]interface{}{
+		"id":        sim.ID,
+		"serial":    sim.Serial,
+		"protocol":  sim.Protocol,
+		"category":  sim.Category,
+		"port":      sim.Port,
+		"running":   sim.Running,
+		"site_id":   siteId,
+		"device_on": sim.DeviceOn,
+	}, nil
+}
+
+// AddMeterToSite adds an additional meter to a site
+func (a *App) AddMeterToSite(siteId int, meterId int) error {
+	site := getSite(siteId)
+	if site == nil {
+		return fmt.Errorf("site %d not found", siteId)
+	}
+
+	meterSim := getSimulator(meterId)
+	if meterSim == nil {
+		return fmt.Errorf("meter %d not found", meterId)
+	}
+	if meterSim.Protocol != "modbus" {
+		return fmt.Errorf("meter must be a Modbus simulator")
+	}
+
+	site.mu.Lock()
+	for _, id := range site.MeterIDs {
+		if id == meterId {
+			site.mu.Unlock()
+			return fmt.Errorf("meter already in site")
+		}
+	}
+	site.MeterIDs = append(site.MeterIDs, meterId)
+	site.mu.Unlock()
+
 	a.emitSiteUpdate()
 	return nil
 }

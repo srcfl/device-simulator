@@ -22,36 +22,124 @@
     <script defer src="/static/js/alpine.min.js"></script>
 </head>
 <body x-data x-init="$store.app.init()">
+    <!-- Top Site Tabs Bar -->
+    <header class="site-header" x-data="siteTabs()">
+        <div class="site-header-left">
+            <h1 class="site-header-title">Device Simulator</h1>
+            <button class="update-check-btn"
+                    @click="$store.app.showUpdateModal = true; $store.app.checkForUpdate()"
+                    :class="{ 'checking': $store.app.updateChecking, 'has-update': $store.app.updateAvailable }"
+                    :title="$store.app.updateChecking ? 'Checking...' : ($store.app.updateAvailable ? `Update available: v${$store.app.updateInfo?.latest_version}` : `v${$store.app.version} - Click to check for updates`)">
+                <svg x-show="!$store.app.updateChecking" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+                    <path d="M21 21v-5h-5"/>
+                </svg>
+                <svg x-show="$store.app.updateChecking" class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                </svg>
+            </button>
+        </div>
+        <div class="site-header-tabs">
+            <template x-for="site in $store.site.sites" :key="site.id">
+                <div class="site-header-tab"
+                     :class="{ 'active': $store.site.selectedId === site.id }"
+                     @click="$store.site.selectSite(site.id); $store.app.selectedId = null;">
+                    <span class="site-header-tab-icon">🏠</span>
+                    <span class="site-header-tab-name" x-text="site.name"></span>
+                    <button class="site-header-tab-close"
+                            x-show="$store.site.sites.length > 1"
+                            @click.stop="deleteSiteTab(site.id)"
+                            title="Delete site">×</button>
+                </div>
+            </template>
+            <button class="site-header-tab-add" @click="createNewSite()" title="Add new site">+</button>
+        </div>
+    </header>
+
+    <!-- App Container - Sidebar + Main -->
+    <div class="app-container">
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <h1>Device Simulator</h1>
-                <button class="update-check-btn"
-                        @click="$store.app.showUpdateModal = true; $store.app.checkForUpdate()"
-                        :class="{ 'checking': $store.app.updateChecking, 'has-update': $store.app.updateAvailable }"
-                        :title="$store.app.updateChecking ? 'Checking...' : ($store.app.updateAvailable ? `Update available: v${$store.app.updateInfo?.latest_version}` : `v${$store.app.version} - Click to check for updates`)">
-                    <svg x-show="!$store.app.updateChecking" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                        <path d="M3 3v5h5"/>
-                        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
-                        <path d="M21 21v-5h-5"/>
-                    </svg>
-                    <svg x-show="$store.app.updateChecking" class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                    </svg>
-                </button>
+            <div class="sidebar-site-link"
+                 x-show="$store.site.selectedId && $store.site.data"
+                 :class="{ 'active': !$store.app.selectedId }"
+                 @click="$store.app.selectedId = null"
+                 title="Go to site view">
+                <span class="sidebar-site-name" x-text="$store.site.data?.name || 'Select a site'"></span>
+                <svg class="sidebar-site-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
             </div>
-            <p>Multi-Protocol Energy Devices</p>
         </div>
 
-        <!-- Simulator List -->
+        <!-- Site Simulation Controls (shown when site is selected) -->
+        <template x-if="$store.site.selectedId && $store.site.data">
+            <div class="site-simulation-controls">
+                <div class="sim-control-header">
+                    <span class="sim-control-title">Simulation</span>
+                    <button class="sim-play-btn"
+                            :class="{ 'running': $store.site.data?.sim_running }"
+                            @click="$store.site.toggleSimulation()"
+                            :title="$store.site.data?.sim_running ? 'Stop Simulation' : 'Start Simulation'">
+                        <template x-if="!$store.site.data?.sim_running">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                        </template>
+                        <template x-if="$store.site.data?.sim_running">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="6" y="4" width="4" height="16"/>
+                                <rect x="14" y="4" width="4" height="16"/>
+                            </svg>
+                        </template>
+                    </button>
+                </div>
+                <div class="sim-control-time">
+                    <span class="sim-time-label">Time:</span>
+                    <span class="sim-time-value" x-text="$store.site.data?.simulated_time || 'Not started'"></span>
+                </div>
+                <div class="sim-control-row">
+                    <label>Speed:</label>
+                    <select class="sim-control-select"
+                            :value="$store.site.data?.time_multiplier || 1"
+                            @change="$store.site.setTimeMultiplier(parseFloat($event.target.value))">
+                        <option value="1">1x</option>
+                        <option value="10">10x</option>
+                        <option value="60">60x</option>
+                        <option value="360">360x</option>
+                        <option value="720">720x</option>
+                    </select>
+                </div>
+                <div class="sim-control-row">
+                    <label>Scenario:</label>
+                    <select class="sim-control-select"
+                            :value="$store.site.data?.scenario || 'sunny'"
+                            @change="$store.site.setScenario($event.target.value)">
+                        <option value="sunny">Sunny</option>
+                        <option value="cloudy">Cloudy</option>
+                        <option value="overcast">Overcast</option>
+                        <option value="rainy">Rainy</option>
+                        <option value="night">Night</option>
+                        <option value="peak_load">Peak Load</option>
+                    </select>
+                </div>
+            </div>
+        </template>
+
+        <!-- Simulator List - filtered by selected site -->
         <div class="simulator-list" id="simulatorList">
-            <template x-if="$store.app.simulators.length === 0">
-                <div class="no-simulators">No emulators yet.<br>Click "+ Add Emulator" below.</div>
+            <template x-if="!$store.site.selectedId">
+                <div class="no-simulators">Select a site to view devices.</div>
             </template>
 
-            <template x-for="[cat, sims] in Object.entries($store.app.getGroupedSimulators())" :key="cat">
+            <template x-if="$store.site.selectedId && $store.app.getSiteSimulators().length === 0">
+                <div class="no-simulators">No devices in this site.<br>Click "+ Add Device" below.</div>
+            </template>
+
+            <template x-for="[cat, sims] in Object.entries($store.app.getSiteGroupedSimulators())" :key="cat">
                 <template x-if="sims.length > 0">
                     <div class="category-section">
                         <div class="category-header" @click="$store.app.toggleCategory(cat)">
@@ -133,41 +221,21 @@
             </template>
         </div>
 
-        <!-- Add Emulator -->
-        <div style="padding: 0.5rem;">
-            <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Emulator</button>
+        <!-- Add Device (creates in current site) -->
+        <div style="padding: 0.5rem;" x-show="$store.site.selectedId">
+            <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Device</button>
             <div class="add-menu" :class="{ 'show': $store.app.addMenuOpen }">
-                <div class="add-menu-title">Select Type</div>
-                <button class="add-menu-btn" @click="$store.app.addSimulator('inverter')">⚡ Inverter (Modbus)</button>
-                <button class="add-menu-btn" @click="$store.app.addSimulator('energy_meter')">📊 Energy Meter (Modbus)</button>
-                <button class="add-menu-btn" @click="$store.app.addSimulator('v2x_charger')">🔋 V2X Charger (MQTT)</button>
-                <button class="add-menu-btn" @click="$store.app.addSimulator('ocpp_charger')">🔌 OCPP Charger</button>
+                <div class="add-menu-title">Add to <span x-text="$store.site.data?.name || 'Site'"></span></div>
+                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('inverter')">⚡ Inverter (Modbus)</button>
+                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('energy_meter')">📊 Energy Meter (Modbus)</button>
+                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('v2x_charger')">🔋 V2X Charger (MQTT)</button>
+                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('ocpp_charger')">🔌 OCPP Charger</button>
             </div>
         </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main">
-        <!-- Site Tab Bar -->
-        <div class="site-tabs" x-data="siteTabs()">
-            <div class="site-tabs-list">
-                <template x-for="site in $store.site.sites" :key="site.id">
-                    <div class="site-tab"
-                         :class="{ 'active': $store.site.selectedId === site.id }"
-                         @click="$store.site.selectSite(site.id); $store.app.selectedId = null;">
-                        <span class="site-tab-icon">🏠</span>
-                        <span class="site-tab-name" x-text="site.name"></span>
-                        <span class="site-tab-status" :class="{ 'active': site.enabled }"></span>
-                        <button class="site-tab-close"
-                                x-show="$store.site.sites.length > 1"
-                                @click.stop="deleteSiteTab(site.id)"
-                                title="Close site">×</button>
-                    </div>
-                </template>
-                <button class="site-tab-add" @click="createNewSite()" title="Add new site">+</button>
-            </div>
-        </div>
-
         <!-- Content Area -->
         <div class="main-content">
             <!-- Site View - shown when site is selected but no simulator is selected -->
@@ -306,25 +374,8 @@
 
                 <!-- Member Devices Section -->
                 <div class="section" x-data="siteMemberControls()">
-                    <div class="section-title" style="display: flex; align-items: center; justify-content: space-between;">
-                        <span>Member Devices</span>
-                        <div x-data="{ showAddSim: false }" style="position: relative;">
-                            <button class="btn btn-action" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;"
-                                    @click="showAddSim = !showAddSim">+ Add Device</button>
-                            <div x-show="showAddSim" @click.away="showAddSim = false"
-                                 style="position: absolute; right: 0; top: 100%; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.5rem; min-width: 200px; z-index: 100;">
-                                <template x-for="sim in getAvailableToAdd()" :key="sim.id">
-                                    <div style="padding: 0.25rem 0.5rem; cursor: pointer; font-size: 0.75rem;"
-                                         @click="addDevice(sim.id); showAddSim = false"
-                                         class="add-menu-btn">
-                                        <span x-text="`${sim.serial} (${sim.protocol})`"></span>
-                                    </div>
-                                </template>
-                                <template x-if="getAvailableToAdd().length === 0">
-                                    <div style="padding: 0.25rem; color: var(--text-muted); font-size: 0.75rem;">No available devices</div>
-                                </template>
-                            </div>
-                        </div>
+                    <div class="section-title">
+                        <span>Site Devices</span>
                     </div>
                     <div class="member-grid">
                         <!-- Home Load - always present -->
@@ -362,18 +413,28 @@
                             </div>
                         </div>
 
-                        <!-- Virtual PV Card (when meter is an inverter) -->
-                        <template x-if="$store.site.isMeterInverter() && $store.site.data?.virtual_devices?.length > 0">
-                            <div class="member-card pv" x-data="virtualDeviceControls()">
+                        <!-- Inverter PV Cards -->
+                        <template x-for="inv in getSiteInverters()" :key="'pv-' + inv.id">
+                            <div class="member-card pv" :class="{ 'offline': !inv.running }">
                                 <div class="member-header">
-                                    <div class="member-info">
-                                        <span class="member-serial">Solar PV</span>
-                                        <span class="protocol-badge pv">virtual</span>
+                                    <div class="member-info" @click="openSimulator(inv.id)" style="cursor: pointer;" title="Open full simulator view">
+                                        <span class="member-serial" x-text="inv.serial + ' - Solar PV'"></span>
+                                        <span class="protocol-badge pv">modbus</span>
+                                    </div>
+                                    <div class="member-actions">
+                                        <button class="member-open-btn" @click="openSimulator(inv.id)" title="Open full view">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                                <polyline points="15 3 21 3 21 9"/>
+                                                <line x1="10" y1="14" x2="21" y2="3"/>
+                                            </svg>
+                                        </button>
                                     </div>
                                 </div>
                                 <div class="member-power">
                                     <span class="power-label">Generation</span>
-                                    <span class="power-value" style="color: var(--color-primary);" x-text="formatPvPower()"></span>
+                                    <span class="power-value" style="color: var(--color-primary);"
+                                          x-text="formatInverterPvPower(inv)"></span>
                                 </div>
                                 <div class="member-controls">
                                     <div class="member-control-row">
@@ -381,65 +442,87 @@
                                         <div class="mini-slider-container">
                                             <input type="range" class="mini-slider pv-power"
                                                    min="0" max="10000" step="100"
-                                                   :value="pvPower"
-                                                   :disabled="isSimulationRunning"
-                                                   @input="onPvPowerInput($event.target.value)"
-                                                   @change="onPvPowerChange($event.target.value)">
+                                                   :value="inv.pv_power || 0"
+                                                   :disabled="isSiteSimulating() || !inv.running"
+                                                   :class="{ 'disabled': isSiteSimulating() || !inv.running }"
+                                                   @change="setInverterPvPower(inv.id, parseInt($event.target.value))">
                                         </div>
-                                        <span class="control-value" style="color: var(--color-primary);" x-text="formatPvPower()"></span>
+                                        <span class="control-value" style="color: var(--color-primary);"
+                                              x-text="formatInverterPvPower(inv)"></span>
                                     </div>
                                 </div>
                                 <div class="member-footer">
-                                    <span class="status-indicator running"></span>
-                                    <span class="status-text" x-text="isSimulationRunning ? 'Simulation running' : 'Manual control'"></span>
+                                    <template x-if="isSiteSimulating()">
+                                        <span class="status-indicator simulating"></span>
+                                    </template>
+                                    <template x-if="!isSiteSimulating()">
+                                        <span class="status-indicator" :class="inv.running ? 'running' : ''"></span>
+                                    </template>
+                                    <span class="status-text" x-text="isSiteSimulating() ? 'Simulating' : (inv.running ? 'Online' : 'Offline')"></span>
                                 </div>
                             </div>
                         </template>
 
-                        <!-- Virtual Battery Card (when meter is an inverter) -->
-                        <template x-if="$store.site.isMeterInverter() && $store.site.data?.virtual_devices?.length > 0">
-                            <div class="member-card battery" x-data="virtualDeviceControls()">
+                        <!-- Inverter Battery Cards -->
+                        <template x-for="inv in getSiteInverters()" :key="'bat-' + inv.id">
+                            <div class="member-card battery" :class="{ 'offline': !inv.running }">
                                 <div class="member-header">
-                                    <div class="member-info">
-                                        <span class="member-serial">Battery</span>
-                                        <span class="protocol-badge battery">virtual</span>
+                                    <div class="member-info" @click="openSimulator(inv.id)" style="cursor: pointer;" title="Open full simulator view">
+                                        <span class="member-serial" x-text="inv.serial + ' - Battery'"></span>
+                                        <span class="protocol-badge battery">modbus</span>
+                                    </div>
+                                    <div class="member-actions">
+                                        <button class="member-open-btn" @click="openSimulator(inv.id)" title="Open full view">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                                <polyline points="15 3 21 3 21 9"/>
+                                                <line x1="10" y1="14" x2="21" y2="3"/>
+                                            </svg>
+                                        </button>
                                     </div>
                                 </div>
                                 <div class="member-power">
                                     <span class="power-label">Power</span>
-                                    <span class="power-value" :class="getBatteryPowerClass()" x-text="formatBatteryPower()"></span>
+                                    <span class="power-value" :class="getInverterBatteryPowerClass(inv)"
+                                          x-text="formatInverterBatteryPower(inv)"></span>
                                 </div>
                                 <div class="member-controls">
                                     <div class="member-control-row">
                                         <span class="control-label">SoC</span>
                                         <div class="mini-progress">
-                                            <div class="mini-progress-fill battery" :style="`width: ${batterySoc}%`"></div>
+                                            <div class="mini-progress-fill battery" :style="`width: ${inv.soc || 0}%`"></div>
                                         </div>
-                                        <span class="control-value" x-text="`${batterySoc.toFixed(0)}%`"></span>
+                                        <span class="control-value" x-text="`${(inv.soc || 0).toFixed(0)}%`"></span>
                                     </div>
                                     <div class="member-control-row">
                                         <span class="control-label">Power</span>
                                         <div class="mini-slider-container">
                                             <input type="range" class="mini-slider battery-power"
                                                    min="-5000" max="5000" step="100"
-                                                   :value="batteryPower"
-                                                   :disabled="isSimulationRunning"
-                                                   @input="onBatteryPowerInput($event.target.value)"
-                                                   @change="onBatteryPowerChange($event.target.value)">
+                                                   :value="getInverterBatterySliderValue(inv)"
+                                                   :disabled="isSiteSimulating() || !inv.running"
+                                                   :class="{ 'disabled': isSiteSimulating() || !inv.running }"
+                                                   @change="setInverterBatteryPower(inv.id, parseInt($event.target.value))">
                                         </div>
-                                        <span class="control-value" :class="getBatteryPowerClass()"
-                                              x-text="`${(Math.abs(batteryPower) / 1000).toFixed(1)} kW`"></span>
+                                        <span class="control-value" :class="getInverterBatteryPowerClass(inv)"
+                                              x-text="formatInverterBatteryPower(inv)"></span>
                                     </div>
                                 </div>
                                 <div class="member-footer">
-                                    <span class="status-indicator running"></span>
-                                    <span class="status-text" x-text="isSimulationRunning ? 'Simulation running' : 'Manual control'"></span>
+                                    <template x-if="isSiteSimulating()">
+                                        <span class="status-indicator simulating"></span>
+                                    </template>
+                                    <template x-if="!isSiteSimulating()">
+                                        <span class="status-indicator" :class="inv.running ? 'running' : ''"></span>
+                                    </template>
+                                    <span class="status-text" x-text="isSiteSimulating() ? 'Simulating' : (inv.running ? 'Online' : 'Offline')"></span>
                                 </div>
                             </div>
                         </template>
 
-                        <template x-for="simId in ($store.site.data?.simulator_ids || [])" :key="simId">
-                            <div class="member-card" :class="getSimInfo(simId).protocol">
+                        <!-- Non-inverter devices (inverters shown as PV/Battery cards above) -->
+                        <template x-for="simId in getNonInverterSimulatorIds()" :key="simId">
+                            <div class="member-card" :class="[getSimInfo(simId).protocol, { 'offline': !getSimInfo(simId).running }]">
                                 <!-- Header with serial, protocol badge, and actions -->
                                 <div class="member-header">
                                     <div class="member-info" @click="openSimulator(simId)" style="cursor: pointer;" title="Open full simulator view">
@@ -456,12 +539,6 @@
                                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                                                 <polyline points="15 3 21 3 21 9"/>
                                                 <line x1="10" y1="14" x2="21" y2="3"/>
-                                            </svg>
-                                        </button>
-                                        <button class="member-remove-btn" @click="removeDevice(simId)" title="Remove from site">
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                                <line x1="6" y1="6" x2="18" y2="18"></line>
                                             </svg>
                                         </button>
                                     </div>
@@ -673,16 +750,8 @@
                             <div class="value" x-text="$store.simulator.data?.port"></div>
                         </div>
                         <div class="config-item">
-                            <label>Connected Site</label>
-                            <select @change="onSiteChange($event.target.value)"
-                                    :value="selectedSiteId || ''">
-                                <option value="">Not connected</option>
-                                <template x-for="site in sites" :key="site.id">
-                                    <option :value="site.id"
-                                            :selected="site.id === selectedSiteId"
-                                            x-text="site.name"></option>
-                                </template>
-                            </select>
+                            <label>Site</label>
+                            <div class="value" x-text="getSiteName() || 'Not assigned'"></div>
                         </div>
                         <div class="config-item" x-show="selectedSiteId">
                             <label>P1 Update</label>
@@ -915,13 +984,8 @@
                         <!-- Connected Site (for inverters only) -->
                         <template x-if="$store.app.selectedProtocol === 'modbus' && $store.simulator.data?.category === 'inverter'">
                             <div class="config-item" x-data="inverterView()">
-                                <label>Connected Site</label>
-                                <select @change="onSiteChange($event.target.value)" :value="selectedSiteId || ''">
-                                    <option value="">Not connected</option>
-                                    <template x-for="site in sites" :key="site.id">
-                                        <option :value="site.id" x-text="site.name" :selected="site.id === selectedSiteId"></option>
-                                    </template>
-                                </select>
+                                <label>Site</label>
+                                <div class="value" x-text="getSiteName() || 'Not assigned'"></div>
                             </div>
                         </template>
 
@@ -959,13 +1023,13 @@
                             </div>
                         </div>
 
-                        <!-- Emulator Toggle (server only) -->
+                        <!-- Emulator Toggle -->
                         <div class="config-item">
                             <label>Emulator</label>
                             <div class="toggle-switch" style="height: 32px;">
                                 <div class="toggle-switch-track"
                                      :class="{ 'on': $store.simulator.data?.running }"
-                                     @click="$store.simulator.toggleEmulator()">
+                                     @click="toggleEmulator()">
                                     <div class="toggle-switch-thumb"></div>
                                 </div>
                                 <span class="toggle-switch-status"
@@ -978,42 +1042,41 @@
 
                 <!-- Controls Section -->
                 <div class="section">
-                    <!-- Modbus Simulation Controls (only for inverters when emulator is online) -->
+                    <!-- Modbus Site Simulation Status (synced with site) -->
                     <template x-if="$store.app.selectedProtocol === 'modbus' && $store.simulator.data?.running">
-                        <div class="auto-row" x-data="modbusControls()">
+                        <div class="auto-row" x-data="siteSimulationStatus()">
                             <div class="controls-panel">
-                                <div class="controls-row">
-                                    <div class="control-group">
-                                        <span class="control-group-label">Scenario</span>
-                                        <select x-model="scenario" @change="updateConfig()">
-                                            <template x-for="s in scenarios" :key="s.value">
-                                                <option :value="s.value" x-text="s.label"></option>
-                                            </template>
-                                        </select>
-                                    </div>
-                                    <div class="control-group">
-                                        <span class="control-group-label">Speed</span>
-                                        <select x-model="timeMultiplier" @change="updateConfig()">
-                                            <template x-for="sp in speeds" :key="sp.value">
-                                                <option :value="sp.value" x-text="sp.label"></option>
-                                            </template>
-                                        </select>
-                                    </div>
-                                    <span class="sim-time" x-text="simulatedTime"></span>
-                                    <div class="control-group" style="margin-left: auto;">
-                                        <span class="control-group-label">Simulation</span>
-                                        <div class="toggle-switch">
-                                            <div class="toggle-switch-track"
-                                                 :class="{ 'on': $store.simulator.automation?.enabled }"
-                                                 @click="$store.simulator.toggleSimulation()">
-                                                <div class="toggle-switch-thumb"></div>
+                                <template x-if="connectedSiteId">
+                                    <div class="controls-row">
+                                        <div class="site-sim-info">
+                                            <span class="site-sim-label">Site Simulation</span>
+                                            <span class="site-sim-site-name" x-text="connectedSiteName"></span>
+                                        </div>
+                                        <div class="site-sim-status" :class="{ 'running': siteSimRunning }">
+                                            <span class="site-sim-scenario" x-text="siteScenarioLabel"></span>
+                                            <span class="site-sim-speed" x-text="'@' + siteTimeMultiplier + 'x'"></span>
+                                        </div>
+                                        <span class="sim-time" x-text="siteSimulatedTime || 'Not started'"></span>
+                                        <div class="control-group" style="margin-left: auto;">
+                                            <span class="control-group-label">Simulation</span>
+                                            <div class="toggle-switch">
+                                                <div class="toggle-switch-track"
+                                                     :class="{ 'on': siteSimRunning }"
+                                                     @click="toggleSiteSimulation()">
+                                                    <div class="toggle-switch-thumb"></div>
+                                                </div>
+                                                <span class="toggle-switch-status"
+                                                      :class="siteSimRunning ? 'running' : 'stopped'"
+                                                      x-text="siteSimRunning ? 'Running' : 'Stopped'"></span>
                                             </div>
-                                            <span class="toggle-switch-status"
-                                                  :class="$store.simulator.automation?.enabled ? 'running' : 'stopped'"
-                                                  x-text="$store.simulator.automation?.enabled ? 'Running' : 'Stopped'"></span>
                                         </div>
                                     </div>
-                                </div>
+                                </template>
+                                <template x-if="!connectedSiteId">
+                                    <div style="color: var(--text-muted); font-size: var(--font-size-sm);">
+                                        This device is not assigned to a site. Simulation is controlled at the site level.
+                                    </div>
+                                </template>
                             </div>
                         </div>
                     </template>
@@ -1460,6 +1523,7 @@
         </template>
         </div><!-- /main-content -->
     </main>
+    </div><!-- /app-container -->
 
     <!-- Update Modal -->
     <template x-if="$store.app.showUpdateModal">
