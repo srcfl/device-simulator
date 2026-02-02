@@ -13,7 +13,7 @@ services:
       - NUM_V2X_CHARGERS=3
       - NUM_OCPP_CHARGERS=2
       - MODBUS_BASE_PORT=5100
-      - MQTT_PORT=1883
+      - MQTT_BASE_PORT=1883
       - OCPP_BASE_PORT=9000
       - HTTP_PORT=80
       - HOST_IP=${HOST_IP:-}

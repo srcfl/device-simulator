@@ -298,6 +298,22 @@ const api = {
         }
         const resp = await fetch('/api/update/apply', { method: 'POST' });
         return resp.json();
+    },
+
+    async getSettings() {
+        if (isWails) {
+            return await window.go.main.App.GetSettings();
+        }
+        // HTTP mode (Docker) - return defaults with display offset
+        // Docker maps internal 1883+ to external 11883+ (offset of 10000)
+        return { mqttBasePort: 1883, mqttDisplayOffset: 10000 };
+    },
+
+    async saveSettings(settings) {
+        if (isWails) {
+            return await window.go.main.App.SaveSettings(settings);
+        }
+        // No-op for Docker mode - ports are handled via docker-compose port mapping
     }
 };
 
@@ -819,19 +835,26 @@ document.addEventListener('alpine:init', () => {
         updateSuccess: false,
         updateError: null,
         showUpdateModal: false,
+        showSettingsModal: false,
+        // MQTT display offset (for Docker port mapping)
+        mqttDisplayOffset: 0,
 
         async init() {
-            // Fetch version and local IP from backend
+            // Fetch version, local IP, and settings from backend
             try {
-                const [sysInfo, versionInfo] = await Promise.all([
+                const [sysInfo, versionInfo, settings] = await Promise.all([
                     api.getSystemInfo(),
-                    api.getVersionInfo()
+                    api.getVersionInfo(),
+                    api.getSettings()
                 ]);
                 if (sysInfo && (sysInfo.local_ip || sysInfo.localIP)) {
                     this.localIP = sysInfo.local_ip || sysInfo.localIP;
                 }
                 if (versionInfo && versionInfo.version) {
                     this.version = versionInfo.version;
+                }
+                if (settings && settings.mqttDisplayOffset !== undefined) {
+                    this.mqttDisplayOffset = settings.mqttDisplayOffset;
                 }
             } catch (e) {
                 console.error('Failed to get system info:', e);

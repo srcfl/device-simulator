@@ -40,6 +40,14 @@
                     <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                 </svg>
             </button>
+            <button class="settings-header-btn"
+                    @click="$store.app.showSettingsModal = true"
+                    title="Settings">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </button>
         </div>
         <div class="site-header-tabs">
             <template x-for="site in $store.site.sites" :key="site.id">
@@ -178,7 +186,7 @@
                                             <span x-text="`Modbus :${sim.port} | Unit ${sim.slave_id}`"></span>
                                         </template>
                                         <template x-if="sim.protocol === 'mqtt'">
-                                            <span x-text="`MQTT :${sim.port + 10000}`"></span>
+                                            <span x-text="`MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
                                         </template>
                                         <template x-if="sim.protocol === 'ocpp'">
                                             <span x-text="`WS :${sim.port}`"></span>
@@ -260,33 +268,39 @@
                                 <div class="fuse-toggle-indicator"></div>
                             </div>
                             <div class="phase-label">L1</div>
-                            <div class="phase-bar-track">
-                                <div class="phase-bar-fill" :style="getPhaseBarStyle(getPhaseCurrents().l1, fuseBlown.l1)"></div>
-                                <div class="fuse-limit-marker"></div>
+                            <div class="phase-bar-track bidirectional">
+                                <div class="center-line"></div>
+                                <div class="fuse-limit-marker export"></div>
+                                <div class="fuse-limit-marker import"></div>
+                                <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l1, fuseBlown.l1)"></div>
                             </div>
-                            <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="`${getPhaseCurrents().l1.toFixed(1)} A`"></div>
+                            <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="formatPhasePower(getPhasePowers().l1)"></div>
                         </div>
                         <div class="phase-bar-container">
                             <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l2 }" @click="toggleFuse('l2')" title="Click to toggle fuse">
                                 <div class="fuse-toggle-indicator"></div>
                             </div>
                             <div class="phase-label">L2</div>
-                            <div class="phase-bar-track">
-                                <div class="phase-bar-fill" :style="getPhaseBarStyle(getPhaseCurrents().l2, fuseBlown.l2)"></div>
-                                <div class="fuse-limit-marker"></div>
+                            <div class="phase-bar-track bidirectional">
+                                <div class="center-line"></div>
+                                <div class="fuse-limit-marker export"></div>
+                                <div class="fuse-limit-marker import"></div>
+                                <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l2, fuseBlown.l2)"></div>
                             </div>
-                            <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="`${getPhaseCurrents().l2.toFixed(1)} A`"></div>
+                            <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="formatPhasePower(getPhasePowers().l2)"></div>
                         </div>
                         <div class="phase-bar-container">
                             <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l3 }" @click="toggleFuse('l3')" title="Click to toggle fuse">
                                 <div class="fuse-toggle-indicator"></div>
                             </div>
                             <div class="phase-label">L3</div>
-                            <div class="phase-bar-track">
-                                <div class="phase-bar-fill" :style="getPhaseBarStyle(getPhaseCurrents().l3, fuseBlown.l3)"></div>
-                                <div class="fuse-limit-marker"></div>
+                            <div class="phase-bar-track bidirectional">
+                                <div class="center-line"></div>
+                                <div class="fuse-limit-marker export"></div>
+                                <div class="fuse-limit-marker import"></div>
+                                <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l3, fuseBlown.l3)"></div>
                             </div>
-                            <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="`${getPhaseCurrents().l3.toFixed(1)} A`"></div>
+                            <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="formatPhasePower(getPhasePowers().l3)"></div>
                         </div>
                         <div class="phase-legend">
                             <span class="fuse-indicator">
@@ -936,7 +950,7 @@
                         <template x-if="$store.app.selectedProtocol === 'mqtt'">
                             <div class="config-item">
                                 <label>MQTT Port</label>
-                                <div class="value" x-text="($store.simulator.data?.port || 0) + 10000"></div>
+                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.mqttDisplayOffset"></div>
                             </div>
                         </template>
 
@@ -1629,6 +1643,105 @@
                             x-show="$store.app.updateAvailable && !$store.app.updateApplying"
                             style="padding: 0.5rem 1rem; background: var(--color-success); border: none; border-radius: var(--radius-md); color: white; cursor: pointer; font-weight: 600;">
                         Update Now
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Settings Modal -->
+    <template x-if="$store.app.showSettingsModal">
+        <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;"
+             @click="$store.app.showSettingsModal = false">
+            <div style="background: var(--bg-secondary); border-radius: var(--radius-lg); padding: 1.5rem; min-width: 360px; max-width: 480px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);"
+                 @click.stop
+                 x-data="settingsPanel()">
+                <h3 style="margin: 0 0 1rem 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    Application Settings
+                </h3>
+
+                <div style="margin-bottom: 1rem;">
+                    <!-- Desktop mode: editable settings -->
+                    <template x-if="!isDockerMode">
+                        <div>
+                            <div style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 0.75rem;">
+                                Changes take effect after restarting the app
+                            </div>
+
+                            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                                <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary); font-size: 0.9rem;">Port Configuration</h4>
+
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">MQTT Base Port</label>
+                                    <input type="number"
+                                           x-model.number="mqttBasePort"
+                                           min="1024"
+                                           max="65535"
+                                           step="1"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
+                                <div style="color: var(--text-muted); font-size: 0.7rem;">
+                                    MQTT brokers will be assigned ports starting from this value
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Docker mode: read-only info -->
+                    <template x-if="isDockerMode">
+                        <div>
+                            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                                <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary); font-size: 0.9rem;">Port Configuration</h4>
+
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">MQTT Base Port</label>
+                                    <span style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600;" x-text="displayPort"></span>
+                                </div>
+                                <div style="color: var(--text-muted); font-size: 0.7rem;">
+                                    Port mapping is configured in docker-compose.yml
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(var(--color-primary-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-primary); font-size: 0.8rem;">
+                                Running in Docker mode. To change ports, edit docker-compose.yml and restart the container.
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <template x-if="needsRestart">
+                    <div style="margin: 0 0 1rem 0; padding: 0.75rem; background: rgba(var(--color-primary-rgb), 0.1); border-radius: var(--radius-md); color: var(--color-primary); font-size: 0.875rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        Settings saved. Restart the app to apply changes.
+                    </div>
+                </template>
+
+                <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                    <button @click="$store.app.showSettingsModal = false"
+                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
+                        Close
+                    </button>
+                    <button @click="reset()"
+                            x-show="!isDockerMode && hasChanges && !saving"
+                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
+                        Reset
+                    </button>
+                    <button @click="save()"
+                            x-show="!isDockerMode"
+                            :disabled="!hasChanges || saving"
+                            style="padding: 0.5rem 1rem; background: var(--color-primary); border: none; border-radius: var(--radius-md); color: white; cursor: pointer; font-weight: 600;"
+                            :style="(!hasChanges || saving) ? 'opacity: 0.5; cursor: not-allowed;' : ''">
+                        <span x-show="!saving">Save Settings</span>
+                        <span x-show="saving">Saving...</span>
                     </button>
                 </div>
             </div>

@@ -215,6 +215,25 @@
     to { transform: rotate(360deg); }
 }
 
+/* Settings Header Button */
+.settings-header-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.settings-header-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
 .simulator-list {
     flex: 1;
     overflow-y: auto;

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/modbus"
+	"github.com/srcfl/device-simulator/internal/settings"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -755,6 +756,11 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 			L2: getRegisterValue(meterSim.Server, 8),
 			L3: getRegisterValue(meterSim.Server, 10),
 		}
+		result["phase_powers"] = PhasePowers{
+			L1: getRegisterValue(meterSim.Server, 12),
+			L2: getRegisterValue(meterSim.Server, 14),
+			L3: getRegisterValue(meterSim.Server, 16),
+		}
 
 		// Include virtual devices if meter is an inverter
 		if meterSim.Category == "inverter" && meterSim.Running {
@@ -1312,4 +1318,23 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error) {
 // ApplyUpdate downloads and applies the latest update
 func (a *App) ApplyUpdate() error {
 	return DoUpdate()
+}
+
+// GetSettings returns current app settings
+func (a *App) GetSettings() (map[string]interface{}, error) {
+	s := settings.Load()
+	return map[string]interface{}{
+		"mqttBasePort": s.MQTTBasePort,
+	}, nil
+}
+
+// SaveSettings saves app settings to config file
+func (a *App) SaveSettings(s map[string]interface{}) error {
+	appSettings := settings.DefaultSettings()
+
+	if mqttPort, ok := s["mqttBasePort"].(float64); ok {
+		appSettings.MQTTBasePort = int(mqttPort)
+	}
+
+	return settings.Save(appSettings)
 }

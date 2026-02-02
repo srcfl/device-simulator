@@ -1895,6 +1895,62 @@ document.addEventListener('alpine:init', () => {
             return `width: ${percentage}%; background: ${color};`;
         },
 
+        getPhasePowers() {
+            const powers = Alpine.store('site').data?.phase_powers || { l1: 0, l2: 0, l3: 0 };
+            return {
+                l1: powers.l1 || 0,
+                l2: powers.l2 || 0,
+                l3: powers.l3 || 0
+            };
+        },
+
+        // Bidirectional bar: center = 0, left = export (negative), right = import (positive)
+        // Scale: 0-35% each side = normal (0 to fuse limit), 35-50% = overload (fuse to 3x)
+        getBidirectionalBarStyle(phasePower, isBlown) {
+            if (isBlown) {
+                return 'width: 0%; left: 50%; background: transparent;';
+            }
+
+            const fuseSize = this.getFuseSize();
+            const fuseWatts = fuseSize * 230;  // Voltage assumption
+            const maxWatts = fuseWatts * 3;    // 3x overload
+
+            const absPower = Math.abs(phasePower);
+            const isExport = phasePower < 0;
+
+            let barWidth, color;
+
+            if (absPower <= fuseWatts) {
+                // Normal range: 0 to fuseWatts maps to 0-35% of half-bar
+                barWidth = (absPower / fuseWatts) * 35;
+                color = isExport ? 'var(--color-export)' : 'var(--color-import)';
+            } else {
+                // Overload range: fuseWatts to maxWatts maps to 35-50%
+                const overloadRatio = Math.min((absPower - fuseWatts) / (maxWatts - fuseWatts), 1);
+                barWidth = 35 + (overloadRatio * 15);
+
+                // Blend base color towards red as overload increases
+                const base = isExport ? [59, 130, 246] : [245, 158, 11];  // blue : orange
+                const red = [239, 68, 68];
+                const r = Math.round(base[0] + (red[0] - base[0]) * overloadRatio);
+                const g = Math.round(base[1] + (red[1] - base[1]) * overloadRatio);
+                const b = Math.round(base[2] + (red[2] - base[2]) * overloadRatio);
+                color = `rgb(${r}, ${g}, ${b})`;
+            }
+
+            // Position: export grows left from center, import grows right
+            const left = isExport ? (50 - barWidth) : 50;
+            return `width: ${barWidth}%; left: ${left}%; background: ${color};`;
+        },
+
+        formatPhasePower(power) {
+            const abs = Math.abs(power);
+            if (abs >= 1000) {
+                return `${(power / 1000).toFixed(2)} kW`;
+            }
+            return `${power.toFixed(0)} W`;
+        },
+
         isPhaseFactorsValid() {
             const sum = this.localPhaseFactors.l1 + this.localPhaseFactors.l2 + this.localPhaseFactors.l3;
             return sum >= 0.99 && sum <= 1.01;
@@ -1915,4 +1971,56 @@ document.addEventListener('alpine:init', () => {
 
     // Confirmation modal component (just a wrapper, logic is in store)
     Alpine.data('confirmModal', () => ({}));
+
+    // Settings Panel Component
+    Alpine.data('settingsPanel', () => ({
+        mqttBasePort: 11883,
+        originalMqttBasePort: 11883,
+        mqttDisplayOffset: 0,
+        saving: false,
+        needsRestart: false,
+        loaded: false,
+
+        get hasChanges() {
+            return this.mqttBasePort !== this.originalMqttBasePort;
+        },
+
+        get isDockerMode() {
+            return this.mqttDisplayOffset > 0;
+        },
+
+        get displayPort() {
+            return this.mqttBasePort + this.mqttDisplayOffset;
+        },
+
+        async init() {
+            try {
+                const settings = await api.getSettings();
+                this.mqttBasePort = settings.mqttBasePort || 11883;
+                this.mqttDisplayOffset = settings.mqttDisplayOffset || 0;
+                this.originalMqttBasePort = this.mqttBasePort;
+                this.loaded = true;
+            } catch (e) {
+                console.error('Failed to load settings:', e);
+                this.loaded = true;
+            }
+        },
+
+        async save() {
+            this.saving = true;
+            try {
+                await api.saveSettings({ mqttBasePort: this.mqttBasePort });
+                this.originalMqttBasePort = this.mqttBasePort;
+                this.needsRestart = true;
+            } catch (e) {
+                console.error('Failed to save settings:', e);
+                alert('Failed to save settings: ' + e.message);
+            }
+            this.saving = false;
+        },
+
+        reset() {
+            this.mqttBasePort = this.originalMqttBasePort;
+        }
+    }));
 });

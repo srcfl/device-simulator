@@ -126,8 +126,24 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-  build-macos:
+  # Run tests before building - must pass for release to proceed
+  test:
     needs: check-release
+    if: needs.check-release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: go test ./... -v
+
+  build-macos:
+    needs: [check-release, test]
     if: needs.check-release.outputs.should_release == 'true'
     runs-on: macos-latest
     steps:
@@ -300,7 +316,7 @@ jobs:
           path: build/device-simulator_darwin_amd64.zip
 
   build-linux:
-    needs: check-release
+    needs: [check-release, test]
     if: needs.check-release.outputs.should_release == 'true'
     runs-on: ubuntu-22.04  # Wails v2 requires webkit2gtk-4.0 (not available in 24.04)
     steps:
@@ -358,7 +374,7 @@ jobs:
           path: build/device-simulator_linux_amd64.tar.gz
 
   build-windows:
-    needs: check-release
+    needs: [check-release, test]
     if: needs.check-release.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:

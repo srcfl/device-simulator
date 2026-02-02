@@ -232,10 +232,11 @@ The commit body (after the first line) becomes the release notes under "In this 
 
 ### Build Process
 
-1. **Parallel builds** for macOS, Linux, Windows
-2. **Version calculation** from latest git tag + bump type
-3. **Version embedding** via ldflags (`-X main.Version=${VERSION}`)
-4. **Release creation** with semantic version tag and assets
+1. **Tests must pass** - `go test ./...` runs before any builds
+2. **Parallel builds** for macOS, Linux, Windows (after tests pass)
+3. **Version calculation** from latest git tag + bump type
+4. **Version embedding** via ldflags (`-X main.Version=${VERSION}`)
+5. **Release creation** with semantic version tag and assets
 
 **Build matrix:**
 | Platform | Runner | Dependencies |
@@ -265,14 +266,31 @@ go build -ldflags "-X main.Version=0.1.42" ./cmd/simulator/
 
 ## Testing
 
+Tests must pass before releases are created (enforced by CI).
+
 ```bash
 # Run all Go tests
 go test ./...
 
+# Run with verbose output
+go test ./... -v
+
 # Run specific package tests
 go test ./internal/modbus/
+go test ./internal/mqtt/
+go test ./internal/settings/
+go test ./internal/ports/
 go test ./internal/generator/
 
 # Test Modbus connection
 modpoll -m tcp -a 1 -r 5000 -c 10 localhost:5000
 ```
+
+**Test packages:**
+| Package | Tests | Description |
+|---------|-------|-------------|
+| `internal/generator` | 7 | Data generators (sine, daynight, etc.) |
+| `internal/modbus` | 16 | Modbus server and register handling |
+| `internal/mqtt` | 8 | MQTT broker start/stop, protocol |
+| `internal/ports` | 13 | Port allocation and release |
+| `internal/settings` | 10 | Settings persistence |

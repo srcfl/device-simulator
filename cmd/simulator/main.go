@@ -24,7 +24,9 @@ import (
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/mqtt"
 	"github.com/srcfl/device-simulator/internal/ocpp"
+	"github.com/srcfl/device-simulator/internal/ports"
 	"github.com/srcfl/device-simulator/internal/profiles"
+	"github.com/srcfl/device-simulator/internal/settings"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -64,55 +66,6 @@ type AutomationState struct {
 	stopChan       chan struct{}
 }
 
-// PortAllocator manages dynamic port allocation for simulators
-type PortAllocator struct {
-	mu             sync.Mutex
-	modbusBase     int
-	mqttBase       int
-	ocppBase       int
-	allocatedPorts map[int]bool
-}
-
-func NewPortAllocator(modbusBase, mqttBase, ocppBase int) *PortAllocator {
-	return &PortAllocator{
-		modbusBase:     modbusBase,
-		mqttBase:       mqttBase,
-		ocppBase:       ocppBase,
-		allocatedPorts: make(map[int]bool),
-	}
-}
-
-func (p *PortAllocator) Allocate(protocol string) int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	var base int
-	switch protocol {
-	case "modbus":
-		base = p.modbusBase
-	case "mqtt":
-		base = p.mqttBase
-	case "ocpp":
-		base = p.ocppBase
-	default:
-		return 0
-	}
-
-	// Find next available port starting from base
-	for port := base; port < base+1000; port++ {
-		if !p.allocatedPorts[port] {
-			p.allocatedPorts[port] = true
-			return port
-		}
-	}
-	return 0 // No available port
-}
-
-func (p *PortAllocator) Release(port int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.allocatedPorts, port)
-}
 
 // P1UpdateMode represents the update interval mode for P1 port simulation
 type P1UpdateMode string
@@ -185,7 +138,7 @@ var (
 	simulatorsMu    sync.RWMutex
 	nextSimulatorID int
 	nextIDMu        sync.Mutex
-	portAllocator   *PortAllocator
+	portAllocator   *ports.Allocator
 
 	// Site management
 	sites      []*Site
@@ -202,7 +155,15 @@ func main() {
 	desktopMode := flag.Bool("desktop", false, "Run in desktop mode (Wails)")
 	flag.Parse()
 
-	// Environment variable overrides
+	// Load settings from config file (applies before env var overrides)
+	appSettings := settings.Load()
+
+	// Apply settings if no env var is set
+	if os.Getenv("MQTT_BASE_PORT") == "" {
+		*mqttBasePort = appSettings.MQTTBasePort
+	}
+
+	// Environment variable overrides (takes precedence over settings)
 	if env := os.Getenv("MODBUS_BASE_PORT"); env != "" {
 		if n, err := strconv.Atoi(env); err == nil {
 			*modbusBasePort = n
@@ -232,7 +193,7 @@ func main() {
 	log.Printf("Port ranges: Modbus %d+, MQTT %d+, OCPP %d+", *modbusBasePort, *mqttBasePort, *ocppBasePort)
 
 	// Initialize port allocator
-	portAllocator = NewPortAllocator(*modbusBasePort, *mqttBasePort, *ocppBasePort)
+	portAllocator = ports.NewAllocator(*modbusBasePort, *mqttBasePort, *ocppBasePort)
 
 	// Initialize empty simulator list
 	simulators = make([]*Simulator, 0)
@@ -383,7 +344,7 @@ func createSimulator(simType string) (*Simulator, error) {
 		return nil, fmt.Errorf("unknown simulator type: %s", simType)
 	}
 
-	port := portAllocator.Allocate(protocol)
+	port := portAllocator.AllocateString(protocol)
 	if port == 0 {
 		return nil, fmt.Errorf("no available port for %s", protocol)
 	}
@@ -1780,6 +1741,13 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 			L1: getRegisterValue(meterSim.Server, 6),
 			L2: getRegisterValue(meterSim.Server, 8),
 			L3: getRegisterValue(meterSim.Server, 10),
+		}
+
+		// Add per-phase powers from meter registers
+		status["phase_powers"] = PhasePowers{
+			L1: getRegisterValue(meterSim.Server, 12),
+			L2: getRegisterValue(meterSim.Server, 14),
+			L3: getRegisterValue(meterSim.Server, 16),
 		}
 
 		// Include virtual devices if meter is an inverter
