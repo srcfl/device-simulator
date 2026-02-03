@@ -839,6 +839,40 @@ document.addEventListener('alpine:init', () => {
             return Alpine.store('site').data?.sim_running || false;
         },
 
+        // Format load power for display
+        formatLoadPower(watts) {
+            if (Math.abs(watts) >= 1000) {
+                return (watts / 1000).toFixed(1) + ' kW';
+            }
+            return Math.round(watts) + ' W';
+        },
+
+        // Get load scenario name from key
+        getLoadScenarioName(key) {
+            const names = {
+                gaming_family: 'Gaming Family',
+                old_couple: 'Old Couple',
+                weed_factory: 'Weed Factory',
+                work_from_home: 'Work From Home',
+                night_owl: 'Night Owl'
+            };
+            return names[key] || key || 'Manual';
+        },
+
+        // Set base load (updates phase loads proportionally)
+        async setBaseLoad(watts) {
+            const siteId = Alpine.store('site').selectedId;
+            if (!siteId) return;
+
+            // Distribute equally across phases (simple approach)
+            const perPhase = watts / 3;
+            try {
+                await siteApi.setSitePhaseLoads(siteId, perPhase, perPhase, perPhase, true);
+            } catch (e) {
+                console.error('Failed to set base load:', e);
+            }
+        },
+
         // Get inverters from site's simulator_ids
         getSiteInverters() {
             // Access simulatorsVersion to trigger Alpine reactivity when simulators change
@@ -2021,6 +2055,149 @@ document.addEventListener('alpine:init', () => {
 
         reset() {
             this.mqttBasePort = this.originalMqttBasePort;
+        }
+    }));
+
+    // Site Load Controls Component
+    Alpine.data('siteLoadControls', () => ({
+        scenarios: [],
+        localLoads: { l1: 333, l2: 333, l3: 334 },
+        loadLinked: true,
+        activeScenario: '',
+        loading: false,
+        sliderDebounce: null,
+
+        async init() {
+            // Load scenarios
+            try {
+                this.scenarios = await siteApi.getLoadScenarios();
+            } catch (e) {
+                console.error('Failed to load scenarios:', e);
+            }
+
+            // Sync from site data
+            this.syncFromSite();
+
+            // Watch for site changes
+            this.$watch('$store.site.data', () => {
+                this.syncFromSite();
+            });
+        },
+
+        syncFromSite() {
+            const data = Alpine.store('site').data;
+            if (!data) return;
+
+            this.activeScenario = data.load_scenario || '';
+            this.loadLinked = data.load_linked ?? true;
+
+            // Only sync loads if not currently dragging a slider
+            if (!this.loading) {
+                const loads = data.phase_loads || { l1: 333, l2: 333, l3: 334 };
+                this.localLoads = { l1: loads.l1, l2: loads.l2, l3: loads.l3 };
+            }
+        },
+
+        isManualMode() {
+            return this.activeScenario === '';
+        },
+
+        getScenarioName() {
+            if (!this.activeScenario) return 'Manual';
+            const s = this.scenarios.find(s => s.key === this.activeScenario);
+            return s ? s.name : this.activeScenario;
+        },
+
+        getScenarioDescription() {
+            if (!this.activeScenario) return 'Adjust phase loads manually';
+            const s = this.scenarios.find(s => s.key === this.activeScenario);
+            return s ? s.description : '';
+        },
+
+        getScenarioIcon(key) {
+            const icons = {
+                gaming_family: '🎮',
+                old_couple: '👴',
+                weed_factory: '🌿',
+                work_from_home: '💻',
+                night_owl: '🦉'
+            };
+            return icons[key] || '📊';
+        },
+
+        getTotalPower() {
+            return this.localLoads.l1 + this.localLoads.l2 + this.localLoads.l3;
+        },
+
+        formatPower(watts) {
+            if (Math.abs(watts) >= 1000) {
+                return (watts / 1000).toFixed(1) + ' kW';
+            }
+            return Math.round(watts) + ' W';
+        },
+
+        async onScenarioChange(scenario) {
+            this.loading = true;
+            this.activeScenario = scenario;
+            try {
+                const siteId = Alpine.store('site').selectedId;
+                const result = await siteApi.setSiteLoadScenario(siteId, scenario);
+                if (result && result.phase_loads) {
+                    this.localLoads = {
+                        l1: result.phase_loads.l1,
+                        l2: result.phase_loads.l2,
+                        l3: result.phase_loads.l3
+                    };
+                }
+            } catch (e) {
+                console.error('Failed to set scenario:', e);
+            }
+            this.loading = false;
+        },
+
+        toggleLinked() {
+            this.loadLinked = !this.loadLinked;
+            this.sendPhaseLoads();
+        },
+
+        onPhaseSliderInput(phase, value) {
+            const newValue = parseFloat(value);
+
+            if (this.loadLinked) {
+                // Calculate proportional change for all phases
+                const oldValue = this.localLoads[phase];
+                const delta = newValue - oldValue;
+
+                // Apply same delta to all phases
+                this.localLoads.l1 = Math.max(0, Math.min(5000, this.localLoads.l1 + delta));
+                this.localLoads.l2 = Math.max(0, Math.min(5000, this.localLoads.l2 + delta));
+                this.localLoads.l3 = Math.max(0, Math.min(5000, this.localLoads.l3 + delta));
+            } else {
+                this.localLoads[phase] = newValue;
+            }
+
+            // Debounce the API call
+            if (this.sliderDebounce) {
+                clearTimeout(this.sliderDebounce);
+            }
+            this.sliderDebounce = setTimeout(() => {
+                this.sendPhaseLoads();
+            }, 100);
+        },
+
+        async sendPhaseLoads() {
+            try {
+                const siteId = Alpine.store('site').selectedId;
+                await siteApi.setSitePhaseLoads(
+                    siteId,
+                    this.localLoads.l1,
+                    this.localLoads.l2,
+                    this.localLoads.l3,
+                    this.loadLinked
+                );
+            } catch (e) {
+                console.error('Failed to set phase loads:', e);
+            }
         }
     }));
 });
