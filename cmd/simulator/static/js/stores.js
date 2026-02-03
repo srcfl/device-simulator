@@ -559,6 +559,46 @@ const siteApi = {
             const text = await resp.text();
             throw new Error(text);
         }
+    },
+
+    async getLoadScenarios() {
+        if (isWails) {
+            return await window.go.main.App.GetLoadScenarios();
+        }
+        const resp = await fetch('/api/load-scenarios');
+        return resp.json();
+    },
+
+    async setSitePhaseLoads(siteId, l1, l2, l3, linked) {
+        if (isWails) {
+            return await window.go.main.App.SetSitePhaseLoads(siteId, l1, l2, l3, linked);
+        }
+        const resp = await fetch(`/api/sites/${siteId}/phase-loads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ l1, l2, l3, linked })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        return resp.json();
+    },
+
+    async setSiteLoadScenario(siteId, scenario) {
+        if (isWails) {
+            return await window.go.main.App.SetSiteLoadScenario(siteId, scenario);
+        }
+        const resp = await fetch(`/api/sites/${siteId}/load-scenario`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scenario })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        return resp.json();
     }
 };
 
@@ -821,6 +861,7 @@ document.addEventListener('alpine:init', () => {
         selectedId: null,
         selectedProtocol: null,
         selectedSerial: null,
+        selectedView: null,  // 'site_load' or null (for normal view)
         localIP: '--',
         categories: categories,
         addMenuOpen: false,
@@ -1053,6 +1094,7 @@ document.addEventListener('alpine:init', () => {
         selectSimulator(id, protocol) {
             this.selectedId = id;
             this.selectedProtocol = protocol;
+            this.selectedView = null;  // Clear site_load view
             const sim = this.simulators.find(s => s.id === id);
             this.selectedSerial = sim ? sim.serial : null;
 
@@ -1068,6 +1110,19 @@ document.addEventListener('alpine:init', () => {
             this.refreshInterval = setInterval(() => Alpine.store('simulator').loadAllData(), 2000);
 
             Alpine.store('simulator').init(id, protocol);
+        },
+
+        selectSiteLoad() {
+            this.selectedId = null;
+            this.selectedProtocol = null;
+            this.selectedSerial = null;
+            this.selectedView = 'site_load';
+
+            // Stop simulator refresh if any
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+                this.refreshInterval = null;
+            }
         },
 
         async toggleSimRunning(id, currentState) {

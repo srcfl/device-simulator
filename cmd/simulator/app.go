@@ -739,6 +739,9 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 		"time_multiplier": site.TimeMultiplier,
 		"sim_running":     site.SimRunning,
 		"scenario":        site.Scenario,
+		"phase_loads":     site.SitePhaseLoads,
+		"load_scenario":   site.LoadScenario,
+		"load_linked":     site.LoadLinked,
 	}
 
 	meterID := site.MeterID
@@ -1337,4 +1340,78 @@ func (a *App) SaveSettings(s map[string]interface{}) error {
 	}
 
 	return settings.Save(appSettings)
+}
+
+// GetLoadScenarios returns all available load scenarios
+func (a *App) GetLoadScenarios() []*LoadScenario {
+	return GetLoadScenariosSlice()
+}
+
+// SetSitePhaseLoads sets the per-phase loads for a site (manual mode)
+func (a *App) SetSitePhaseLoads(id int, l1, l2, l3 float64, linked bool) (map[string]interface{}, error) {
+	site := getSite(id)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", id)
+	}
+
+	site.mu.Lock()
+	// Setting phase loads clears any active scenario (switch to manual)
+	site.LoadScenario = ""
+	site.SitePhaseLoads.L1 = l1
+	site.SitePhaseLoads.L2 = l2
+	site.SitePhaseLoads.L3 = l3
+	site.LoadLinked = linked
+	site.BaseLoadW = l1 + l2 + l3
+	loads := site.SitePhaseLoads
+	site.mu.Unlock()
+
+	a.emitSiteUpdate()
+
+	return map[string]interface{}{
+		"phase_loads": loads,
+		"load_linked": linked,
+		"base_load_w": loads.Total(),
+	}, nil
+}
+
+// SetSiteLoadScenario sets the active load scenario for a site
+func (a *App) SetSiteLoadScenario(id int, scenario string) (map[string]interface{}, error) {
+	site := getSite(id)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", id)
+	}
+
+	// Empty scenario means manual mode
+	if scenario != "" {
+		if _, ok := LoadScenarios[scenario]; !ok {
+			return nil, fmt.Errorf("unknown load scenario: %s", scenario)
+		}
+	}
+
+	site.mu.Lock()
+	site.LoadScenario = scenario
+
+	// If switching to a scenario, initialize phase loads to current time slot
+	if scenario != "" {
+		if ls, ok := LoadScenarios[scenario]; ok {
+			hour := site.SimulatedTime.Hour()
+			if site.SimulatedTime.IsZero() {
+				hour = time.Now().Hour()
+			}
+			loads := ls.GetLoadForTime(hour)
+			site.SitePhaseLoads = loads
+			site.BaseLoadW = loads.Total()
+		}
+	}
+
+	result := map[string]interface{}{
+		"load_scenario": site.LoadScenario,
+		"phase_loads":   site.SitePhaseLoads,
+		"base_load_w":   site.SitePhaseLoads.Total(),
+	}
+	site.mu.Unlock()
+
+	a.emitSiteUpdate()
+
+	return result, nil
 }

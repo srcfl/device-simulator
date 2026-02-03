@@ -128,6 +128,11 @@ type Site struct {
 	SimRunning     bool      `json:"sim_running"`    // Simulation running (data generation)
 	Scenario       string    `json:"scenario"`       // Weather scenario
 
+	// Site Load (per-phase load control)
+	SitePhaseLoads PhaseLoads `json:"phase_loads"`       // Per-phase loads in Watts
+	LoadScenario   string     `json:"load_scenario"`     // Active load scenario key ("" = manual)
+	LoadLinked     bool       `json:"load_linked"`       // Whether sliders are linked
+
 	mu           sync.RWMutex
 	stopChan     chan struct{}
 	simStopChan  chan struct{}                       // Stop channel for simulation loop
@@ -593,6 +598,9 @@ func startHTTPServer(port int) {
 	// Site endpoints
 	mux.HandleFunc("/api/sites", handleSitesList)
 	mux.HandleFunc("/api/sites/", handleSiteAPI)
+
+	// Load scenarios endpoint
+	mux.HandleFunc("/api/load-scenarios", handleLoadScenarios)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("HTTP server listening on %s", addr)
@@ -1702,6 +1710,10 @@ func handleSiteAPI(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(action, "virtual-devices/"):
 		deviceType := strings.TrimPrefix(action, "virtual-devices/")
 		handleSiteVirtualDevice(w, r, site, deviceType)
+	case action == "phase-loads":
+		handleSitePhaseLoads(w, r, site)
+	case action == "load-scenario":
+		handleSiteLoadScenario(w, r, site)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}
@@ -1729,6 +1741,9 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 		"time_multiplier": site.TimeMultiplier,
 		"sim_running":     site.SimRunning,
 		"scenario":        site.Scenario,
+		"phase_loads":     site.SitePhaseLoads,
+		"load_scenario":   site.LoadScenario,
+		"load_linked":     site.LoadLinked,
 	}
 
 	// Add current meter reading if meter is valid
@@ -2471,6 +2486,117 @@ func handleSiteVirtualDevice(w http.ResponseWriter, r *http.Request, site *Site,
 	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
 }
 
+// handleLoadScenarios returns all available load scenarios
+func handleLoadScenarios(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(GetLoadScenariosSlice())
+}
+
+// handleSitePhaseLoads handles setting per-phase loads for a site
+func handleSitePhaseLoads(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		L1     *float64 `json:"l1"`
+		L2     *float64 `json:"l2"`
+		L3     *float64 `json:"l3"`
+		Linked *bool    `json:"linked"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	site.mu.Lock()
+	// Setting phase loads clears any active scenario (switch to manual)
+	site.LoadScenario = ""
+
+	if req.L1 != nil {
+		site.SitePhaseLoads.L1 = *req.L1
+	}
+	if req.L2 != nil {
+		site.SitePhaseLoads.L2 = *req.L2
+	}
+	if req.L3 != nil {
+		site.SitePhaseLoads.L3 = *req.L3
+	}
+	if req.Linked != nil {
+		site.LoadLinked = *req.Linked
+	}
+
+	// Update BaseLoadW for backward compat
+	site.BaseLoadW = site.SitePhaseLoads.Total()
+	loads := site.SitePhaseLoads
+	linked := site.LoadLinked
+	site.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"phase_loads": loads,
+		"load_linked": linked,
+		"base_load_w": loads.Total(),
+	})
+}
+
+// handleSiteLoadScenario handles setting the active load scenario for a site
+func handleSiteLoadScenario(w http.ResponseWriter, r *http.Request, site *Site) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Scenario string `json:"scenario"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Empty scenario means manual mode
+	if req.Scenario != "" {
+		if _, ok := LoadScenarios[req.Scenario]; !ok {
+			http.Error(w, "Unknown load scenario: "+req.Scenario, http.StatusBadRequest)
+			return
+		}
+	}
+
+	site.mu.Lock()
+	site.LoadScenario = req.Scenario
+
+	// If switching to a scenario, initialize phase loads to current time slot
+	if req.Scenario != "" {
+		if ls, ok := LoadScenarios[req.Scenario]; ok {
+			hour := site.SimulatedTime.Hour()
+			if site.SimulatedTime.IsZero() {
+				hour = time.Now().Hour()
+			}
+			loads := ls.GetLoadForTime(hour)
+			site.SitePhaseLoads = loads
+			site.BaseLoadW = loads.Total()
+		}
+	}
+
+	scenario := site.LoadScenario
+	loads := site.SitePhaseLoads
+	site.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"load_scenario": scenario,
+		"phase_loads":   loads,
+		"base_load_w":   loads.Total(),
+	})
+}
+
 func runAutomationLoop(sim *Simulator) {
 	log.Printf("[%s] Automation started", sim.Serial)
 
@@ -2828,9 +2954,20 @@ func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
 			site.SimulatedTime = site.SimulatedTime.Add(elapsed)
 			simTime := site.SimulatedTime
 			scenario := site.Scenario
+			loadScenario := site.LoadScenario
 			simIDs := make([]int, len(site.SimulatorIDs))
 			copy(simIDs, site.SimulatorIDs)
 			meterID := site.MeterID
+
+			// Update load based on scenario if one is active
+			if loadScenario != "" {
+				if ls, ok := LoadScenarios[loadScenario]; ok {
+					loads := ls.GetLoadForTime(simTime.Hour())
+					site.SitePhaseLoads = loads
+					// Also update BaseLoadW for backward compat
+					site.BaseLoadW = loads.Total()
+				}
+			}
 			site.mu.Unlock()
 
 			// Generate values for each device in the site
@@ -3009,6 +3146,7 @@ func calculateAndUpdateMeter(site *Site) {
 	baseLoad := site.BaseLoadW
 	p1Buffer := site.P1Buffer
 	phaseFactors := site.PhaseFactors
+	sitePhaseLoads := site.SitePhaseLoads
 	site.mu.RUnlock()
 
 	// Get primary meter
@@ -3025,10 +3163,15 @@ func calculateAndUpdateMeter(site *Site) {
 	meterCategory := meterSim.Category
 	meterSim.mu.RUnlock()
 
-	// Calculate current total power
-	totalPower := baseLoad // Start with base load
+	// Start with per-phase loads from SitePhaseLoads
+	phasePowers := PhasePowers{
+		L1: sitePhaseLoads.L1,
+		L2: sitePhaseLoads.L2,
+		L3: sitePhaseLoads.L3,
+	}
 
 	// If meter is an inverter, read its PV/Battery values and include them in the calculation
+	// Distribute PV/battery contributions using phase factors
 	if meterCategory == "inverter" {
 		pvPower := getRegisterValue(meterSim.Server, 5016)       // PV power
 		batteryPower := getRegisterValue(meterSim.Server, 13021) // Battery power (absolute)
@@ -3041,9 +3184,15 @@ func calculateAndUpdateMeter(site *Site) {
 		}
 		// Note: when cmd=170 (charge), batteryPower stays positive (importing/consuming)
 
-		totalPower = baseLoad - pvPower + batteryPower
+		// Distribute PV generation (reduces load) and battery across phases
+		pvBatteryNet := -pvPower + batteryPower
+		phasePowers.L1 += pvBatteryNet * phaseFactors.L1
+		phasePowers.L2 += pvBatteryNet * phaseFactors.L2
+		phasePowers.L3 += pvBatteryNet * phaseFactors.L3
 	}
 
+	// Add contributions from other simulators (distributed using phase factors)
+	var otherPower float64
 	for _, simID := range simIDs {
 		// Skip meter simulator to avoid double-counting its own power
 		if simID == meterID {
@@ -3053,15 +3202,20 @@ func calculateAndUpdateMeter(site *Site) {
 		if sim == nil {
 			continue
 		}
-		totalPower += getPowerContribution(sim)
+		otherPower += getPowerContribution(sim)
 	}
 
-	// Distribute power across phases using configurable phase factors
-	phasePowers := PhasePowers{
-		L1: totalPower * phaseFactors.L1,
-		L2: totalPower * phaseFactors.L2,
-		L3: totalPower * phaseFactors.L3,
-	}
+	// Distribute other power contributions across phases
+	phasePowers.L1 += otherPower * phaseFactors.L1
+	phasePowers.L2 += otherPower * phaseFactors.L2
+	phasePowers.L3 += otherPower * phaseFactors.L3
+
+	// Calculate total power from phase powers
+	totalPower := phasePowers.L1 + phasePowers.L2 + phasePowers.L3
+
+	// Update BaseLoadW for backward compatibility (used for display)
+	// This is the sum of SitePhaseLoads
+	_ = baseLoad // Kept for backward compat in API responses
 
 	// Calculate energy delta for this 0.5s tick (kWh and Wh)
 	energyDeltaKWh := math.Abs(totalPower) / 1000.0 / 7200.0 // kWh per 0.5s
@@ -3335,6 +3489,10 @@ func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64)
 		TimeMultiplier: 1.0,
 		SimRunning:     false,
 		Scenario:       "sunny",
+		// Site Load initialization (~1kW default, distributed across phases)
+		SitePhaseLoads: PhaseLoads{L1: 333, L2: 333, L3: 334},
+		LoadScenario:   "", // Empty = manual mode
+		LoadLinked:     true,
 	}
 	sites = append(sites, site)
 	sitesMu.Unlock()
