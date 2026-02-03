@@ -798,11 +798,25 @@ document.addEventListener('alpine:init', () => {
         toggleLocks: {},
         // Reactive trigger that updates when simulators change
         simulatorsVersion: 0,
+        // Home load state (mirrors Site Load dashboard)
+        loadScenarios: [],
+        homeLoads: { l1: 0, l2: 0, l3: 0 },
+        homeLoadLinked: true,
+        homeLoadScenario: '',
+        homeLoadLoading: false,
+        homeLoadDebounce: null,
 
         init() {
             // Watch for simulator changes to trigger reactivity
             this.$watch('$store.app.simulators', () => {
                 this.simulatorsVersion++;
+            });
+
+            this.loadHomeLoadScenarios();
+            this.syncHomeLoadFromSite();
+
+            this.$watch('$store.site.data', () => {
+                this.syncHomeLoadFromSite();
             });
         },
 
@@ -847,29 +861,130 @@ document.addEventListener('alpine:init', () => {
             return Math.round(watts) + ' W';
         },
 
+        async loadHomeLoadScenarios() {
+            try {
+                this.loadScenarios = await siteApi.getLoadScenarios();
+            } catch (e) {
+                console.error('Failed to load home load scenarios:', e);
+            }
+        },
+
+        syncHomeLoadFromSite() {
+            const data = Alpine.store('site').data;
+            if (!data) return;
+
+            this.homeLoadScenario = data.load_scenario || '';
+            this.homeLoadLinked = data.load_linked ?? true;
+
+            const shouldSyncLoads = !this.homeLoadLoading || !this.isLoadManual();
+            if (shouldSyncLoads) {
+                const loads = data.phase_loads || { l1: 0, l2: 0, l3: 0 };
+                this.homeLoads = {
+                    l1: loads.l1 || 0,
+                    l2: loads.l2 || 0,
+                    l3: loads.l3 || 0
+                };
+            }
+        },
+
+        isLoadManual() {
+            return this.homeLoadScenario === '';
+        },
+
+        getHomeLoadTotal() {
+            return this.homeLoads.l1 + this.homeLoads.l2 + this.homeLoads.l3;
+        },
+
         // Get load scenario name from key
         getLoadScenarioName(key) {
-            const names = {
+            if (!key) return 'Manual';
+            const scenario = this.loadScenarios.find(s => s.key === key);
+            if (scenario) return scenario.name;
+            const fallbackNames = {
                 gaming_family: 'Gaming Family',
                 old_couple: 'Old Couple',
                 weed_factory: 'Weed Factory',
                 work_from_home: 'Work From Home',
                 night_owl: 'Night Owl'
             };
-            return names[key] || key || 'Manual';
+            return fallbackNames[key] || key;
         },
 
-        // Set base load (updates phase loads proportionally)
-        async setBaseLoad(watts) {
+        getLoadScenarioIcon(key) {
+            const icons = {
+                gaming_family: '🎮',
+                old_couple: '👴',
+                weed_factory: '🌿',
+                work_from_home: '💻',
+                night_owl: '🦉'
+            };
+            return icons[key] || '📊';
+        },
+
+        async setHomeLoadScenario(scenario) {
             const siteId = Alpine.store('site').selectedId;
             if (!siteId) return;
 
-            // Distribute equally across phases (simple approach)
-            const perPhase = watts / 3;
+            this.homeLoadLoading = true;
+            this.homeLoadScenario = scenario;
             try {
-                await siteApi.setSitePhaseLoads(siteId, perPhase, perPhase, perPhase, true);
+                const result = await siteApi.setSiteLoadScenario(siteId, scenario);
+                if (result && result.phase_loads) {
+                    this.homeLoads = {
+                        l1: result.phase_loads.l1,
+                        l2: result.phase_loads.l2,
+                        l3: result.phase_loads.l3
+                    };
+                }
             } catch (e) {
-                console.error('Failed to set base load:', e);
+                console.error('Failed to set home load scenario:', e);
+            }
+            this.homeLoadLoading = false;
+        },
+
+        toggleHomeLoadLinked() {
+            if (!this.isLoadManual()) return;
+            this.homeLoadLinked = !this.homeLoadLinked;
+            this.sendHomePhaseLoads();
+        },
+
+        onHomePhaseInput(phase, value) {
+            if (!this.isLoadManual()) return;
+            const newValue = parseFloat(value);
+
+            if (this.homeLoadLinked) {
+                const oldValue = this.homeLoads[phase];
+                const delta = newValue - oldValue;
+
+                this.homeLoads.l1 = Math.max(0, Math.min(5000, this.homeLoads.l1 + delta));
+                this.homeLoads.l2 = Math.max(0, Math.min(5000, this.homeLoads.l2 + delta));
+                this.homeLoads.l3 = Math.max(0, Math.min(5000, this.homeLoads.l3 + delta));
+            } else {
+                this.homeLoads[phase] = newValue;
+            }
+
+            this.homeLoadLoading = true;
+            if (this.homeLoadDebounce) {
+                clearTimeout(this.homeLoadDebounce);
+            }
+            this.homeLoadDebounce = setTimeout(async () => {
+                await this.sendHomePhaseLoads();
+                this.homeLoadLoading = false;
+            }, 120);
+        },
+
+        async sendHomePhaseLoads() {
+            try {
+                const siteId = Alpine.store('site').selectedId;
+                await siteApi.setSitePhaseLoads(
+                    siteId,
+                    this.homeLoads.l1,
+                    this.homeLoads.l2,
+                    this.homeLoads.l3,
+                    this.homeLoadLinked
+                );
+            } catch (e) {
+                console.error('Failed to set home phase loads:', e);
             }
         },
 
@@ -1079,27 +1194,15 @@ document.addEventListener('alpine:init', () => {
                 try {
                     const current = this.getModbusRunning(simId);
                     if (current) {
-                        await api.stopAutomation(simId);
+                        await api.stopEmulator(simId);
                     } else {
-                        await api.startAutomation(simId);
+                        await api.startEmulator(simId);
                     }
                     await Alpine.store('app').loadSimulators();
                 } catch (e) {
                     console.error('Toggle Modbus running error:', e);
                 }
             });
-        },
-
-        // Home Load controls
-        formatLoadPower(power) {
-            if (power >= 1000) {
-                return `${(power / 1000).toFixed(1)} kW`;
-            }
-            return `${power} W`;
-        },
-
-        async setBaseLoad(power) {
-            await Alpine.store('site').updateConfig({ base_load_w: power });
         },
 
         // General helpers
@@ -2008,31 +2111,62 @@ document.addEventListener('alpine:init', () => {
 
     // Settings Panel Component
     Alpine.data('settingsPanel', () => ({
-        mqttBasePort: 11883,
-        originalMqttBasePort: 11883,
+        modbusBasePort: 5000,
+        mqttBasePort: 1883,
+        ocppBasePort: 9000,
+        modbusDisplayOffset: 0,
+        originalMqttBasePort: 1883,
+        originalModbusBasePort: 5000,
+        originalOcppBasePort: 9000,
+        originalModbusDisplayOffset: 0,
         mqttDisplayOffset: 0,
+        ocppDisplayOffset: 0,
+        originalMqttDisplayOffset: 0,
+        originalOcppDisplayOffset: 0,
         saving: false,
         needsRestart: false,
         loaded: false,
 
         get hasChanges() {
-            return this.mqttBasePort !== this.originalMqttBasePort;
+            return this.modbusBasePort !== this.originalModbusBasePort ||
+                this.mqttBasePort !== this.originalMqttBasePort ||
+                this.ocppBasePort !== this.originalOcppBasePort ||
+                this.modbusDisplayOffset !== this.originalModbusDisplayOffset ||
+                this.mqttDisplayOffset !== this.originalMqttDisplayOffset ||
+                this.ocppDisplayOffset !== this.originalOcppDisplayOffset;
         },
 
         get isDockerMode() {
-            return this.mqttDisplayOffset > 0;
+            return this.mqttDisplayOffset > 0 || this.modbusDisplayOffset > 0 || this.ocppDisplayOffset > 0;
         },
 
-        get displayPort() {
+        get mqttDisplayPort() {
             return this.mqttBasePort + this.mqttDisplayOffset;
+        },
+
+        get modbusDisplayPort() {
+            return this.modbusBasePort + this.modbusDisplayOffset;
+        },
+
+        get ocppDisplayPort() {
+            return this.ocppBasePort + this.ocppDisplayOffset;
         },
 
         async init() {
             try {
                 const settings = await api.getSettings();
-                this.mqttBasePort = settings.mqttBasePort || 11883;
+                this.modbusBasePort = settings.modbusBasePort || 5000;
+                this.mqttBasePort = settings.mqttBasePort || 1883;
+                this.ocppBasePort = settings.ocppBasePort || 9000;
+                this.modbusDisplayOffset = settings.modbusDisplayOffset || 0;
                 this.mqttDisplayOffset = settings.mqttDisplayOffset || 0;
+                this.ocppDisplayOffset = settings.ocppDisplayOffset || 0;
+                this.originalModbusBasePort = this.modbusBasePort;
                 this.originalMqttBasePort = this.mqttBasePort;
+                this.originalOcppBasePort = this.ocppBasePort;
+                this.originalModbusDisplayOffset = this.modbusDisplayOffset;
+                this.originalMqttDisplayOffset = this.mqttDisplayOffset;
+                this.originalOcppDisplayOffset = this.ocppDisplayOffset;
                 this.loaded = true;
             } catch (e) {
                 console.error('Failed to load settings:', e);
@@ -2043,8 +2177,20 @@ document.addEventListener('alpine:init', () => {
         async save() {
             this.saving = true;
             try {
-                await api.saveSettings({ mqttBasePort: this.mqttBasePort });
+                await api.saveSettings({
+                    modbusBasePort: this.modbusBasePort,
+                    mqttBasePort: this.mqttBasePort,
+                    ocppBasePort: this.ocppBasePort,
+                    modbusDisplayOffset: this.modbusDisplayOffset,
+                    mqttDisplayOffset: this.mqttDisplayOffset,
+                    ocppDisplayOffset: this.ocppDisplayOffset
+                });
+                this.originalModbusBasePort = this.modbusBasePort;
                 this.originalMqttBasePort = this.mqttBasePort;
+                this.originalOcppBasePort = this.ocppBasePort;
+                this.originalModbusDisplayOffset = this.modbusDisplayOffset;
+                this.originalMqttDisplayOffset = this.mqttDisplayOffset;
+                this.originalOcppDisplayOffset = this.ocppDisplayOffset;
                 this.needsRestart = true;
             } catch (e) {
                 console.error('Failed to save settings:', e);
@@ -2054,7 +2200,12 @@ document.addEventListener('alpine:init', () => {
         },
 
         reset() {
+            this.modbusBasePort = this.originalModbusBasePort;
             this.mqttBasePort = this.originalMqttBasePort;
+            this.ocppBasePort = this.originalOcppBasePort;
+            this.modbusDisplayOffset = this.originalModbusDisplayOffset;
+            this.mqttDisplayOffset = this.originalMqttDisplayOffset;
+            this.ocppDisplayOffset = this.originalOcppDisplayOffset;
         }
     }));
 

@@ -300,20 +300,58 @@ const api = {
         return resp.json();
     },
 
+    async getWarnings() {
+        if (isWails) {
+            return await window.go.main.App.GetWarnings();
+        }
+        const resp = await fetch('/api/warnings');
+        return resp.json();
+    },
+
+    async clearWarnings() {
+        if (isWails) {
+            return await window.go.main.App.ClearWarnings();
+        }
+        const resp = await fetch('/api/warnings/clear', { method: 'POST' });
+        return resp.json();
+    },
+
     async getSettings() {
         if (isWails) {
             return await window.go.main.App.GetSettings();
         }
-        // HTTP mode (Docker) - return defaults with display offset
-        // Docker maps internal 1883+ to external 11883+ (offset of 10000)
-        return { mqttBasePort: 1883, mqttDisplayOffset: 10000 };
+        try {
+            const resp = await fetch('/api/settings');
+            if (resp.ok) {
+                return await resp.json();
+            }
+        } catch (e) {
+            console.error('Failed to load settings:', e);
+        }
+        // Fallback defaults (Docker-friendly)
+        return {
+            modbusBasePort: 5000,
+            mqttBasePort: 1883,
+            ocppBasePort: 9000,
+            modbusDisplayOffset: 0,
+            mqttDisplayOffset: 10000,
+            ocppDisplayOffset: 0
+        };
     },
 
     async saveSettings(settings) {
         if (isWails) {
             return await window.go.main.App.SaveSettings(settings);
         }
-        // No-op for Docker mode - ports are handled via docker-compose port mapping
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
     }
 };
 
@@ -732,11 +770,15 @@ const storage = {
                     type: sim.category,
                     serial: sim.serial,
                     slaveId: sim.slave_id || 1,
+                    port: sim.port,
                     profile: sim.profile || null,
                     automation: { wasRunning: sim.running || false, timeMultiplier: 1, scenario: 'sunny' },
                     createdAt: new Date().toISOString(),
                     lastModified: new Date().toISOString()
                 });
+            } else {
+                const existing = savedBySerial.get(sim.serial);
+                existing.port = sim.port;
             }
         }
 
@@ -879,6 +921,9 @@ document.addEventListener('alpine:init', () => {
         showSettingsModal: false,
         // MQTT display offset (for Docker port mapping)
         mqttDisplayOffset: 0,
+        modbusDisplayOffset: 0,
+        ocppDisplayOffset: 0,
+        warnings: [],
 
         async init() {
             // Fetch version, local IP, and settings from backend
@@ -894,8 +939,16 @@ document.addEventListener('alpine:init', () => {
                 if (versionInfo && versionInfo.version) {
                     this.version = versionInfo.version;
                 }
-                if (settings && settings.mqttDisplayOffset !== undefined) {
-                    this.mqttDisplayOffset = settings.mqttDisplayOffset;
+                if (settings) {
+                    if (settings.mqttDisplayOffset !== undefined) {
+                        this.mqttDisplayOffset = settings.mqttDisplayOffset;
+                    }
+                    if (settings.modbusDisplayOffset !== undefined) {
+                        this.modbusDisplayOffset = settings.modbusDisplayOffset;
+                    }
+                    if (settings.ocppDisplayOffset !== undefined) {
+                        this.ocppDisplayOffset = settings.ocppDisplayOffset;
+                    }
                 }
             } catch (e) {
                 console.error('Failed to get system info:', e);
@@ -904,6 +957,7 @@ document.addEventListener('alpine:init', () => {
 
             // Check for updates (non-blocking)
             this.checkForUpdate();
+            this.loadWarnings();
 
             try {
                 const serverSims = await api.getSimulators();
@@ -921,7 +975,7 @@ document.addEventListener('alpine:init', () => {
                 console.error('Init error:', e);
             }
             await this.loadSimulators();
-            await Alpine.store('site').loadSites();
+            await Alpine.store('site').init();
 
             // Clear any existing global refresh interval before creating new one
             if (this.globalRefreshInterval) {
@@ -936,6 +990,7 @@ document.addEventListener('alpine:init', () => {
         async loadSimulators() {
             try {
                 this.simulators = await api.getSimulators();
+                storage.syncWithServer(this.simulators);
             } catch (e) {
                 console.error('Load error:', e);
             }
@@ -944,6 +999,7 @@ document.addEventListener('alpine:init', () => {
         async restoreSimulators() {
             const saved = storage.getAll();
             if (saved.length === 0) return;
+            const portWarnings = [];
 
             for (const config of saved) {
                 // Check server state BEFORE each creation to handle race conditions
@@ -958,6 +1014,9 @@ document.addEventListener('alpine:init', () => {
 
                 try {
                     const newSim = await api.createSimulator(config.type);
+                    if (config.port && newSim.port !== config.port) {
+                        portWarnings.push(`${config.serial}: expected ${config.port}, assigned ${newSim.port}`);
+                    }
                     if (newSim.serial !== config.serial || config.slaveId) {
                         await api.updateConfig(newSim.id, { serial: config.serial, slave_id: config.slaveId || 1 });
                     }
@@ -981,6 +1040,11 @@ document.addEventListener('alpine:init', () => {
                 } catch (e) {
                     console.error('Restore error:', e);
                 }
+            }
+            if (portWarnings.length > 0) {
+                const appStore = Alpine.store('app');
+                const messages = portWarnings.map(w => `Port assignment changed: ${w}`);
+                appStore.warnings = [...(appStore.warnings || []), ...messages];
             }
         },
 
@@ -1030,6 +1094,7 @@ document.addEventListener('alpine:init', () => {
                     type: type,
                     serial: newSim.serial,
                     slaveId: newSim.slave_id || 1,
+                    port: newSim.port,
                     profile: newSim.profile || null,
                     siteId: siteStore.selectedId,
                     deviceOn: true,
@@ -1060,6 +1125,7 @@ document.addEventListener('alpine:init', () => {
                     type: type,
                     serial: newSim.serial,
                     slaveId: newSim.slave_id || 1,
+                    port: newSim.port,
                     profile: newSim.profile || null,
                     automation: { wasRunning: false, timeMultiplier: 1, scenario: 'sunny' }
                 });
@@ -1098,14 +1164,6 @@ document.addEventListener('alpine:init', () => {
             const sim = this.simulators.find(s => s.id === id);
             this.selectedSerial = sim ? sim.serial : null;
 
-            // Don't clear site selection - site view should always be on
-            // Just stop the site refresh interval since we'll show simulator view
-            const siteStore = Alpine.store('site');
-            if (siteStore.refreshInterval) {
-                clearInterval(siteStore.refreshInterval);
-                siteStore.refreshInterval = null;
-            }
-
             if (this.refreshInterval) clearInterval(this.refreshInterval);
             this.refreshInterval = setInterval(() => Alpine.store('simulator').loadAllData(), 2000);
 
@@ -1123,6 +1181,9 @@ document.addEventListener('alpine:init', () => {
                 clearInterval(this.refreshInterval);
                 this.refreshInterval = null;
             }
+
+            // Ensure site data continues to refresh
+            Alpine.store('site').ensureRefreshing();
         },
 
         async toggleSimRunning(id, currentState) {
@@ -1151,10 +1212,16 @@ document.addEventListener('alpine:init', () => {
             const sim = this.simulators.find(s => s.id === id);
             const freshState = sim?.running || false;
 
-            if (freshState) {
-                await api.stopEmulator(id);
-            } else {
-                await api.startEmulator(id);
+            try {
+                if (freshState) {
+                    await api.stopEmulator(id);
+                } else {
+                    await api.startEmulator(id);
+                }
+            } catch (e) {
+                console.error('Toggle emulator error:', e);
+                alert('Error toggling emulator: ' + (e.message || e));
+                return;
             }
 
             if (sim) {
@@ -1211,6 +1278,24 @@ document.addEventListener('alpine:init', () => {
                 this.updateError = typeof e === 'string' ? e : (e.message || e.toString() || 'Unknown error occurred');
             } finally {
                 this.updateApplying = false;
+            }
+        },
+
+        async loadWarnings() {
+            try {
+                const data = await api.getWarnings();
+                this.warnings = data.warnings || [];
+            } catch (e) {
+                console.error('Failed to load warnings:', e);
+            }
+        },
+
+        async clearWarnings() {
+            try {
+                await api.clearWarnings();
+                this.warnings = [];
+            } catch (e) {
+                console.error('Failed to clear warnings:', e);
             }
         }
     });
@@ -1562,6 +1647,7 @@ document.addEventListener('alpine:init', () => {
                     enabled: false
                 });
 
+                await Alpine.store('app').loadSimulators();
                 console.log('Created default site "My Home"');
             } catch (e) {
                 console.error('Failed to create default site:', e);
@@ -1571,6 +1657,7 @@ document.addEventListener('alpine:init', () => {
         async loadSites() {
             try {
                 this.sites = await siteApi.getSites();
+                storage.syncSitesWithServer(this.sites);
             } catch (e) {
                 console.error('Load sites error:', e);
             }
@@ -1642,7 +1729,10 @@ document.addEventListener('alpine:init', () => {
                     enabled: false
                 });
 
-                await this.loadSites();
+                await Promise.all([
+                    this.loadSites(),
+                    Alpine.store('app').loadSimulators()
+                ]);
                 return newSite;
             } catch (e) {
                 console.error('Create site error:', e);
@@ -1685,6 +1775,13 @@ document.addEventListener('alpine:init', () => {
 
             // Auto-enable aggregation (sites are always aggregating)
             this.ensureEnabled(id);
+        },
+
+        ensureRefreshing() {
+            if (!this.selectedId) return;
+            if (this.refreshInterval) return;
+            this.refreshInterval = setInterval(() => this.loadSiteData(), 1000);
+            this.loadSiteData();
         },
 
         async ensureEnabled(id) {
@@ -1963,6 +2060,7 @@ document.addEventListener('alpine:init', () => {
                     type: simType,
                     serial: newSim.serial,
                     slaveId: newSim.slave_id || 1,
+                    port: newSim.port,
                     profile: newSim.profile || null,
                     siteId: this.selectedId,
                     automation: { wasRunning: false, timeMultiplier: 1, scenario: 'sunny' }

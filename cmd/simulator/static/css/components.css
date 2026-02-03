@@ -658,6 +658,23 @@
     text-align: right;
 }
 
+.member-control-row.load-profile-row {
+    align-items: center;
+}
+
+.member-load-select {
+    flex: 1;
+    width: auto;
+    font-size: var(--font-size-sm);
+    padding: 0.35rem 0.5rem;
+}
+
+.member-load-phases {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
 /* Mini Toggle (for member cards) */
 .mini-toggle {
     position: relative;
@@ -2384,6 +2401,47 @@
     border-color: var(--border-color);
 }
 
+/* ========== Warning Banner ========== */
+
+.warning-banner {
+    background: rgba(245, 158, 11, 0.12);
+    border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+    color: var(--text-primary);
+    padding: 0.5rem 1rem;
+}
+
+.warning-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.warning-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.warning-item {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.warning-dismiss {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.35rem 0.7rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.warning-dismiss:hover {
+    background: var(--bg-secondary);
+}
+
 .site-load-sidebar-item.active {
     background: rgba(var(--color-warning-rgb), 0.15);
     border-color: var(--color-warning);
@@ -2584,6 +2642,10 @@
     color: var(--color-warning);
 }
 
+.load-scenario-indicator span + span {
+    margin-left: 4px;
+}
+
 /* ========== Site Load Panel (legacy) ========== */
 
 .site-load-section {
@@ -2687,6 +2749,30 @@
     color: var(--color-primary);
 }
 
+.link-toggle.compact {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius-sm);
+}
+
+.link-toggle.compact svg {
+    width: 14px;
+    height: 14px;
+}
+
+.link-toggle:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: var(--border-color);
+    color: var(--text-muted);
+    background: transparent;
+}
+
+.link-toggle:disabled:hover {
+    border-color: var(--border-color);
+    color: var(--text-muted);
+}
+
 /* Phase Load Row */
 .phase-load-row {
     display: grid;
@@ -2700,10 +2786,19 @@
     margin-bottom: 0;
 }
 
+.phase-load-row.compact {
+    grid-template-columns: 26px 1fr 70px;
+    margin-bottom: var(--spacing-xs);
+}
+
 .phase-load-label {
     font-size: var(--font-size-md);
     font-weight: 500;
     color: var(--text-secondary);
+}
+
+.phase-load-row.compact .phase-load-label {
+    font-size: var(--font-size-sm);
 }
 
 .phase-load-slider {
@@ -2742,6 +2837,20 @@
     cursor: not-allowed;
 }
 
+.phase-load-row.compact .phase-load-slider {
+    height: 5px;
+}
+
+.phase-load-row.compact .phase-load-slider::-webkit-slider-thumb {
+    width: 14px;
+    height: 14px;
+}
+
+.phase-load-row.compact .phase-load-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+}
+
 .phase-load-slider.disabled::-webkit-slider-thumb {
     cursor: not-allowed;
     background: var(--text-muted);
@@ -2752,6 +2861,10 @@
     font-family: var(--font-mono);
     color: var(--color-warning);
     text-align: right;
+}
+
+.phase-load-row.compact .phase-load-value {
+    font-size: var(--font-size-xs);
 }
 
 /* Scenario Badge */

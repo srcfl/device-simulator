@@ -66,6 +66,20 @@
         </div>
     </header>
 
+    <!-- Warnings Banner -->
+    <template x-if="$store.app.warnings.length > 0">
+        <div class="warning-banner">
+            <div class="warning-banner-content">
+                <div class="warning-list">
+                    <template x-for="(w, idx) in $store.app.warnings" :key="idx">
+                        <div class="warning-item" x-text="w"></div>
+                    </template>
+                </div>
+                <button class="warning-dismiss" @click="$store.app.clearWarnings()">Dismiss</button>
+            </div>
+        </div>
+    </template>
+
     <!-- App Container - Sidebar + Main -->
     <div class="app-container">
     <!-- Sidebar -->
@@ -74,7 +88,7 @@
             <div class="sidebar-site-link"
                  x-show="$store.site.selectedId && $store.site.data"
                  :class="{ 'active': !$store.app.selectedId && $store.app.selectedView !== 'site_load' }"
-                 @click="$store.app.selectedId = null; $store.app.selectedView = null"
+                 @click="$store.app.selectedId = null; $store.app.selectedView = null; $store.site.ensureRefreshing()"
                  title="Go to site view">
                 <span class="sidebar-site-name" x-text="$store.site.data?.name || 'Select a site'"></span>
                 <svg class="sidebar-site-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -183,7 +197,7 @@
                         <div class="category-items" :class="{ 'collapsed': $store.app.categories[cat].collapsed }">
                             <template x-for="sim in sims" :key="sim.id">
                                 <div class="sim-item"
-                                     :class="{ 'active': $store.app.selectedId === sim.id, 'bound-meter': $store.site.isBoundMeter(sim.id) }"
+                                     :class="{ 'active': $store.app.selectedId === sim.id, 'bound-meter': $store.site.isBoundMeter(sim.id), 'device-off': !sim.running }"
                                      @click="$store.app.selectSimulator(sim.id, sim.protocol)">
 
                                     <button class="sim-delete"
@@ -208,13 +222,13 @@
                                     <div class="sim-serial" x-text="sim.serial"></div>
                                     <div class="sim-ports">
                                         <template x-if="sim.protocol === 'modbus'">
-                                            <span x-text="`Modbus :${sim.port} | Unit ${sim.slave_id}`"></span>
+                                            <span x-text="`Modbus :${sim.port + $store.app.modbusDisplayOffset} | Unit ${sim.slave_id}`"></span>
                                         </template>
                                         <template x-if="sim.protocol === 'mqtt'">
                                             <span x-text="`MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
                                         </template>
                                         <template x-if="sim.protocol === 'ocpp'">
-                                            <span x-text="`WS :${sim.port}`"></span>
+                                            <span x-text="`WS :${sim.port + $store.app.ocppDisplayOffset}`"></span>
                                         </template>
                                     </div>
                                     <div class="sim-stats">
@@ -550,34 +564,89 @@
                                     <span class="member-serial">Home Load</span>
                                     <span class="protocol-badge load">load</span>
                                 </div>
+                                <div class="member-actions">
+                                    <button class="link-toggle compact"
+                                            :class="{ 'linked': homeLoadLinked }"
+                                            :disabled="!isLoadManual()"
+                                            @click.stop="toggleHomeLoadLinked()"
+                                            :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
+                                        <svg x-show="homeLoadLinked" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                        </svg>
+                                        <svg x-show="!homeLoadLinked" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/>
+                                            <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71"/>
+                                            <line x1="8" y1="2" x2="8" y2="5"/>
+                                            <line x1="2" y1="8" x2="5" y2="8"/>
+                                            <line x1="16" y1="19" x2="16" y2="22"/>
+                                            <line x1="19" y1="16" x2="22" y2="16"/>
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
 
                             <div class="member-power">
                                 <span class="power-label">Consumption</span>
                                 <span class="power-value" style="color: var(--color-warning);"
-                                      x-text="formatLoadPower($store.site.data?.base_load_w || 0)"></span>
+                                      x-text="formatLoadPower(getHomeLoadTotal())"></span>
                             </div>
 
-                            <div class="member-controls">
-                                <div class="member-control-row">
-                                    <span class="control-label">Power</span>
-                                    <div class="mini-slider-container">
-                                        <input type="range" class="mini-slider load-power"
-                                               min="0" max="15000" step="100"
-                                               :value="$store.site.data?.base_load_w || 0"
-                                               @click.stop
-                                               @change="setBaseLoad(parseInt($event.target.value))">
+                            <div class="member-controls load-controls" @click.stop>
+                                <div class="member-control-row load-profile-row">
+                                    <span class="control-label">Profile</span>
+                                    <select class="site-load-select member-load-select"
+                                            @change="setHomeLoadScenario($event.target.value)"
+                                            :value="homeLoadScenario">
+                                        <option value="">Manual</option>
+                                        <template x-for="s in loadScenarios" :key="s.key">
+                                            <option :value="s.key" x-text="s.name"></option>
+                                        </template>
+                                    </select>
+                                </div>
+
+                                <div class="member-load-phases">
+                                    <div class="phase-load-row compact">
+                                        <span class="phase-load-label">L1</span>
+                                        <input type="range" class="phase-load-slider"
+                                               min="0" max="5000" step="50"
+                                               :value="homeLoads.l1"
+                                               :disabled="!isLoadManual()"
+                                               :class="{ 'disabled': !isLoadManual() }"
+                                               @input="onHomePhaseInput('l1', $event.target.value)">
+                                        <span class="phase-load-value" x-text="formatLoadPower(homeLoads.l1)"></span>
                                     </div>
-                                    <span class="control-value" style="color: var(--color-warning);"
-                                          x-text="formatLoadPower($store.site.data?.base_load_w || 0)"></span>
+                                    <div class="phase-load-row compact">
+                                        <span class="phase-load-label">L2</span>
+                                        <input type="range" class="phase-load-slider"
+                                               min="0" max="5000" step="50"
+                                               :value="homeLoads.l2"
+                                               :disabled="!isLoadManual()"
+                                               :class="{ 'disabled': !isLoadManual() }"
+                                               @input="onHomePhaseInput('l2', $event.target.value)">
+                                        <span class="phase-load-value" x-text="formatLoadPower(homeLoads.l2)"></span>
+                                    </div>
+                                    <div class="phase-load-row compact">
+                                        <span class="phase-load-label">L3</span>
+                                        <input type="range" class="phase-load-slider"
+                                               min="0" max="5000" step="50"
+                                               :value="homeLoads.l3"
+                                               :disabled="!isLoadManual()"
+                                               :class="{ 'disabled': !isLoadManual() }"
+                                               @input="onHomePhaseInput('l3', $event.target.value)">
+                                        <span class="phase-load-value" x-text="formatLoadPower(homeLoads.l3)"></span>
+                                    </div>
                                 </div>
                             </div>
 
                             <div class="member-footer">
-                                <template x-if="$store.site.data?.load_scenario">
-                                    <span class="load-scenario-indicator" x-text="getLoadScenarioName($store.site.data?.load_scenario)"></span>
+                                <template x-if="!isLoadManual()">
+                                    <span class="load-scenario-indicator">
+                                        <span x-text="getLoadScenarioIcon(homeLoadScenario)"></span>
+                                        <span x-text="getLoadScenarioName(homeLoadScenario)"></span>
+                                    </span>
                                 </template>
-                                <template x-if="!$store.site.data?.load_scenario">
+                                <template x-if="isLoadManual()">
                                     <span class="status-text">Manual</span>
                                 </template>
                             </div>
@@ -786,7 +855,7 @@
                                 <template x-if="getSimInfo(simId).protocol === 'modbus'">
                                     <div class="member-controls">
                                         <div class="member-control-row">
-                                            <span class="control-label">Sim</span>
+                                            <span class="control-label">Emu</span>
                                             <div class="mini-toggle" :class="{ 'on': getModbusRunning(simId) }"
                                                  @click="toggleModbusRunning(simId)">
                                                 <div class="mini-toggle-thumb"></div>
@@ -917,7 +986,7 @@
                         </div>
                         <div class="config-item">
                             <label>Modbus Port</label>
-                            <div class="value" x-text="$store.simulator.data?.port"></div>
+                            <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset"></div>
                         </div>
                         <div class="config-item">
                             <label>Site</label>
@@ -1098,7 +1167,7 @@
                         <template x-if="$store.app.selectedProtocol === 'modbus'">
                             <div class="config-item">
                                 <label>Modbus Port</label>
-                                <div class="value" x-text="$store.simulator.data?.port"></div>
+                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset"></div>
                             </div>
                         </template>
 
@@ -1107,6 +1176,13 @@
                             <div class="config-item">
                                 <label>MQTT Port</label>
                                 <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.mqttDisplayOffset"></div>
+                            </div>
+                        </template>
+
+                        <template x-if="$store.app.selectedProtocol === 'ocpp'">
+                            <div class="config-item">
+                                <label>OCPP Port</label>
+                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.ocppDisplayOffset"></div>
                             </div>
                         </template>
 
@@ -1832,6 +1908,16 @@
                                 <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary); font-size: 0.9rem;">Port Configuration</h4>
 
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">Modbus Base Port</label>
+                                    <input type="number"
+                                           x-model.number="modbusBasePort"
+                                           min="1024"
+                                           max="65535"
+                                           step="1"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                                     <label style="color: var(--text-secondary); font-size: 0.875rem;">MQTT Base Port</label>
                                     <input type="number"
                                            x-model.number="mqttBasePort"
@@ -1841,8 +1927,55 @@
                                            :disabled="saving"
                                            style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
                                 </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">OCPP Base Port</label>
+                                    <input type="number"
+                                           x-model.number="ocppBasePort"
+                                           min="1024"
+                                           max="65535"
+                                           step="1"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
                                 <div style="color: var(--text-muted); font-size: 0.7rem;">
-                                    MQTT brokers will be assigned ports starting from this value
+                                    Ports are assigned starting from these base values
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 0.75rem; padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                                <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary); font-size: 0.9rem;">Display Offsets</h4>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">Modbus Offset</label>
+                                    <input type="number"
+                                           x-model.number="modbusDisplayOffset"
+                                           min="0"
+                                           max="65535"
+                                           step="1"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">MQTT Offset</label>
+                                    <input type="number"
+                                           x-model.number="mqttDisplayOffset"
+                                           min="0"
+                                           max="65535"
+                                           step="1"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">OCPP Offset</label>
+                                    <input type="number"
+                                           x-model.number="ocppDisplayOffset"
+                                           min="0"
+                                           max="65535"
+                                           step="1"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
+                                <div style="color: var(--text-muted); font-size: 0.7rem; margin-top: 0.5rem;">
+                                    Offsets only affect displayed ports (useful for external port mappings)
                                 </div>
                             </div>
                         </div>
@@ -1855,8 +1988,16 @@
                                 <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary); font-size: 0.9rem;">Port Configuration</h4>
 
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">Modbus Base Port</label>
+                                    <span style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600;" x-text="modbusDisplayPort"></span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                                     <label style="color: var(--text-secondary); font-size: 0.875rem;">MQTT Base Port</label>
-                                    <span style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600;" x-text="displayPort"></span>
+                                    <span style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600;" x-text="mqttDisplayPort"></span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">OCPP Base Port</label>
+                                    <span style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600;" x-text="ocppDisplayPort"></span>
                                 </div>
                                 <div style="color: var(--text-muted); font-size: 0.7rem;">
                                     Port mapping is configured in docker-compose.yml
