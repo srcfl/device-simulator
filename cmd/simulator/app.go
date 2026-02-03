@@ -93,17 +93,10 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 			} else {
 				entry["pv_power"] = getRegisterValue(sim.Server, 5016)
 				entry["soc"] = getRegisterValue(sim.Server, 13022)
-				entry["load"] = getRegisterValue(sim.Server, 13021)
+				batteryPower, batteryDirection := getBatteryPowerAndDirection(sim.Server)
+				entry["load"] = batteryPower
 				entry["meter"] = getRegisterValue(sim.Server, 5600)
-				// Add battery direction based on command register
-				batteryCmd := getRegisterValue(sim.Server, 13050)
-				if batteryCmd == 170 {
-					entry["battery_direction"] = "charging"
-				} else if batteryCmd == 187 {
-					entry["battery_direction"] = "discharging"
-				} else {
-					entry["battery_direction"] = "idle"
-				}
+				entry["battery_direction"] = batteryDirection
 			}
 		case "mqtt":
 			state := sim.MQTTServer.GetState()
@@ -224,6 +217,7 @@ func (a *App) UpdateConfig(id int, config map[string]interface{}) error {
 		sim.OCPPServer.SetOCPPURL(ocppURL)
 	}
 
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	return nil
 }
@@ -400,6 +394,9 @@ func (a *App) StartAutomation(id int) error {
 	if sim == nil {
 		return fmt.Errorf("simulator %d not found", id)
 	}
+	if sim.SiteID != 0 || isSimulatorMeter(sim.ID) {
+		return fmt.Errorf("simulation is controlled by the site for assigned devices")
+	}
 
 	// Start the server if not running
 	if !sim.Running {
@@ -418,6 +415,7 @@ func (a *App) StartAutomation(id int) error {
 	}
 	sim.Automation.mu.Unlock()
 
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	return nil
 }
@@ -430,16 +428,12 @@ func (a *App) StopAutomation(id int) error {
 	}
 
 	// Stop automation first
-	sim.Automation.mu.Lock()
-	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
-		close(sim.Automation.stopChan)
-		sim.Automation.Enabled = false
-	}
-	sim.Automation.mu.Unlock()
+	stopSimulatorAutomation(sim)
 
 	// Then stop the server
 	stopSimulatorServer(sim)
 
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	return nil
 }
@@ -461,6 +455,7 @@ func (a *App) UpdateAutomationConfig(id int, config map[string]interface{}) erro
 		sim.Automation.Scenario = scenario
 	}
 
+	markStateDirty()
 	return nil
 }
 
@@ -473,6 +468,7 @@ func (a *App) StartEmulator(id int) error {
 
 	err := startSimulatorServer(sim)
 	if err == nil {
+		markStateDirty()
 		a.emitSimulatorUpdate()
 	}
 	return err
@@ -486,6 +482,7 @@ func (a *App) StopEmulator(id int) error {
 	}
 
 	stopSimulatorServer(sim)
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	return nil
 }
@@ -495,6 +492,9 @@ func (a *App) StartSimulation(id int) error {
 	sim := getSimulator(id)
 	if sim == nil {
 		return fmt.Errorf("simulator %d not found", id)
+	}
+	if sim.SiteID != 0 || isSimulatorMeter(sim.ID) {
+		return fmt.Errorf("simulation is controlled by the site for assigned devices")
 	}
 
 	if !sim.Running {
@@ -511,6 +511,7 @@ func (a *App) StartSimulation(id int) error {
 	}
 	sim.Automation.mu.Unlock()
 
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	return nil
 }
@@ -523,13 +524,9 @@ func (a *App) StopSimulation(id int) error {
 	}
 
 	// Stop automation
-	sim.Automation.mu.Lock()
-	if sim.Automation.Enabled && sim.Automation.stopChan != nil {
-		close(sim.Automation.stopChan)
-		sim.Automation.Enabled = false
-	}
-	sim.Automation.mu.Unlock()
+	stopSimulatorAutomation(sim)
 
+	markStateDirty()
 	return nil
 }
 
@@ -768,16 +765,8 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 		// Include virtual devices if meter is an inverter
 		if meterSim.Category == "inverter" && meterSim.Running {
 			pvPower := getRegisterValue(meterSim.Server, 5016)
-			batteryPower := getRegisterValue(meterSim.Server, 13021)
+			batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim.Server)
 			batterySoc := getRegisterValue(meterSim.Server, 13022)
-			batteryCmd := getRegisterValue(meterSim.Server, 13050)
-
-			batteryDirection := "idle"
-			if batteryCmd == 170 {
-				batteryDirection = "charging"
-			} else if batteryCmd == 187 {
-				batteryDirection = "discharging"
-			}
 
 			result["virtual_devices"] = []map[string]interface{}{
 				{"type": "pv", "power": pvPower},
@@ -840,6 +829,7 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 		}
 	}
 
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -851,10 +841,18 @@ func (a *App) SetSiteMeter(id int, meterId int) error {
 		return fmt.Errorf("site %d not found", id)
 	}
 
+	site.mu.RLock()
+	bound := site.BoundMeter
+	site.mu.RUnlock()
+	if bound {
+		return fmt.Errorf("cannot change meter for site with bound meter")
+	}
+
 	site.mu.Lock()
 	site.MeterID = meterId
 	site.mu.Unlock()
 
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -902,6 +900,11 @@ func (a *App) AddSimulatorToSite(siteId int, simulatorId int) error {
 	site.SimulatorIDs = append(site.SimulatorIDs, simulatorId)
 	site.mu.Unlock()
 
+	sim.mu.Lock()
+	sim.SiteID = siteId
+	sim.mu.Unlock()
+
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -938,6 +941,7 @@ func (a *App) RemoveSimulatorFromSite(siteId int, simulatorId int) error {
 		sim.mu.Unlock()
 	}
 
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -963,6 +967,7 @@ func (a *App) EnableSite(id int) error {
 	}
 
 	startSiteAggregation(site)
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -976,6 +981,7 @@ func (a *App) DisableSite(id int) error {
 
 	stopSiteSimulation(site)
 	stopSiteAggregation(site)
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -987,45 +993,11 @@ func (a *App) StartSiteSimulation(id int) error {
 		return fmt.Errorf("site %d not found", id)
 	}
 
-	// Auto-enable aggregation if not already running
-	site.mu.RLock()
-	enabled := site.Enabled
-	meterID := site.MeterID
-	simIDs := make([]int, len(site.SimulatorIDs))
-	copy(simIDs, site.SimulatorIDs)
-	site.mu.RUnlock()
-
-	if !enabled {
-		startSiteAggregation(site)
-	}
-
-	// Start meter server
-	if meterSim := getSimulator(meterID); meterSim != nil {
-		if err := startSimulatorServer(meterSim); err != nil {
-			log.Printf("[Site %d] Failed to start meter server: %v", id, err)
-		}
-	}
-
-	// Start device servers
-	for _, simID := range simIDs {
-		sim := getSimulator(simID)
-		if sim != nil {
-			sim.mu.RLock()
-			deviceOn := sim.DeviceOn
-			sim.mu.RUnlock()
-
-			if deviceOn {
-				if err := startSimulatorServer(sim); err != nil {
-					log.Printf("[Site %d] Failed to start simulator %d: %v", id, simID, err)
-				}
-			}
-		}
-	}
-
-	if err := startSiteSimulation(site); err != nil {
+	if err := startSiteSimulationWithServers(site); err != nil {
 		return err
 	}
 
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -1038,6 +1010,7 @@ func (a *App) StopSiteSimulation(id int) error {
 	}
 
 	stopSiteSimulation(site)
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -1058,6 +1031,7 @@ func (a *App) UpdateSiteSimulationConfig(id int, config map[string]interface{}) 
 	}
 	site.mu.Unlock()
 
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -1078,6 +1052,7 @@ func (a *App) SetDevicePowerState(simId int, deviceOn bool) error {
 		stopSimulatorServer(sim)
 	}
 
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	return nil
 }
@@ -1104,6 +1079,7 @@ func (a *App) CreateSimulatorInSite(siteId int, simType string) (map[string]inte
 	sim.SiteID = siteId
 	sim.mu.Unlock()
 
+	markStateDirty()
 	a.emitSimulatorUpdate()
 	a.emitSiteUpdate()
 
@@ -1144,6 +1120,7 @@ func (a *App) AddMeterToSite(siteId int, meterId int) error {
 	site.MeterIDs = append(site.MeterIDs, meterId)
 	site.mu.Unlock()
 
+	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
 }
@@ -1176,6 +1153,7 @@ func (a *App) SetP1Mode(id int, mode string) (map[string]interface{}, error) {
 	site.P1Buffer.resetEnergy()
 	site.mu.Unlock()
 
+	markStateDirty()
 	return map[string]interface{}{"mode": mode}, nil
 }
 
@@ -1206,16 +1184,8 @@ func (a *App) GetVirtualDevices(siteId int) (map[string]interface{}, error) {
 	}
 
 	pvPower := getRegisterValue(server, 5016)
-	batteryPower := getRegisterValue(server, 13021)
+	batteryPower, batteryDirection := getBatteryPowerAndDirection(server)
 	batterySoc := getRegisterValue(server, 13022)
-	batteryCmd := getRegisterValue(server, 13050)
-
-	batteryDirection := "idle"
-	if batteryCmd == 170 {
-		batteryDirection = "charging"
-	} else if batteryCmd == 187 {
-		batteryDirection = "discharging"
-	}
 
 	virtualDevices := []map[string]interface{}{
 		{"type": "pv", "power": pvPower},
@@ -1260,6 +1230,16 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 			if def := modbus.RegisterLookup[13021]; def != nil {
 				meterSim.Server.WriteRegisterValue(def, power)
 			}
+			// Update direction command based on sign
+			var cmd float64 = 204
+			if power > 0 {
+				cmd = 170
+			} else if power < 0 {
+				cmd = 187
+			}
+			if def := modbus.RegisterLookup[13050]; def != nil {
+				meterSim.Server.WriteRegisterValue(def, cmd)
+			}
 		}
 		if soc, ok := data["soc"].(float64); ok {
 			if def := modbus.RegisterLookup[13022]; def != nil {
@@ -1274,7 +1254,7 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 			case "discharging":
 				cmd = 187
 			default:
-				cmd = 0 // idle
+				cmd = 204 // idle
 			}
 			if def := modbus.RegisterLookup[13050]; def != nil {
 				meterSim.Server.WriteRegisterValue(def, cmd)
@@ -1284,6 +1264,7 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 		return nil, fmt.Errorf("unknown device type: %s", deviceType)
 	}
 
+	markStateDirty()
 	return map[string]interface{}{"status": "ok"}, nil
 }
 
@@ -1323,20 +1304,56 @@ func (a *App) ApplyUpdate() error {
 	return DoUpdate()
 }
 
+// GetWarnings returns current runtime warnings
+func (a *App) GetWarnings() map[string]interface{} {
+	return map[string]interface{}{
+		"warnings": getWarnings(),
+	}
+}
+
+// ClearWarnings clears runtime warnings
+func (a *App) ClearWarnings() map[string]string {
+	clearWarnings()
+	return map[string]string{"status": "cleared"}
+}
+
 // GetSettings returns current app settings
 func (a *App) GetSettings() (map[string]interface{}, error) {
-	s := settings.Load()
+	s := runtimeSettings
+	if s == nil {
+		s = settings.Load()
+	}
 	return map[string]interface{}{
-		"mqttBasePort": s.MQTTBasePort,
+		"modbusBasePort":      s.ModbusBasePort,
+		"mqttBasePort":        s.MQTTBasePort,
+		"ocppBasePort":        s.OCPPBasePort,
+		"modbusDisplayOffset": s.ModbusDisplayOffset,
+		"mqttDisplayOffset":   s.MQTTDisplayOffset,
+		"ocppDisplayOffset":   s.OCPPDisplayOffset,
 	}, nil
 }
 
 // SaveSettings saves app settings to config file
 func (a *App) SaveSettings(s map[string]interface{}) error {
-	appSettings := settings.DefaultSettings()
+	appSettings := settings.Load()
 
+	if modbusPort, ok := s["modbusBasePort"].(float64); ok {
+		appSettings.ModbusBasePort = int(modbusPort)
+	}
 	if mqttPort, ok := s["mqttBasePort"].(float64); ok {
 		appSettings.MQTTBasePort = int(mqttPort)
+	}
+	if ocppPort, ok := s["ocppBasePort"].(float64); ok {
+		appSettings.OCPPBasePort = int(ocppPort)
+	}
+	if modbusOffset, ok := s["modbusDisplayOffset"].(float64); ok {
+		appSettings.ModbusDisplayOffset = int(modbusOffset)
+	}
+	if mqttOffset, ok := s["mqttDisplayOffset"].(float64); ok {
+		appSettings.MQTTDisplayOffset = int(mqttOffset)
+	}
+	if ocppOffset, ok := s["ocppDisplayOffset"].(float64); ok {
+		appSettings.OCPPDisplayOffset = int(ocppOffset)
 	}
 
 	return settings.Save(appSettings)

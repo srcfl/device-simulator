@@ -10,8 +10,17 @@ import (
 func TestDefaultSettings(t *testing.T) {
 	s := DefaultSettings()
 
-	if s.MQTTBasePort != 11883 {
-		t.Errorf("Expected default MQTTBasePort 11883, got %d", s.MQTTBasePort)
+	if s.ModbusBasePort != 5000 {
+		t.Errorf("Expected default ModbusBasePort 5000, got %d", s.ModbusBasePort)
+	}
+	if s.MQTTBasePort != 1883 {
+		t.Errorf("Expected default MQTTBasePort 1883, got %d", s.MQTTBasePort)
+	}
+	if s.OCPPBasePort != 9000 {
+		t.Errorf("Expected default OCPPBasePort 9000, got %d", s.OCPPBasePort)
+	}
+	if s.MQTTDisplayOffset != 0 {
+		t.Errorf("Expected default MQTTDisplayOffset 0, got %d", s.MQTTDisplayOffset)
 	}
 }
 
@@ -20,8 +29,8 @@ func TestLoadFromNonExistentFile(t *testing.T) {
 	s := LoadFrom("/nonexistent/path/settings.json")
 
 	// Should return defaults
-	if s.MQTTBasePort != 11883 {
-		t.Errorf("Expected default MQTTBasePort 11883, got %d", s.MQTTBasePort)
+	if s.MQTTBasePort != 1883 {
+		t.Errorf("Expected default MQTTBasePort 1883, got %d", s.MQTTBasePort)
 	}
 }
 
@@ -29,8 +38,8 @@ func TestLoadFromEmptyPath(t *testing.T) {
 	s := LoadFrom("")
 
 	// Should return defaults
-	if s.MQTTBasePort != 11883 {
-		t.Errorf("Expected default MQTTBasePort 11883, got %d", s.MQTTBasePort)
+	if s.MQTTBasePort != 1883 {
+		t.Errorf("Expected default MQTTBasePort 1883, got %d", s.MQTTBasePort)
 	}
 }
 
@@ -46,7 +55,12 @@ func TestSaveAndLoad(t *testing.T) {
 
 	// Save custom settings
 	original := &AppSettings{
-		MQTTBasePort: 12345,
+		ModbusBasePort:      5001,
+		MQTTBasePort:        12345,
+		OCPPBasePort:        9001,
+		ModbusDisplayOffset: 0,
+		MQTTDisplayOffset:   10000,
+		OCPPDisplayOffset:   0,
 	}
 
 	err = SaveTo(original, path)
@@ -62,8 +76,17 @@ func TestSaveAndLoad(t *testing.T) {
 	// Load settings back
 	loaded := LoadFrom(path)
 
+	if loaded.ModbusBasePort != original.ModbusBasePort {
+		t.Errorf("Expected ModbusBasePort %d, got %d", original.ModbusBasePort, loaded.ModbusBasePort)
+	}
 	if loaded.MQTTBasePort != original.MQTTBasePort {
 		t.Errorf("Expected MQTTBasePort %d, got %d", original.MQTTBasePort, loaded.MQTTBasePort)
+	}
+	if loaded.OCPPBasePort != original.OCPPBasePort {
+		t.Errorf("Expected OCPPBasePort %d, got %d", original.OCPPBasePort, loaded.OCPPBasePort)
+	}
+	if loaded.MQTTDisplayOffset != original.MQTTDisplayOffset {
+		t.Errorf("Expected MQTTDisplayOffset %d, got %d", original.MQTTDisplayOffset, loaded.MQTTDisplayOffset)
 	}
 }
 
@@ -110,7 +133,7 @@ func TestSettingsJSONFormat(t *testing.T) {
 
 	path := filepath.Join(tmpDir, "settings.json")
 
-	s := &AppSettings{MQTTBasePort: 11883}
+	s := &AppSettings{MQTTBasePort: 1883}
 	err = SaveTo(s, path)
 	if err != nil {
 		t.Fatalf("SaveTo failed: %v", err)
@@ -153,8 +176,8 @@ func TestLoadInvalidJSON(t *testing.T) {
 
 	// Should return defaults when JSON is invalid
 	s := LoadFrom(path)
-	if s.MQTTBasePort != 11883 {
-		t.Errorf("Expected default MQTTBasePort 11883 for invalid JSON, got %d", s.MQTTBasePort)
+	if s.MQTTBasePort != 1883 {
+		t.Errorf("Expected default MQTTBasePort 1883 for invalid JSON, got %d", s.MQTTBasePort)
 	}
 }
 

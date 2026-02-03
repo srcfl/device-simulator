@@ -9,13 +9,23 @@ import (
 
 // AppSettings holds persistent application settings
 type AppSettings struct {
-	MQTTBasePort int `json:"mqttBasePort"`
+	ModbusBasePort      int `json:"modbusBasePort"`
+	MQTTBasePort        int `json:"mqttBasePort"`
+	OCPPBasePort        int `json:"ocppBasePort"`
+	ModbusDisplayOffset int `json:"modbusDisplayOffset"`
+	MQTTDisplayOffset   int `json:"mqttDisplayOffset"`
+	OCPPDisplayOffset   int `json:"ocppDisplayOffset"`
 }
 
 // DefaultSettings returns settings with default values
 func DefaultSettings() *AppSettings {
 	return &AppSettings{
-		MQTTBasePort: 11883, // Default to 11883 (matches Docker external port)
+		ModbusBasePort:      5000,
+		MQTTBasePort:        1883,
+		OCPPBasePort:        9000,
+		ModbusDisplayOffset: 0,
+		MQTTDisplayOffset:   0,
+		OCPPDisplayOffset:   0,
 	}
 }
 
