@@ -875,25 +875,66 @@ document.addEventListener('alpine:init', () => {
         show: false,
         title: '',
         message: '',
+        okLabel: 'OK',
+        cancelLabel: 'Cancel',
+        showCancel: true,
+        okVariant: 'primary', // 'primary' | 'danger'
         _resolve: null,
 
-        async prompt(title, message) {
-            this.title = title;
-            this.message = message;
+        async open(options) {
+            const {
+                title,
+                message,
+                okLabel = 'OK',
+                cancelLabel = 'Cancel',
+                showCancel = true,
+                okVariant = 'primary'
+            } = options || {};
+
+            this.title = title || '';
+            this.message = message || '';
+            this.okLabel = okLabel;
+            this.cancelLabel = cancelLabel;
+            this.showCancel = showCancel;
+            this.okVariant = okVariant;
             this.show = true;
+
             return new Promise(resolve => {
                 this._resolve = resolve;
+            });
+        },
+
+        async prompt(title, message, options = {}) {
+            return this.open({
+                title,
+                message,
+                showCancel: true,
+                okLabel: options.okLabel || 'OK',
+                cancelLabel: options.cancelLabel || 'Cancel',
+                okVariant: options.okVariant || 'primary'
+            });
+        },
+
+        async alert(title, message, options = {}) {
+            return this.open({
+                title,
+                message,
+                showCancel: false,
+                okLabel: options.okLabel || 'OK',
+                okVariant: options.okVariant || 'primary'
             });
         },
 
         ok() {
             this.show = false;
             if (this._resolve) this._resolve(true);
+            this._resolve = null;
         },
 
         cancel() {
             this.show = false;
             if (this._resolve) this._resolve(false);
+            this._resolve = null;
         }
     });
 
@@ -1084,7 +1125,10 @@ document.addEventListener('alpine:init', () => {
             this.addMenuOpen = false;
             const siteStore = Alpine.store('site');
             if (!siteStore.selectedId) {
-                alert('Please select a site first');
+                await Alpine.store('confirm').alert(
+                    'Select a Site',
+                    'Please select a site first.'
+                );
                 return;
             }
             try {
@@ -1104,7 +1148,7 @@ document.addEventListener('alpine:init', () => {
                 await siteStore.loadSiteData();
             } catch (e) {
                 console.error('Add to site error:', e);
-                alert('Failed: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Failed: ' + e.message);
             }
         },
 
@@ -1132,14 +1176,15 @@ document.addEventListener('alpine:init', () => {
                 await this.loadSimulators();
             } catch (e) {
                 console.error('Add error:', e);
-                alert('Failed: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Failed: ' + e.message);
             }
         },
 
         async deleteSimulator(id, serial) {
             const confirmed = await Alpine.store('confirm').prompt(
                 'Delete Simulator',
-                `Are you sure you want to delete simulator ${serial}?`
+                `Are you sure you want to delete simulator ${serial}?`,
+                { okLabel: 'Delete', okVariant: 'danger' }
             );
             if (!confirmed) return;
 
@@ -1153,7 +1198,7 @@ document.addEventListener('alpine:init', () => {
                 await this.loadSimulators();
             } catch (e) {
                 console.error('Delete error:', e);
-                alert('Failed: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Failed: ' + e.message);
             }
         },
 
@@ -1220,7 +1265,10 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (e) {
                 console.error('Toggle emulator error:', e);
-                alert('Error toggling emulator: ' + (e.message || e));
+                await Alpine.store('confirm').alert(
+                    'Error',
+                    'Error toggling emulator: ' + (e.message || e)
+                );
                 return;
             }
 
@@ -1446,7 +1494,10 @@ document.addEventListener('alpine:init', () => {
             if (!isRunning && this.protocol === 'ocpp') {
                 const ocppUrl = this.data?.ocpp_url || '';
                 if (!ocppUrl.trim()) {
-                    alert('Please enter an OCPP URL before starting.');
+                    await Alpine.store('confirm').alert(
+                        'Missing OCPP URL',
+                        'Please enter an OCPP URL before starting.'
+                    );
                     return;
                 }
             }
@@ -1479,7 +1530,10 @@ document.addEventListener('alpine:init', () => {
             if (!isRunning && this.protocol === 'ocpp') {
                 const ocppUrl = this.data?.ocpp_url || '';
                 if (!ocppUrl.trim()) {
-                    alert('Please enter an OCPP URL before starting.');
+                    await Alpine.store('confirm').alert(
+                        'Missing OCPP URL',
+                        'Please enter an OCPP URL before starting.'
+                    );
                     return;
                 }
             }
@@ -1492,7 +1546,10 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (e) {
                 console.error('Toggle emulator error:', e);
-                alert('Error toggling emulator: ' + e.message);
+                await Alpine.store('confirm').alert(
+                    'Error',
+                    'Error toggling emulator: ' + e.message
+                );
             }
 
             const app = Alpine.store('app');
@@ -1521,7 +1578,7 @@ document.addEventListener('alpine:init', () => {
                     await api.startSimulation(this.id);
                 }
             } catch (e) {
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
                 return;
             }
 
@@ -1766,6 +1823,7 @@ document.addEventListener('alpine:init', () => {
             this.selectedId = id;
             // Clear simulator selection when selecting a site
             Alpine.store('app').selectedId = null;
+            Alpine.store('app').selectedView = null;
             Alpine.store('simulator').clear();
 
             if (this.refreshInterval) clearInterval(this.refreshInterval);
@@ -1903,7 +1961,7 @@ document.addEventListener('alpine:init', () => {
                 this.syncCurrentSiteToStorage();
             } catch (e) {
                 console.error('Toggle enabled error:', e);
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         },
 
@@ -1953,7 +2011,7 @@ document.addEventListener('alpine:init', () => {
                 await this.loadSiteData();
             } catch (e) {
                 console.error('Set P1 mode error:', e);
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         },
 
@@ -1989,7 +2047,7 @@ document.addEventListener('alpine:init', () => {
                 await this.loadSites();
             } catch (e) {
                 console.error('Start simulation error:', e);
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         },
 

@@ -27,7 +27,7 @@ func TestServerInitDefaults(t *testing.T) {
 	server.InitDefaults()
 
 	// Check that Battery SoC default is set (78%)
-	def := RegisterLookup[13022]
+	def := RegisterLookup[13023]
 	if def == nil {
 		t.Fatal("Battery SoC register definition not found")
 	}
@@ -58,7 +58,7 @@ func TestServerInitDefaults(t *testing.T) {
 func TestServerWriteRegisterValue(t *testing.T) {
 	server := NewServer(60001)
 
-	def := RegisterLookup[13022] // Battery SoC
+	def := RegisterLookup[13023] // Battery SoC
 	if def == nil {
 		t.Fatal("Battery SoC register definition not found")
 	}

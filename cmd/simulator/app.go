@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/modbus"
@@ -89,13 +90,13 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 		case "modbus":
 			entry["slave_id"] = sim.SlaveID
 			if sim.Category == "energy_meter" {
-				entry["meter"] = getRegisterValue(sim.Server, 5600)
+				entry["meter"] = getRegisterValue(sim.Server, 5599)
 			} else {
-				entry["pv_power"] = getRegisterValue(sim.Server, 5016)
-				entry["soc"] = getRegisterValue(sim.Server, 13022)
+				entry["pv_power"] = getRegisterValue(sim.Server, 5017)
+				entry["soc"] = getRegisterValue(sim.Server, 13023)
 				batteryPower, batteryDirection := getBatteryPowerAndDirection(sim.Server)
 				entry["load"] = batteryPower
-				entry["meter"] = getRegisterValue(sim.Server, 5600)
+				entry["meter"] = getRegisterValue(sim.Server, 5599)
 				entry["battery_direction"] = batteryDirection
 			}
 		case "mqtt":
@@ -286,7 +287,27 @@ func (a *App) WriteRegister(id int, address uint16, value float64) error {
 	sim.mu.Lock()
 	defer sim.mu.Unlock()
 
-	return sim.Server.WriteRegisterValue(def, value)
+	if err := sim.Server.WriteRegisterValue(def, value); err != nil {
+		return err
+	}
+
+	// Keep Sungrow status flags in sync with charge/discharge commands
+	if address == 13050 {
+		flags := 0.0
+		switch int(value) {
+		case 170:
+			flags = 2 // charging
+		case 187:
+			flags = 4 // discharging
+		default:
+			flags = 0
+		}
+		if flagsDef := modbus.RegisterLookup[13000]; flagsDef != nil {
+			_ = sim.Server.WriteRegisterValue(flagsDef, flags)
+		}
+	}
+
+	return nil
 }
 
 // GetLogs returns operation logs for a simulator
@@ -750,7 +771,7 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 	// Add current meter reading if meter is valid
 	meterSim := getSimulator(meterID)
 	if meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
-		result["meter_power"] = getRegisterValue(meterSim.Server, 5600)
+		result["meter_power"] = getRegisterValue(meterSim.Server, 5599)
 		result["phase_currents"] = PhaseCurrents{
 			L1: getRegisterValue(meterSim.Server, 6),
 			L2: getRegisterValue(meterSim.Server, 8),
@@ -764,9 +785,9 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 
 		// Include virtual devices if meter is an inverter
 		if meterSim.Category == "inverter" && meterSim.Running {
-			pvPower := getRegisterValue(meterSim.Server, 5016)
+			pvPower := getRegisterValue(meterSim.Server, 5017)
 			batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim.Server)
-			batterySoc := getRegisterValue(meterSim.Server, 13022)
+			batterySoc := getRegisterValue(meterSim.Server, 13023)
 
 			result["virtual_devices"] = []map[string]interface{}{
 				{"type": "pv", "power": pvPower},
@@ -1183,9 +1204,9 @@ func (a *App) GetVirtualDevices(siteId int) (map[string]interface{}, error) {
 		return map[string]interface{}{"virtual_devices": []interface{}{}}, nil
 	}
 
-	pvPower := getRegisterValue(server, 5016)
+	pvPower := getRegisterValue(server, 5017)
 	batteryPower, batteryDirection := getBatteryPowerAndDirection(server)
-	batterySoc := getRegisterValue(server, 13022)
+	batterySoc := getRegisterValue(server, 13023)
 
 	virtualDevices := []map[string]interface{}{
 		{"type": "pv", "power": pvPower},
@@ -1221,14 +1242,14 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 	switch deviceType {
 	case "pv":
 		if power, ok := data["power"].(float64); ok {
-			if def := modbus.RegisterLookup[5016]; def != nil {
+			if def := modbus.RegisterLookup[5017]; def != nil {
 				meterSim.Server.WriteRegisterValue(def, power)
 			}
 		}
 	case "battery":
 		if power, ok := data["power"].(float64); ok {
-			if def := modbus.RegisterLookup[13021]; def != nil {
-				meterSim.Server.WriteRegisterValue(def, power)
+			if def := modbus.RegisterLookup[13022]; def != nil {
+				meterSim.Server.WriteRegisterValue(def, math.Abs(power))
 			}
 			// Update direction command based on sign
 			var cmd float64 = 204
@@ -1240,9 +1261,18 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 			if def := modbus.RegisterLookup[13050]; def != nil {
 				meterSim.Server.WriteRegisterValue(def, cmd)
 			}
+			if def := modbus.RegisterLookup[13000]; def != nil {
+				flags := 0.0
+				if cmd == 187 {
+					flags = 4 // discharging
+				} else if cmd == 170 {
+					flags = 2 // charging
+				}
+				meterSim.Server.WriteRegisterValue(def, flags)
+			}
 		}
 		if soc, ok := data["soc"].(float64); ok {
-			if def := modbus.RegisterLookup[13022]; def != nil {
+			if def := modbus.RegisterLookup[13023]; def != nil {
 				meterSim.Server.WriteRegisterValue(def, soc)
 			}
 		}
@@ -1258,6 +1288,15 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 			}
 			if def := modbus.RegisterLookup[13050]; def != nil {
 				meterSim.Server.WriteRegisterValue(def, cmd)
+			}
+			if def := modbus.RegisterLookup[13000]; def != nil {
+				flags := 0.0
+				if cmd == 187 {
+					flags = 4 // discharging
+				} else if cmd == 170 {
+					flags = 2 // charging
+				}
+				meterSim.Server.WriteRegisterValue(def, flags)
 			}
 		}
 	default:

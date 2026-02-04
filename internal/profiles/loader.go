@@ -266,10 +266,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sungrow-hybrid.yaml",
 		Defaults: map[uint16]float64{
-			5016:  0,     // PV Power
-			13021: 0,     // Battery Power
-			13022: 50,    // Battery SoC
-			5600:  0,     // Meter Power
+			5017:  0,     // PV Power
+			13022: 0,     // Battery Power
+			13023: 50,    // Battery SoC
+			5599:  0,     // Meter Power
 			13052: 500,   // Load Power
 			13049: 0,     // Grid Mode (Self-consumption)
 			13050: 204,   // Stop command
@@ -305,10 +305,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "solis",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13021: 0,
-			13022: 60,
-			5600:  0,
+			5017:  0,
+			13022: 0,
+			13023: 60,
+			5599:  0,
 			13052: 400,
 			33046: 600,
 			33047: 600,
@@ -322,8 +322,8 @@ var EmbeddedProfiles = map[string]*Profile{
 		Categories:  []string{"pv", "battery", "meter", "grid"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/solaredge.yaml",
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13022: 55,
+			5017:  0,
+			13023: 55,
 			13052: 600,
 		},
 	},
@@ -335,8 +335,8 @@ var EmbeddedProfiles = map[string]*Profile{
 		Categories:  []string{"pv", "meter", "grid"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sma-tripower.yaml",
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13022: 70,
+			5017:  0,
+			13023: 70,
 			13052: 800,
 		},
 	},
@@ -348,10 +348,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/huawei-sun2000.yaml",
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13021: 0,
-			13022: 65,
-			5600:  0,
+			5017:  0,
+			13022: 0,
+			13023: 65,
+			5599:  0,
 			13052: 700,
 		},
 	},
@@ -363,8 +363,8 @@ var EmbeddedProfiles = map[string]*Profile{
 		Categories:  []string{"pv", "battery", "meter", "grid"},
 		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/fronius.yaml",
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13022: 45,
+			5017:  0,
+			13023: 45,
 			13052: 550,
 		},
 	},
@@ -375,10 +375,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "deye",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13021: 0,
-			13022: 80,
-			5600:  0,
+			5017:  0,
+			13022: 0,
+			13023: 80,
+			5599:  0,
 			13052: 450,
 		},
 	},
@@ -389,9 +389,9 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "pixii",
 		Categories:  []string{"battery", "meter", "control"},
 		Defaults: map[uint16]float64{
-			13021: 0,
-			13022: 50,
-			5600:  0,
+			13022: 0,
+			13023: 50,
+			5599:  0,
 		},
 	},
 	"ferroamp-energyhub": {
@@ -401,9 +401,9 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "ferroamp",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13022: 55,
-			5600:  0,
+			5017:  0,
+			13023: 55,
+			5599:  0,
 			13052: 1000,
 		},
 	},
@@ -466,10 +466,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13021: 0,
-			13022: 50,
-			5600:  0,
+			5017:  0,
+			13022: 0,
+			13023: 50,
+			5599:  0,
 			13052: 500,
 			33046: 500,
 			33047: 500,
@@ -503,10 +503,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5016:  0,
-			13021: 0,
-			13022: 60,
-			5600:  0,
+			5017:  0,
+			13022: 0,
+			13023: 60,
+			5599:  0,
 			13052: 5000,
 			33046: 5000,
 			33047: 5000,

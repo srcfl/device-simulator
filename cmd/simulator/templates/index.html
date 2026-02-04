@@ -99,7 +99,7 @@
 
         <!-- Site Simulation Controls (shown when site is selected) -->
         <template x-if="$store.site.selectedId && $store.site.data">
-            <div class="site-simulation-controls">
+            <div class="site-simulation-controls" x-data="siteSimulationControls()">
                 <div class="sim-control-header">
                     <span class="sim-control-title">Simulation</span>
                     <button class="sim-play-btn"
@@ -126,8 +126,8 @@
                 <div class="sim-control-row">
                     <label>Speed:</label>
                     <select class="sim-control-select"
-                            :value="$store.site.data?.time_multiplier || 1"
-                            @change="$store.site.setTimeMultiplier(parseFloat($event.target.value))">
+                            x-model="localTimeMultiplier"
+                            @change="onTimeMultiplierChange($event.target.value)">
                         <option value="1">1x</option>
                         <option value="10">10x</option>
                         <option value="60">60x</option>
@@ -138,8 +138,8 @@
                 <div class="sim-control-row">
                     <label>Scenario:</label>
                     <select class="sim-control-select"
-                            :value="$store.site.data?.scenario || 'sunny'"
-                            @change="$store.site.setScenario($event.target.value)">
+                            x-model="localScenario"
+                            @change="onScenarioChange($event.target.value)">
                         <option value="sunny">Sunny</option>
                         <option value="cloudy">Cloudy</option>
                         <option value="overcast">Overcast</option>
@@ -405,7 +405,7 @@
                 <div class="section" x-data="phaseVisualization()">
                     <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>Site Energy Balance</span>
-                        <button class="settings-btn" @click="showSettingsModal = true" title="Site Settings">
+                        <button class="settings-btn" @click="openSettingsModal()" title="Site Settings">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -475,24 +475,25 @@
 
                     <!-- Settings Modal -->
                     <template x-if="showSettingsModal">
-                        <div class="site-settings-modal-backdrop" @click="showSettingsModal = false">
+                        <div class="site-settings-modal-backdrop" @click="closeSettingsModal()">
                             <div class="site-settings-modal" @click.stop>
                                 <div class="modal-header">
                                     <h3>Site Settings</h3>
-                                    <button class="modal-close" @click="showSettingsModal = false">×</button>
+                                    <button class="modal-close" @click="closeSettingsModal()">×</button>
                                 </div>
                                 <div class="modal-info">Settings are stored locally in your browser</div>
                                 <div class="modal-body">
                                     <div class="modal-field">
                                         <label>Site Name</label>
                                         <input type="text"
-                                               :value="$store.site.data?.name || ''"
-                                               @change="$store.site.updateConfig({ name: $event.target.value })">
+                                               x-model="localSiteName"
+                                               @focus="onSiteNameFocus()"
+                                               @blur="onSiteNameBlur()">
                                     </div>
                                     <div class="modal-field">
                                         <label>Fuse Size</label>
-                                        <select :value="$store.site.data?.fuse_size || 16"
-                                                @change="$store.site.updateConfig({ fuse_size: parseInt($event.target.value) })">
+                                        <select x-model.number="localFuseSize"
+                                                @change="onFuseSizeChange($event.target.value)">
                                             <option value="10">10 A</option>
                                             <option value="16">16 A</option>
                                             <option value="20">20 A</option>
@@ -507,18 +508,24 @@
                                                 <span>L1</span>
                                                 <input type="number" step="0.01" min="0" max="1"
                                                        :value="localPhaseFactors.l1"
+                                                       @focus="onPhaseFactorFocus()"
+                                                       @blur="onPhaseFactorBlur()"
                                                        @input="localPhaseFactors.l1 = parseFloat($event.target.value) || 0">
                                             </div>
                                             <div class="phase-input">
                                                 <span>L2</span>
                                                 <input type="number" step="0.01" min="0" max="1"
                                                        :value="localPhaseFactors.l2"
+                                                       @focus="onPhaseFactorFocus()"
+                                                       @blur="onPhaseFactorBlur()"
                                                        @input="localPhaseFactors.l2 = parseFloat($event.target.value) || 0">
                                             </div>
                                             <div class="phase-input">
                                                 <span>L3</span>
                                                 <input type="number" step="0.01" min="0" max="1"
                                                        :value="localPhaseFactors.l3"
+                                                       @focus="onPhaseFactorFocus()"
+                                                       @blur="onPhaseFactorBlur()"
                                                        @input="localPhaseFactors.l3 = parseFloat($event.target.value) || 0">
                                             </div>
                                         </div>
@@ -540,7 +547,7 @@
                                     </div>
                                 </div>
                                 <div class="modal-footer">
-                                    <button class="btn btn-secondary" @click="showSettingsModal = false">Cancel</button>
+                                    <button class="btn btn-secondary" @click="closeSettingsModal()">Cancel</button>
                                     <button class="btn btn-primary" :disabled="!isPhaseFactorsValid()" @click="savePhaseFactors()">Save</button>
                                 </div>
                             </div>
@@ -1255,10 +1262,9 @@
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <span style="font-family: monospace; font-size: 12px;" x-text="$store.app.version"></span>
                                 <template x-if="$store.app.updateAvailable">
-                                    <button class="update-btn"
+                                    <button class="btn btn-primary btn-sm"
                                             @click="$store.app.applyUpdate()"
-                                            :disabled="$store.app.updateApplying"
-                                            style="background: #22c55e; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">
+                                            :disabled="$store.app.updateApplying">
                                         <span x-show="!$store.app.updateApplying">Update to <span x-text="$store.app.updateInfo?.latest_version"></span></span>
                                         <span x-show="$store.app.updateApplying">Updating...</span>
                                     </button>
@@ -1863,17 +1869,17 @@
                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                     <button @click="$store.app.showUpdateModal = false"
                             :disabled="$store.app.updateApplying"
-                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
+                            class="btn btn-secondary">
                         Close
                     </button>
                     <button @click="$store.app.checkForUpdate()"
                             x-show="!$store.app.updateChecking && !$store.app.updateApplying"
-                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
+                            class="btn btn-secondary">
                         Check Again
                     </button>
                     <button @click="$store.app.applyUpdate()"
                             x-show="$store.app.updateAvailable && !$store.app.updateApplying"
-                            style="padding: 0.5rem 1rem; background: var(--color-success); border: none; border-radius: var(--radius-md); color: white; cursor: pointer; font-weight: 600;">
+                            class="btn btn-primary">
                         Update Now
                     </button>
                 </div>
@@ -2024,19 +2030,18 @@
 
                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                     <button @click="$store.app.showSettingsModal = false"
-                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
+                            class="btn btn-secondary">
                         Close
                     </button>
                     <button @click="reset()"
                             x-show="!isDockerMode && hasChanges && !saving"
-                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
+                            class="btn btn-secondary">
                         Reset
                     </button>
                     <button @click="save()"
                             x-show="!isDockerMode"
                             :disabled="!hasChanges || saving"
-                            style="padding: 0.5rem 1rem; background: var(--color-primary); border: none; border-radius: var(--radius-md); color: white; cursor: pointer; font-weight: 600;"
-                            :style="(!hasChanges || saving) ? 'opacity: 0.5; cursor: not-allowed;' : ''">
+                            class="btn btn-primary">
                         <span x-show="!saving">Save Settings</span>
                         <span x-show="saving">Saving...</span>
                     </button>
@@ -2054,12 +2059,14 @@
                 <p style="margin: 0 0 1.5rem 0; color: var(--text-secondary);" x-text="$store.confirm.message"></p>
                 <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                     <button @click="$store.confirm.cancel()"
-                            style="padding: 0.5rem 1rem; background: var(--bg-tertiary); border: none; border-radius: var(--radius-md); color: var(--text-primary); cursor: pointer;">
-                        Cancel
+                            x-show="$store.confirm.showCancel"
+                            class="btn btn-secondary"
+                            x-text="$store.confirm.cancelLabel">
                     </button>
                     <button @click="$store.confirm.ok()"
-                            style="padding: 0.5rem 1rem; background: var(--color-error); border: none; border-radius: var(--radius-md); color: white; cursor: pointer;">
-                        Delete
+                            class="btn"
+                            :class="$store.confirm.okVariant === 'danger' ? 'btn-danger' : 'btn-primary'"
+                            x-text="$store.confirm.okLabel">
                     </button>
                 </div>
             </div>

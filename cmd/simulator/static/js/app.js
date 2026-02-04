@@ -9,6 +9,23 @@ const categories = {
     ocpp_charger: { name: 'OCPP Chargers', icon: '🔌', collapsed: false }
 };
 
+const getConfirmStore = () => window.Alpine?.store?.('confirm');
+
+const showAlert = async (title, message) => {
+    const store = getConfirmStore();
+    if (store?.alert) {
+        await store.alert(title, message);
+    }
+};
+
+const showConfirm = async (title, message, options = {}) => {
+    const store = getConfirmStore();
+    if (store?.prompt) {
+        return store.prompt(title, message, options);
+    }
+    return false;
+};
+
 // Initialize Alpine stores
 document.addEventListener('alpine:init', () => {
     // Main application store
@@ -138,12 +155,17 @@ document.addEventListener('alpine:init', () => {
                 await this.loadSimulators();
             } catch (e) {
                 console.error('Failed to create simulator:', e);
-                alert('Failed to create simulator: ' + e.message);
+                await showAlert('Error', 'Failed to create simulator: ' + e.message);
             }
         },
 
         async deleteSimulator(id, serial) {
-            if (!confirm(`Delete simulator ${serial}?`)) return;
+            const confirmed = await showConfirm(
+                'Delete Simulator',
+                `Are you sure you want to delete simulator ${serial}?`,
+                { okLabel: 'Delete', okVariant: 'danger' }
+            );
+            if (!confirmed) return;
 
             try {
                 await api.deleteSimulator(id);
@@ -156,7 +178,7 @@ document.addEventListener('alpine:init', () => {
                 await this.loadSimulators();
             } catch (e) {
                 console.error('Failed to delete simulator:', e);
-                alert('Failed to delete simulator: ' + e.message);
+                await showAlert('Error', 'Failed to delete simulator: ' + e.message);
             }
         },
 
@@ -352,7 +374,10 @@ document.addEventListener('alpine:init', () => {
                 // Check OCPP URL requirement
                 const ocppUrl = this.data?.ocpp_url || '';
                 if (!ocppUrl.trim()) {
-                    alert('Please enter an OCPP URL before starting the simulation.');
+                    await showAlert(
+                        'Missing OCPP URL',
+                        'Please enter an OCPP URL before starting the simulation.'
+                    );
                     return;
                 }
             }

@@ -42,6 +42,46 @@ body {
 
 .btn-action { background: var(--color-primary); color: #000; }
 
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+.btn-primary {
+    background: var(--color-primary);
+    color: #fff;
+    border: none;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--color-primary-hover);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--bg-primary);
+}
+
+.btn-danger {
+    background: var(--color-error);
+    color: #fff;
+    border: none;
+}
+
+.btn-danger:hover:not(:disabled) {
+    filter: brightness(0.95);
+}
+
 .toggle-btn {
     padding: 0.5rem 1rem;
     border: none;

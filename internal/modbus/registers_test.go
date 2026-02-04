@@ -201,7 +201,7 @@ func TestEncodeDecodeI32(t *testing.T) {
 func TestScaling(t *testing.T) {
 	// Test 0.1 scale factor (like Battery SoC)
 	def := &RegisterDef{
-		Address:  13022,
+		Address:  13023,
 		DataType: U16,
 		Scale:    0.1,
 		Words:    1,
@@ -239,23 +239,23 @@ func TestRegisterLookup(t *testing.T) {
 	}
 
 	// Verify specific registers exist
-	pvPower := RegisterLookup[5016]
+	pvPower := RegisterLookup[5017]
 	if pvPower == nil {
-		t.Error("PV Power register (5016) not found")
+		t.Error("PV Power register (5017) not found")
 	} else if pvPower.Name != "PV Power" {
-		t.Errorf("Register 5016 name = %s, want 'PV Power'", pvPower.Name)
+		t.Errorf("Register 5017 name = %s, want 'PV Power'", pvPower.Name)
 	}
 
-	batterySoc := RegisterLookup[13022]
+	batterySoc := RegisterLookup[13023]
 	if batterySoc == nil {
-		t.Error("Battery SoC register (13022) not found")
+		t.Error("Battery SoC register (13023) not found")
 	} else if batterySoc.Scale != 0.1 {
 		t.Errorf("Battery SoC scale = %v, want 0.1", batterySoc.Scale)
 	}
 }
 
 func TestToPayload(t *testing.T) {
-	def := RegisterLookup[13022] // Battery SoC
+	def := RegisterLookup[13023] // Battery SoC
 	if def == nil {
 		t.Fatal("Battery SoC register not found")
 	}
@@ -265,8 +265,8 @@ func TestToPayload(t *testing.T) {
 		t.Fatalf("ToPayload error: %v", err)
 	}
 
-	if payload.Address != 13022 {
-		t.Errorf("Address = %d, want 13022", payload.Address)
+	if payload.Address != 13023 {
+		t.Errorf("Address = %d, want 13023", payload.Address)
 	}
 	if payload.Value != 78.0 {
 		t.Errorf("Value = %v, want 78.0", payload.Value)

@@ -1023,12 +1023,19 @@ document.addEventListener('alpine:init', () => {
         },
 
         formatInverterBatteryPower(inv) {
-            const power = inv?.load || 0;
-            const absP = Math.abs(power);
+            const power = Math.abs(inv?.load || 0);
+            const direction = inv?.battery_direction;
+            let signedPower = power;
+            if (direction === 'discharging') signedPower = -power;
+            else if (direction === 'charging') signedPower = power;
+            else if (direction === 'idle') signedPower = 0;
+
+            const absP = Math.abs(signedPower);
+            const sign = signedPower > 0 ? '+' : signedPower < 0 ? '-' : '';
             if (absP >= 1000) {
-                return `${(absP / 1000).toFixed(1)} kW`;
+                return `${sign}${(absP / 1000).toFixed(1)} kW`;
             }
-            return `${absP.toFixed(0)} W`;
+            return `${sign}${absP.toFixed(0)} W`;
         },
 
         getInverterBatteryPowerClass(inv) {
@@ -1041,7 +1048,7 @@ document.addEventListener('alpine:init', () => {
 
         // Get signed battery power for slider value (charging = negative, discharging = positive)
         getInverterBatterySliderValue(inv) {
-            const power = inv?.load || 0;
+            const power = Math.abs(inv?.load || 0);
             const direction = inv?.battery_direction;
             if (direction === 'charging') return -power;
             if (direction === 'discharging') return power;
@@ -1050,8 +1057,8 @@ document.addEventListener('alpine:init', () => {
 
         async setInverterPvPower(simId, value) {
             try {
-                // Write to PV power register (5016 is common for inverters)
-                await api.writeRegister(simId, 5016, value);
+                // Write to PV power register (5017 for Sungrow)
+                await api.writeRegister(simId, 5017, value);
                 await Alpine.store('app').loadSimulators();
             } catch (e) {
                 console.error('Set inverter PV power error:', e);
@@ -1060,8 +1067,8 @@ document.addEventListener('alpine:init', () => {
 
         async setInverterBatteryPower(simId, value) {
             try {
-                // Write absolute power value to register 13021
-                await api.writeRegister(simId, 13021, Math.abs(value));
+                // Write absolute power value to register 13022
+                await api.writeRegister(simId, 13022, Math.abs(value));
 
                 // Write command register 13050: 170=charge, 187=discharge, 204=stop
                 let cmd = 204; // stop/idle
@@ -1222,6 +1229,73 @@ document.addEventListener('alpine:init', () => {
         }
     }));
 
+    // Site Simulation Controls (sidebar)
+    Alpine.data('siteSimulationControls', () => ({
+        localTimeMultiplier: 1,
+        localScenario: 'sunny',
+        changingTimeMultiplier: false,
+        changingScenario: false,
+        lastSiteId: null,
+
+        init() {
+            this.syncFromStore(true);
+
+            this.$watch('$store.site.data', () => {
+                const currentSiteId = Alpine.store('site').selectedId;
+
+                if (this.lastSiteId !== currentSiteId) {
+                    this.lastSiteId = currentSiteId;
+                    this.changingTimeMultiplier = false;
+                    this.changingScenario = false;
+                    this.syncFromStore(true);
+                    return;
+                }
+
+                this.syncFromStore(false);
+            });
+        },
+
+        syncFromStore(force) {
+            const data = Alpine.store('site').data;
+            if (!data) return;
+
+            if (force || !this.changingTimeMultiplier) {
+                this.localTimeMultiplier = data.time_multiplier || 1;
+            }
+            if (force || !this.changingScenario) {
+                this.localScenario = data.scenario || 'sunny';
+            }
+        },
+
+        async onTimeMultiplierChange(value) {
+            const next = parseFloat(value) || 1;
+            const current = Alpine.store('site').data?.time_multiplier || 1;
+            if (next === current) return;
+
+            this.changingTimeMultiplier = true;
+            this.localTimeMultiplier = next;
+            try {
+                await Alpine.store('site').setTimeMultiplier(next);
+            } finally {
+                this.changingTimeMultiplier = false;
+            }
+        },
+
+        async onScenarioChange(value) {
+            const next = value || 'sunny';
+            const current = Alpine.store('site').data?.scenario || 'sunny';
+            if (next === current) return;
+
+            this.changingScenario = true;
+            this.localScenario = next;
+            try {
+                await Alpine.store('site').setScenario(next);
+            } finally {
+                this.changingScenario = false;
+            }
+        }
+    }));
+
     // Site Tabs Component
     Alpine.data('siteTabs', () => ({
         async createNewSite() {
@@ -1233,14 +1307,25 @@ document.addEventListener('alpine:init', () => {
                 // Create an empty site (no meter, no simulators)
                 await Alpine.store('site').createSite(name, 0, [], 1000);
             } catch (e) {
-                alert('Error creating site: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error creating site: ' + e.message);
             }
         },
 
         async deleteSiteTab(siteId) {
-            if (Alpine.store('site').sites.length <= 1) return;
-            if (!confirm('Delete this site?')) return;
-            await Alpine.store('site').deleteSite(siteId);
+            const siteStore = Alpine.store('site');
+            if (siteStore.sites.length <= 1) return;
+
+            const site = siteStore.sites.find(s => s.id === siteId);
+            const siteName = site?.name || 'this site';
+
+            const confirmed = await Alpine.store('confirm').prompt(
+                'Delete Site',
+                `Are you sure you want to delete ${siteName}?`,
+                { okLabel: 'Delete', okVariant: 'danger' }
+            );
+            if (!confirmed) return;
+
+            await siteStore.deleteSite(siteId);
         }
     }));
 
@@ -1382,19 +1467,19 @@ document.addEventListener('alpine:init', () => {
 
         get meterPower() {
             const regs = Alpine.store('simulator').registers || [];
-            const reg = regs.find(r => r.address === 5600);
+            const reg = regs.find(r => r.address === 5599);
             return reg?.value || 0;
         },
 
         get importEnergy() {
             const regs = Alpine.store('simulator').registers || [];
-            const reg = regs.find(r => r.address === 13036);
+            const reg = regs.find(r => r.address === 13037);
             return reg?.value || 0;
         },
 
         get exportEnergy() {
             const regs = Alpine.store('simulator').registers || [];
-            const reg = regs.find(r => r.address === 13045);
+            const reg = regs.find(r => r.address === 13046);
             return reg?.value || 0;
         },
 
@@ -1425,7 +1510,7 @@ document.addEventListener('alpine:init', () => {
                 await Alpine.store('site').loadSites();
             } catch (e) {
                 console.error('Set P1 mode error:', e);
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         }
     }));
@@ -1677,12 +1762,12 @@ document.addEventListener('alpine:init', () => {
         syncFromRegisters() {
             const regs = Alpine.store('simulator').registers || [];
 
-            // PV Power (address 5016, U32 Little Endian)
-            const pvReg = regs.find(r => r.address === 5016);
+            // PV Power (address 5017, U32 Little Endian)
+            const pvReg = regs.find(r => r.address === 5017);
             if (pvReg) this.pvPower = pvReg.value || 0;
 
-            // Battery Power (address 13021, U16)
-            const batPowerReg = regs.find(r => r.address === 13021);
+            // Battery Power (address 13022, U16)
+            const batPowerReg = regs.find(r => r.address === 13022);
             if (batPowerReg) {
                 // Determine sign from command register (13050)
                 const cmdReg = regs.find(r => r.address === 13050);
@@ -1692,12 +1777,12 @@ document.addEventListener('alpine:init', () => {
                 this.batteryPower = cmd === 170 ? -absVal : absVal;
             }
 
-            // Battery SoC (address 13022, scale 0.1)
-            const socReg = regs.find(r => r.address === 13022);
+            // Battery SoC (address 13023, scale 0.1)
+            const socReg = regs.find(r => r.address === 13023);
             if (socReg) this.batterySoc = socReg.value || 0;
 
-            // Meter Power (address 5600, I32 Little Endian)
-            const meterReg = regs.find(r => r.address === 5600);
+            // Meter Power (address 5599, I32 Little Endian)
+            const meterReg = regs.find(r => r.address === 5599);
             if (meterReg) this.meterPower = meterReg.value || 0;
         },
 
@@ -1725,7 +1810,7 @@ document.addEventListener('alpine:init', () => {
             if (!this.dragging) return;
             this.dragging = null;
             this.pvPower = parseFloat(value);
-            await api.writeRegister(Alpine.store('simulator').id, 5016, this.pvPower);
+            await api.writeRegister(Alpine.store('simulator').id, 5017, this.pvPower);
             await Alpine.store('simulator').loadRegisters();
         },
 
@@ -1739,7 +1824,7 @@ document.addEventListener('alpine:init', () => {
             if (!this.dragging) return;
             this.dragging = null;
             this.batterySoc = parseFloat(value);
-            await api.writeRegister(Alpine.store('simulator').id, 13022, this.batterySoc);
+            await api.writeRegister(Alpine.store('simulator').id, 13023, this.batterySoc);
             await Alpine.store('simulator').loadRegisters();
         },
 
@@ -1756,7 +1841,7 @@ document.addEventListener('alpine:init', () => {
             const simId = Alpine.store('simulator').id;
 
             // Write absolute power value
-            await api.writeRegister(simId, 13021, Math.abs(this.batteryPower));
+            await api.writeRegister(simId, 13022, Math.abs(this.batteryPower));
 
             // Write command register: 170=charge, 187=discharge, 204=stop
             let cmd = 204; // stop
@@ -1787,7 +1872,12 @@ document.addEventListener('alpine:init', () => {
 
         // Reset to profile defaults
         async resetToDefaults() {
-            if (!confirm('Reset all values to profile defaults?')) return;
+            const confirmed = await Alpine.store('confirm').prompt(
+                'Reset Values',
+                'Reset all values to profile defaults?',
+                { okLabel: 'Reset', okVariant: 'danger' }
+            );
+            if (!confirmed) return;
             const simId = Alpine.store('simulator').id;
             await api.reset(simId);
             await Alpine.store('simulator').loadRegisters();
@@ -1882,7 +1972,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 await Alpine.store('site').addSimulator(simId);
             } catch (e) {
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         },
 
@@ -1890,7 +1980,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 await Alpine.store('site').removeSimulator(simId);
             } catch (e) {
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         },
 
@@ -1899,7 +1989,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 await Alpine.store('site').setMeter(meterId);
             } catch (e) {
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         }
     }));
@@ -1908,12 +1998,33 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('phaseVisualization', () => ({
         showSettingsModal: false,
         localPhaseFactors: { l1: 0.333, l2: 0.333, l3: 0.334 },
+        localSiteName: '',
+        localFuseSize: 16,
+        editingSiteName: false,
+        editingPhaseFactors: false,
+        changingFuseSize: false,
+        lastSiteId: null,
         fuseBlown: { l1: false, l2: false, l3: false },
 
         init() {
-            // Initialize local phase factors from store
-            this.syncPhaseFactors();
-            this.$watch('$store.site.data', () => this.syncPhaseFactors());
+            // Initialize local settings from store
+            this.syncSettingsFromStore(true);
+
+            this.$watch('$store.site.data', () => {
+                const currentSiteId = Alpine.store('site').selectedId;
+                if (this.lastSiteId !== currentSiteId) {
+                    this.lastSiteId = currentSiteId;
+                    this.showSettingsModal = false;
+                    this.editingSiteName = false;
+                    this.editingPhaseFactors = false;
+                    this.changingFuseSize = false;
+                    this.syncSettingsFromStore(true);
+                    return;
+                }
+
+                // Avoid overwriting inputs while editing
+                this.syncSettingsFromStore(false);
+            });
 
             // Load fuse state from localStorage
             this.loadFuseState();
@@ -1947,14 +2058,72 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        syncPhaseFactors() {
-            const factors = Alpine.store('site').data?.phase_factors;
-            if (factors) {
-                this.localPhaseFactors = {
-                    l1: factors.l1 || 0.333,
-                    l2: factors.l2 || 0.333,
-                    l3: factors.l3 || 0.334
-                };
+        syncSettingsFromStore(force) {
+            const data = Alpine.store('site').data;
+            if (!data) return;
+
+            if (force || !this.editingSiteName) {
+                this.localSiteName = data.name || '';
+            }
+            if (force || !this.changingFuseSize) {
+                this.localFuseSize = data.fuse_size || 16;
+            }
+            if (force || !this.editingPhaseFactors) {
+                const factors = data.phase_factors;
+                if (factors) {
+                    this.localPhaseFactors = {
+                        l1: factors.l1 || 0.333,
+                        l2: factors.l2 || 0.333,
+                        l3: factors.l3 || 0.334
+                    };
+                }
+            }
+        },
+
+        openSettingsModal() {
+            this.syncSettingsFromStore(true);
+            this.showSettingsModal = true;
+        },
+
+        closeSettingsModal() {
+            this.showSettingsModal = false;
+            this.editingSiteName = false;
+            this.editingPhaseFactors = false;
+            this.changingFuseSize = false;
+        },
+
+        onSiteNameFocus() {
+            this.editingSiteName = true;
+        },
+
+        async onSiteNameBlur() {
+            this.editingSiteName = false;
+            const trimmed = this.localSiteName.trim();
+            const current = Alpine.store('site').data?.name || '';
+            if (trimmed && trimmed !== current) {
+                await Alpine.store('site').updateConfig({ name: trimmed });
+            }
+        },
+
+        onPhaseFactorFocus() {
+            this.editingPhaseFactors = true;
+        },
+
+        onPhaseFactorBlur() {
+            this.editingPhaseFactors = false;
+        },
+
+        async onFuseSizeChange(value) {
+            const next = parseInt(value, 10) || 16;
+            const current = Alpine.store('site').data?.fuse_size || 16;
+            if (next === current) return;
+
+            this.changingFuseSize = true;
+            this.localFuseSize = next;
+            try {
+                await Alpine.store('site').updateConfig({ fuse_size: next });
+            } finally {
+                this.changingFuseSize = false;
             }
         },
 
@@ -2099,9 +2268,9 @@ document.addEventListener('alpine:init', () => {
                 await Alpine.store('site').updateConfig({
                     phase_factors: this.localPhaseFactors
                 });
-                this.showSettingsModal = false;
+                this.closeSettingsModal();
             } catch (e) {
-                alert('Error: ' + e.message);
+                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
             }
         }
     }));
@@ -2194,7 +2363,10 @@ document.addEventListener('alpine:init', () => {
                 this.needsRestart = true;
             } catch (e) {
                 console.error('Failed to save settings:', e);
-                alert('Failed to save settings: ' + e.message);
+                await Alpine.store('confirm').alert(
+                    'Error',
+                    'Failed to save settings: ' + e.message
+                );
             }
             this.saving = false;
         },

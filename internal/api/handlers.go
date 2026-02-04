@@ -176,6 +176,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if def.Address == 13050 {
+			flags := 0.0
+			switch int(req.Value) {
+			case 170:
+				flags = 2 // charging
+			case 187:
+				flags = 4 // discharging
+			default:
+				flags = 0
+			}
+			if flagsDef := modbus.RegisterLookup[13000]; flagsDef != nil {
+				_ = s.modbusServer.WriteRegisterValue(flagsDef, flags)
+			}
+		}
 
 		// Read back and return
 		var regs []uint16
@@ -325,7 +339,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status := make(map[string]interface{})
 
 	// Read key registers
-	keyRegisters := []uint16{5016, 13021, 13022, 5600, 13052}
+	keyRegisters := []uint16{5017, 13022, 13023, 5599, 13052}
 	for _, addr := range keyRegisters {
 		def := modbus.RegisterLookup[addr]
 		if def == nil {
@@ -492,8 +506,8 @@ func (s *Server) generateValues(simTime time.Time) {
 		loadPower = 2500
 	}
 
-	// Update PV register (5016)
-	pvDef := modbus.RegisterLookup[5016]
+	// Update PV register (5017)
+	pvDef := modbus.RegisterLookup[5017]
 	if pvDef != nil {
 		s.modbusServer.WriteRegisterValue(pvDef, solarPower)
 	}
@@ -509,7 +523,7 @@ func (s *Server) generateValues(simTime time.Time) {
 	batteryPower := 0.0 // TODO: implement battery logic
 	meterPower := loadPower - solarPower + batteryPower
 
-	meterDef := modbus.RegisterLookup[5600]
+	meterDef := modbus.RegisterLookup[5599]
 	if meterDef != nil {
 		s.modbusServer.WriteRegisterValue(meterDef, meterPower)
 	}

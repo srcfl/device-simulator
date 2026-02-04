@@ -3,6 +3,8 @@ name: Build Desktop Apps
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       release_type:
@@ -129,7 +131,6 @@ jobs:
   # Run tests before building - must pass for release to proceed
   test:
     needs: check-release
-    if: needs.check-release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

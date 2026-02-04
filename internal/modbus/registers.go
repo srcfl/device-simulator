@@ -50,29 +50,49 @@ type RegisterDef struct {
 // RegisterDefinitions contains all known register definitions
 // Categories: pv, battery, meter, grid, control
 var RegisterDefinitions = []RegisterDef{
-	// PV Registers
-	{Address: 5016, Name: "PV Power", Description: "Total PV power", Unit: "W", Category: "pv", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
-	{Address: 13002, Name: "Total PV Generation", Description: "Total PV generation", Unit: "Wh", Category: "pv", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	// PV Registers (Sungrow SH Hybrid - Input Registers)
+	{Address: 5001, Name: "Nominal Output Power", Description: "Nominal output power of the inverter", Unit: "kW", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5008, Name: "Inside Temperature", Description: "Internal temperature of the inverter", Unit: "°C", Category: "pv", DataType: I16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5011, Name: "MPPT 1 Voltage", Description: "Maximum Power Point Tracker 1 Voltage", Unit: "V", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5012, Name: "MPPT 1 Current", Description: "Maximum Power Point Tracker 1 Current", Unit: "A", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5013, Name: "MPPT 2 Voltage", Description: "Maximum Power Point Tracker 2 Voltage", Unit: "V", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5014, Name: "MPPT 2 Current", Description: "Maximum Power Point Tracker 2 Current", Unit: "A", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5017, Name: "PV Power", Description: "Total DC power", Unit: "W", Category: "pv", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 13003, Name: "Total PV Generation", Description: "Total photovoltaic generation", Unit: "Wh", Category: "pv", DataType: U32, Scale: 100.0, Words: 2, Endianness: Little, UseHolding: false},
 	{Address: 13073, Name: "PV Command", Description: "PV power limit", Unit: "W", Category: "pv", DataType: U16, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
 
-	// Battery Registers
-	{Address: 13021, Name: "Battery Power", Description: "Battery power (positive=charge, negative=discharge)", Unit: "W", Category: "battery", DataType: I16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
-	{Address: 13022, Name: "Battery SoC", Description: "Battery state of charge", Unit: "%", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
-	{Address: 13000, Name: "Battery Flags", Description: "Bit1: charging, Bit2: discharging", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
+	// Battery Registers (Sungrow SH Hybrid - Input Registers)
+	{Address: 13000, Name: "System State Flags", Description: "Bitmask of inverter running states", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13020, Name: "Battery Voltage", Description: "Battery voltage", Unit: "V", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13021, Name: "Battery Current", Description: "Battery current", Unit: "A", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13022, Name: "Battery Power", Description: "Battery power", Unit: "W", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13023, Name: "Battery SoC", Description: "Battery state of charge", Unit: "%", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13025, Name: "Battery Temperature", Description: "Battery temperature", Unit: "°C", Category: "battery", DataType: I16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13027, Name: "Total Battery Discharge", Description: "Total battery discharge energy", Unit: "Wh", Category: "battery", DataType: U32, Scale: 100.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 13041, Name: "Total Charge Energy", Description: "Total charge energy", Unit: "Wh", Category: "battery", DataType: U32, Scale: 100.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 13058, Name: "Battery Max SoC", Description: "Maximum battery state of charge threshold", Unit: "%", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: true},
+	{Address: 13059, Name: "Battery Min SoC", Description: "Minimum battery state of charge threshold", Unit: "%", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: true},
 	{Address: 13050, Name: "Charge/Discharge Cmd", Description: "170=charge; 187=discharge; 204=stop", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
 	{Address: 13051, Name: "Battery Setpoint", Description: "Battery power setpoint", Unit: "W", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
 	{Address: 33046, Name: "Max Charge Power", Description: "Max charge power", Unit: "kW", Category: "battery", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: true},
 	{Address: 33047, Name: "Max Discharge Power", Description: "Max discharge power", Unit: "kW", Category: "battery", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: true},
-	{Address: 13040, Name: "Total Charge Energy", Description: "Total charge energy", Unit: "Wh", Category: "battery", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
-	{Address: 13026, Name: "Total Battery Discharge", Description: "Total battery discharge energy", Unit: "Wh", Category: "battery", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
 
-	// Meter Registers
-	{Address: 5600, Name: "Meter Power", Description: "Meter active power (+ = import, - = export)", Unit: "W", Category: "meter", DataType: I32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
-	{Address: 13036, Name: "Total Import Energy", Description: "Total import energy", Unit: "Wh", Category: "meter", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
-	{Address: 13045, Name: "Total Export Energy", Description: "Total export energy", Unit: "Wh", Category: "meter", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	// Meter Registers (Sungrow external meter - Input Registers)
+	{Address: 5599, Name: "Meter Power", Description: "Meter total active power", Unit: "W", Category: "meter", DataType: I32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 5601, Name: "Meter L1 Power", Description: "Meter phase A active power", Unit: "W", Category: "meter", DataType: I32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 5603, Name: "Meter L2 Power", Description: "Meter phase B active power", Unit: "W", Category: "meter", DataType: I32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 5605, Name: "Meter L3 Power", Description: "Meter phase C active power", Unit: "W", Category: "meter", DataType: I32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 5740, Name: "Meter L1 Voltage", Description: "Meter phase A voltage", Unit: "V", Category: "meter", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5741, Name: "Meter L2 Voltage", Description: "Meter phase B voltage", Unit: "V", Category: "meter", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5742, Name: "Meter L3 Voltage", Description: "Meter phase C voltage", Unit: "V", Category: "meter", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5743, Name: "Meter L1 Current", Description: "Meter phase A current", Unit: "A", Category: "meter", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5744, Name: "Meter L2 Current", Description: "Meter phase B current", Unit: "A", Category: "meter", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 5745, Name: "Meter L3 Current", Description: "Meter phase C current", Unit: "A", Category: "meter", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: false},
+	{Address: 13037, Name: "Total Import Energy", Description: "Total import energy", Unit: "Wh", Category: "meter", DataType: U32, Scale: 100.0, Words: 2, Endianness: Little, UseHolding: false},
+	{Address: 13046, Name: "Total Export Energy", Description: "Total export energy", Unit: "Wh", Category: "meter", DataType: U32, Scale: 100.0, Words: 2, Endianness: Little, UseHolding: false},
 
 	// Grid Registers
-	{Address: 5241, Name: "Grid Frequency HP", Description: "Grid Frequency - High precision", Unit: "Hz", Category: "grid", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: true},
+	{Address: 5241, Name: "Grid Frequency HP", Description: "Grid Frequency - High precision", Unit: "Hz", Category: "grid", DataType: U16, Scale: 0.01, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 13049, Name: "Grid Mode", Description: "0: Self-consumption; 2: Forced; 3: External EMS", Unit: "", Category: "grid", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
 	{Address: 13086, Name: "Export Limit Enable", Description: "170=enabled; 85=disabled", Unit: "", Category: "grid", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
 
@@ -126,10 +146,10 @@ var DefaultValues = map[uint16]int64{
 	5241:  50, // Grid Frequency (50.00 Hz, scaled by 100)
 
 	// Power Flow Registers
-	5016:  0,  // PV Power
-	13021: 0,  // Battery Power
-	13022: 78, // Battery SoC (%)
-	5600:  0,  // Meter Power
+	5017:  0,  // PV Power
+	13022: 0,  // Battery Power
+	13023: 78, // Battery SoC (%)
+	5599:  0,  // Meter Power
 	13052: 0,  // Load Power
 
 	// Control Registers
@@ -141,13 +161,15 @@ var DefaultValues = map[uint16]int64{
 	13086: 170,   // Export Limit Enable (170=Enabled)
 	33046: 500,   // Max Charge Power (5kW)
 	33047: 500,   // Max Discharge Power (5kW)
+	13058: 1000,  // Battery Max SoC (100.0%)
+	13059: 0,     // Battery Min SoC (0.0%)
 
 	// Energy totals will be randomized at startup
-	13036: 150000, // Total Import Energy (Wh)
-	13040: 180000, // Total Charge Energy (Wh)
-	13045: 200000, // Total Export Energy (Wh)
-	13002: 220000, // Total PV Generation (Wh)
-	13026: 160000, // Total Battery Discharge (Wh)
+	13037: 150000, // Total Import Energy (Wh)
+	13041: 180000, // Total Charge Energy (Wh)
+	13046: 200000, // Total Export Energy (Wh)
+	13003: 220000, // Total PV Generation (Wh)
+	13027: 160000, // Total Battery Discharge (Wh)
 }
 
 // EncodeValue encodes a float64 value to register words according to the register definition
