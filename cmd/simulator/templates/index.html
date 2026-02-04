@@ -100,53 +100,52 @@
         <!-- Site Simulation Controls (shown when site is selected) -->
         <template x-if="$store.site.selectedId && $store.site.data">
             <div class="site-simulation-controls" x-data="siteSimulationControls()">
-                <div class="sim-control-header">
-                    <span class="sim-control-title">Simulation</span>
-                    <button class="sim-play-btn"
-                            :class="{ 'running': $store.site.data?.sim_running }"
-                            @click="$store.site.toggleSimulation()"
-                            :title="$store.site.data?.sim_running ? 'Stop Simulation' : 'Start Simulation'">
-                        <template x-if="!$store.site.data?.sim_running">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                <polygon points="5 3 19 12 5 21 5 3"/>
-                            </svg>
-                        </template>
-                        <template x-if="$store.site.data?.sim_running">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                <rect x="6" y="4" width="4" height="16"/>
-                                <rect x="14" y="4" width="4" height="16"/>
-                            </svg>
-                        </template>
+                <div class="sim-control-header compact">
+                    <div class="sim-clock compact">
+                        <div class="sim-clock-time" x-text="clockTime"></div>
+                        <div class="sim-clock-date" x-text="clockDate"></div>
+                    </div>
+                    <button class="sim-reset-btn compact"
+                            :disabled="resettingClock"
+                            @click="resetClock()"
+                            title="Reset clock to now">
+                        Now
                     </button>
-                </div>
-                <div class="sim-control-time">
-                    <span class="sim-time-label">Time:</span>
-                    <span class="sim-time-value" x-text="$store.site.data?.simulated_time || 'Not started'"></span>
-                </div>
-                <div class="sim-control-row">
-                    <label>Speed:</label>
-                    <select class="sim-control-select"
-                            x-model="localTimeMultiplier"
-                            @change="onTimeMultiplierChange($event.target.value)">
-                        <option value="1">1x</option>
-                        <option value="10">10x</option>
-                        <option value="60">60x</option>
-                        <option value="360">360x</option>
-                        <option value="720">720x</option>
-                    </select>
-                </div>
-                <div class="sim-control-row">
-                    <label>Scenario:</label>
-                    <select class="sim-control-select"
-                            x-model="localScenario"
-                            @change="onScenarioChange($event.target.value)">
-                        <option value="sunny">Sunny</option>
-                        <option value="cloudy">Cloudy</option>
-                        <option value="overcast">Overcast</option>
-                        <option value="rainy">Rainy</option>
-                        <option value="night">Night</option>
-                        <option value="peak_load">Peak Load</option>
-                    </select>
+                    <div class="sim-control-actions compact">
+                        <div class="sim-speed" @click.window="speedOpen = false">
+                            <button class="sim-speed-btn" @click.stop="speedOpen = !speedOpen">
+                                <span x-text="speedLabel"></span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <div class="sim-speed-menu" x-show="speedOpen" x-transition @click.stop>
+                                <template x-for="opt in speedOptions" :key="opt.value">
+                                    <button class="sim-speed-option"
+                                            :class="{ 'active': localTimeMultiplier === opt.value }"
+                                            @click="selectSpeed(opt.value)">
+                                        <span x-text="opt.label"></span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                        <button class="sim-play-btn compact"
+                                :class="{ 'running': $store.site.data?.sim_running }"
+                                @click="$store.site.toggleSimulation()"
+                                :title="$store.site.data?.sim_running ? 'Stop Simulation' : 'Start Simulation'">
+                            <template x-if="!$store.site.data?.sim_running">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3"/>
+                                </svg>
+                            </template>
+                            <template x-if="$store.site.data?.sim_running">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="4" width="4" height="16"/>
+                                    <rect x="14" y="4" width="4" height="16"/>
+                                </svg>
+                            </template>
+                        </button>
+                    </div>
                 </div>
             </div>
         </template>
@@ -297,13 +296,6 @@
                     <div class="section">
                         <div class="section-title">Load Profile</div>
                         <div class="scenario-selector">
-                            <div class="scenario-option"
-                                 :class="{ 'active': activeScenario === '' }"
-                                 @click="onScenarioChange('')">
-                                <span class="scenario-option-icon">⚙️</span>
-                                <span class="scenario-option-name">Manual Control</span>
-                                <span class="scenario-option-desc">Adjust phase loads manually</span>
-                            </div>
                             <template x-for="s in scenarios" :key="s.key">
                                 <div class="scenario-option"
                                      :class="{ 'active': activeScenario === s.key }"
@@ -321,8 +313,9 @@
                     <div class="section">
                         <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
                             <span>Phase Loads</span>
-                            <button class="link-toggle" :class="{ 'linked': loadLinked }"
+                            <button class="link-toggle compact" :class="{ 'linked': loadLinked }"
                                     @click="toggleLinked()"
+                                    :disabled="isSimulationRunning()"
                                     :title="loadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
                                 <svg x-show="loadLinked" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -336,7 +329,6 @@
                                     <line x1="16" y1="19" x2="16" y2="22"/>
                                     <line x1="19" y1="16" x2="22" y2="16"/>
                                 </svg>
-                                <span x-text="loadLinked ? 'Linked' : 'Unlinked'"></span>
                             </button>
                         </div>
 
@@ -350,8 +342,8 @@
                                 <input type="range" class="phase-load-slider large"
                                        min="0" max="5000" step="50"
                                        :value="localLoads.l1"
-                                       :disabled="!isManualMode()"
-                                       :class="{ 'disabled': !isManualMode() }"
+                                       :disabled="isSimulationRunning()"
+                                       :class="{ 'disabled': isSimulationRunning() }"
                                        @input="onPhaseSliderInput('l1', $event.target.value)">
                             </div>
 
@@ -364,8 +356,8 @@
                                 <input type="range" class="phase-load-slider large"
                                        min="0" max="5000" step="50"
                                        :value="localLoads.l2"
-                                       :disabled="!isManualMode()"
-                                       :class="{ 'disabled': !isManualMode() }"
+                                       :disabled="isSimulationRunning()"
+                                       :class="{ 'disabled': isSimulationRunning() }"
                                        @input="onPhaseSliderInput('l2', $event.target.value)">
                             </div>
 
@@ -378,22 +370,20 @@
                                 <input type="range" class="phase-load-slider large"
                                        min="0" max="5000" step="50"
                                        :value="localLoads.l3"
-                                       :disabled="!isManualMode()"
-                                       :class="{ 'disabled': !isManualMode() }"
+                                       :disabled="isSimulationRunning()"
+                                       :class="{ 'disabled': isSimulationRunning() }"
                                        @input="onPhaseSliderInput('l3', $event.target.value)">
                             </div>
                         </div>
 
                         <!-- Scenario Info -->
-                        <template x-if="!isManualMode()">
-                            <div class="scenario-active-info">
-                                <span class="scenario-active-icon" x-text="getScenarioIcon(activeScenario)"></span>
-                                <div class="scenario-active-text">
-                                    <strong x-text="getScenarioName()"></strong>
-                                    <span>Values update automatically based on simulated time of day</span>
-                                </div>
+                        <div class="scenario-active-info">
+                            <span class="scenario-active-icon" x-text="getScenarioIcon(activeScenario)"></span>
+                            <div class="scenario-active-text">
+                                <strong x-text="getScenarioName()"></strong>
+                                <span x-text="isSimulationRunning() ? 'Values update automatically based on simulated time of day' : 'Simulation stopped - adjust phase loads below'"></span>
                             </div>
-                        </template>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -572,22 +562,11 @@
                                     <span class="protocol-badge load">load</span>
                                 </div>
                                 <div class="member-actions">
-                                    <button class="link-toggle compact"
-                                            :class="{ 'linked': homeLoadLinked }"
-                                            :disabled="!isLoadManual()"
-                                            @click.stop="toggleHomeLoadLinked()"
-                                            :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
-                                        <svg x-show="homeLoadLinked" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                                        </svg>
-                                        <svg x-show="!homeLoadLinked" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/>
-                                            <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71"/>
-                                            <line x1="8" y1="2" x2="8" y2="5"/>
-                                            <line x1="2" y1="8" x2="5" y2="8"/>
-                                            <line x1="16" y1="19" x2="16" y2="22"/>
-                                            <line x1="19" y1="16" x2="22" y2="16"/>
+                                    <button class="member-open-btn" @click.stop="$store.app.selectSiteLoad()" title="Open Site Load dashboard">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                            <polyline points="15 3 21 3 21 9"/>
+                                            <line x1="10" y1="14" x2="21" y2="3"/>
                                         </svg>
                                     </button>
                                 </div>
@@ -603,43 +582,96 @@
                                 <div class="member-control-row load-profile-row">
                                     <span class="control-label">Profile</span>
                                     <select class="site-load-select member-load-select"
-                                            @change="setHomeLoadScenario($event.target.value)"
-                                            :value="homeLoadScenario">
-                                        <option value="">Manual</option>
+                                            x-model="homeLoadScenario"
+                                            @change="setHomeLoadScenario($event.target.value)">
                                         <template x-for="s in loadScenarios" :key="s.key">
-                                            <option :value="s.key" x-text="s.name"></option>
+                                            <option :value="s.key" x-text="`${getLoadScenarioIcon(s.key)} ${s.name}`"></option>
                                         </template>
                                     </select>
                                 </div>
 
                                 <div class="member-load-phases">
-                                    <div class="phase-load-row compact">
+                                    <div class="phase-load-row compact with-link">
                                         <span class="phase-load-label">L1</span>
+                                        <button class="link-toggle micro"
+                                                :class="{ 'linked': homeLoadLinked }"
+                                                :disabled="isSiteSimulating()"
+                                                @click.stop="toggleHomeLoadLinked()"
+                                                :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
+                                            <svg x-show="homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                            </svg>
+                                            <svg x-show="!homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/>
+                                                <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71"/>
+                                                <line x1="8" y1="2" x2="8" y2="5"/>
+                                                <line x1="2" y1="8" x2="5" y2="8"/>
+                                                <line x1="16" y1="19" x2="16" y2="22"/>
+                                                <line x1="19" y1="16" x2="22" y2="16"/>
+                                            </svg>
+                                        </button>
                                         <input type="range" class="phase-load-slider"
                                                min="0" max="5000" step="50"
                                                :value="homeLoads.l1"
-                                               :disabled="!isLoadManual()"
-                                               :class="{ 'disabled': !isLoadManual() }"
+                                               :disabled="isSiteSimulating()"
+                                               :class="{ 'disabled': isSiteSimulating() }"
                                                @input="onHomePhaseInput('l1', $event.target.value)">
                                         <span class="phase-load-value" x-text="formatLoadPower(homeLoads.l1)"></span>
                                     </div>
-                                    <div class="phase-load-row compact">
+                                    <div class="phase-load-row compact with-link">
                                         <span class="phase-load-label">L2</span>
+                                        <button class="link-toggle micro"
+                                                :class="{ 'linked': homeLoadLinked }"
+                                                :disabled="isSiteSimulating()"
+                                                @click.stop="toggleHomeLoadLinked()"
+                                                :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
+                                            <svg x-show="homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                            </svg>
+                                            <svg x-show="!homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/>
+                                                <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 0 0 0 6.95 0l1.71-1.71"/>
+                                                <line x1="8" y1="2" x2="8" y2="5"/>
+                                                <line x1="2" y1="8" x2="5" y2="8"/>
+                                                <line x1="16" y1="19" x2="16" y2="22"/>
+                                                <line x1="19" y1="16" x2="22" y2="16"/>
+                                            </svg>
+                                        </button>
                                         <input type="range" class="phase-load-slider"
                                                min="0" max="5000" step="50"
                                                :value="homeLoads.l2"
-                                               :disabled="!isLoadManual()"
-                                               :class="{ 'disabled': !isLoadManual() }"
+                                               :disabled="isSiteSimulating()"
+                                               :class="{ 'disabled': isSiteSimulating() }"
                                                @input="onHomePhaseInput('l2', $event.target.value)">
                                         <span class="phase-load-value" x-text="formatLoadPower(homeLoads.l2)"></span>
                                     </div>
-                                    <div class="phase-load-row compact">
+                                    <div class="phase-load-row compact with-link">
                                         <span class="phase-load-label">L3</span>
+                                        <button class="link-toggle micro"
+                                                :class="{ 'linked': homeLoadLinked }"
+                                                :disabled="isSiteSimulating()"
+                                                @click.stop="toggleHomeLoadLinked()"
+                                                :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
+                                            <svg x-show="homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                            </svg>
+                                            <svg x-show="!homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 0 0 0-6.95 0l-1.72 1.71"/>
+                                                <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 0 0 0 6.95 0l1.71-1.71"/>
+                                                <line x1="8" y1="2" x2="8" y2="5"/>
+                                                <line x1="2" y1="8" x2="5" y2="8"/>
+                                                <line x1="16" y1="19" x2="16" y2="22"/>
+                                                <line x1="19" y1="16" x2="22" y2="16"/>
+                                            </svg>
+                                        </button>
                                         <input type="range" class="phase-load-slider"
                                                min="0" max="5000" step="50"
                                                :value="homeLoads.l3"
-                                               :disabled="!isLoadManual()"
-                                               :class="{ 'disabled': !isLoadManual() }"
+                                               :disabled="isSiteSimulating()"
+                                               :class="{ 'disabled': isSiteSimulating() }"
                                                @input="onHomePhaseInput('l3', $event.target.value)">
                                         <span class="phase-load-value" x-text="formatLoadPower(homeLoads.l3)"></span>
                                     </div>
@@ -647,15 +679,8 @@
                             </div>
 
                             <div class="member-footer">
-                                <template x-if="!isLoadManual()">
-                                    <span class="load-scenario-indicator">
-                                        <span x-text="getLoadScenarioIcon(homeLoadScenario)"></span>
-                                        <span x-text="getLoadScenarioName(homeLoadScenario)"></span>
-                                    </span>
-                                </template>
-                                <template x-if="isLoadManual()">
-                                    <span class="status-text">Manual</span>
-                                </template>
+                                <span class="status-indicator" :class="isSiteSimulating() ? 'simulating' : 'running'"></span>
+                                <span class="status-text" x-text="isSiteSimulating() ? 'Simulating' : 'Online'"></span>
                             </div>
                         </div>
 
@@ -683,6 +708,16 @@
                                           x-text="formatInverterPvPower(inv)"></span>
                                 </div>
                                 <div class="member-controls">
+                                    <div class="member-control-row load-profile-row">
+                                        <span class="control-label">Profile</span>
+                                        <select class="site-load-select member-load-select"
+                                                @change="setInverterScenario(inv.id, $event.target.value)"
+                                                :value="getInverterScenario(inv)">
+                                            <template x-for="s in pvScenarios" :key="s.value">
+                                                <option :value="s.value" x-text="s.label"></option>
+                                            </template>
+                                        </select>
+                                    </div>
                                     <div class="member-control-row">
                                         <span class="control-label">Power</span>
                                         <div class="mini-slider-container">
@@ -746,8 +781,8 @@
                                             <input type="range" class="mini-slider battery-power"
                                                    min="-5000" max="5000" step="100"
                                                    :value="getInverterBatterySliderValue(inv)"
-                                                   :disabled="isSiteSimulating() || !inv.running"
-                                                   :class="{ 'disabled': isSiteSimulating() || !inv.running }"
+                                                   :disabled="!inv.running"
+                                                   :class="{ 'disabled': !inv.running }"
                                                    @change="setInverterBatteryPower(inv.id, parseInt($event.target.value))">
                                         </div>
                                         <span class="control-value" :class="getInverterBatteryPowerClass(inv)"
@@ -755,13 +790,8 @@
                                     </div>
                                 </div>
                                 <div class="member-footer">
-                                    <template x-if="isSiteSimulating()">
-                                        <span class="status-indicator simulating"></span>
-                                    </template>
-                                    <template x-if="!isSiteSimulating()">
-                                        <span class="status-indicator" :class="inv.running ? 'running' : ''"></span>
-                                    </template>
-                                    <span class="status-text" x-text="isSiteSimulating() ? 'Simulating' : (inv.running ? 'Online' : 'Offline')"></span>
+                                    <span class="status-indicator" :class="inv.running ? 'running' : ''"></span>
+                                    <span class="status-text" x-text="inv.running ? 'Online' : 'Offline'"></span>
                                 </div>
                             </div>
                         </template>
@@ -1625,6 +1655,17 @@
                                             <span class="control-value" :class="getBatteryPowerClass()"
                                                   x-text="formatBatteryPower()"></span>
                                         </div>
+                                        <div class="control-row">
+                                            <span class="control-label">Capacity</span>
+                                            <div class="slider-container">
+                                                <input type="range" class="default-slider capacity-slider"
+                                                       min="2" max="300" step="1"
+                                                       :value="batteryCapacityKWh"
+                                                       @input="onBatteryCapacityInput($event.target.value)"
+                                                       @change="onBatteryCapacityChange($event.target.value)">
+                                            </div>
+                                            <span class="control-value" x-text="`${batteryCapacityKWh.toFixed(0)} kWh`"></span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1872,6 +1913,12 @@
                             class="btn btn-secondary">
                         Close
                     </button>
+                    <button @click="$store.app.restartApp()"
+                            x-show="$store.app.updateSuccess"
+                            :disabled="$store.app.updateApplying"
+                            class="btn btn-primary">
+                        Restart Now
+                    </button>
                     <button @click="$store.app.checkForUpdate()"
                             x-show="!$store.app.updateChecking && !$store.app.updateApplying"
                             class="btn btn-secondary">
@@ -1982,6 +2029,23 @@
                                 </div>
                                 <div style="color: var(--text-muted); font-size: 0.7rem; margin-top: 0.5rem;">
                                     Offsets only affect displayed ports (useful for external port mappings)
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 0.75rem; padding: 1rem; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                                <h4 style="margin: 0 0 0.75rem 0; color: var(--text-primary); font-size: 0.9rem;">Simulation</h4>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <label style="color: var(--text-secondary); font-size: 0.875rem;">Site Tick (ms)</label>
+                                    <input type="number"
+                                           x-model.number="siteTickMs"
+                                           min="50"
+                                           max="5000"
+                                           step="10"
+                                           :disabled="saving"
+                                           style="width: 100px; padding: 0.4rem 0.5rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 0.875rem; text-align: right;">
+                                </div>
+                                <div style="color: var(--text-muted); font-size: 0.7rem;">
+                                    Controls aggregation and site simulation update frequency
                                 </div>
                             </div>
                         </div>

@@ -300,6 +300,14 @@ const api = {
         return resp.json();
     },
 
+    async restartApp() {
+        if (isWails) {
+            return await window.go.main.App.RestartApp();
+        }
+        const resp = await fetch('/api/restart', { method: 'POST' });
+        return resp.json();
+    },
+
     async getWarnings() {
         if (isWails) {
             return await window.go.main.App.GetWarnings();
@@ -335,7 +343,8 @@ const api = {
             ocppBasePort: 9000,
             modbusDisplayOffset: 0,
             mqttDisplayOffset: 10000,
-            ocppDisplayOffset: 0
+            ocppDisplayOffset: 0,
+            siteTickMs: 500
         };
     },
 
@@ -752,6 +761,7 @@ const storage = {
                     slaveId: sim.slave_id || 1,
                     port: sim.port,
                     profile: sim.profile || null,
+                    batteryCapacityKwh: sim.battery_capacity_kwh,
                     automation: { wasRunning: sim.running || false, timeMultiplier: 1, scenario: 'sunny' },
                     createdAt: new Date().toISOString(),
                     lastModified: new Date().toISOString()
@@ -759,6 +769,9 @@ const storage = {
             } else {
                 const existing = savedBySerial.get(sim.serial);
                 existing.port = sim.port;
+                if (sim.battery_capacity_kwh !== undefined) {
+                    existing.batteryCapacityKwh = sim.battery_capacity_kwh;
+                }
             }
         }
 
@@ -1307,6 +1320,18 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        async restartApp() {
+            try {
+                await api.restartApp();
+            } catch (e) {
+                console.error('Restart failed:', e);
+                await Alpine.store('confirm').alert(
+                    'Error',
+                    'Failed to restart the application.'
+                );
+            }
+        },
+
         async loadWarnings() {
             try {
                 const data = await api.getWarnings();
@@ -1448,7 +1473,13 @@ document.addEventListener('alpine:init', () => {
                 if (updates.serial) storageUpdates.serial = updates.serial;
                 if (updates.slave_id) storageUpdates.slaveId = updates.slave_id;
                 if (updates.ocpp_url !== undefined) storageUpdates.ocppUrl = updates.ocpp_url;
+                if (updates.battery_capacity_kwh !== undefined) {
+                    storageUpdates.batteryCapacityKwh = updates.battery_capacity_kwh;
+                }
                 storage.updateConfig(app.selectedSerial, storageUpdates);
+                if (updates.battery_capacity_kwh !== undefined && this.data) {
+                    this.data.battery_capacity_kwh = updates.battery_capacity_kwh;
+                }
                 await app.loadSimulators();
             } catch (e) {
                 console.error('Update config error:', e);
@@ -2015,6 +2046,11 @@ document.addEventListener('alpine:init', () => {
         // Set weather scenario
         async setScenario(scenario) {
             await this.updateSimulationConfig({ scenario: scenario });
+        },
+
+        // Reset site clock to a specific epoch (ms)
+        async resetClock(epochMs) {
+            await this.updateSimulationConfig({ clock_ms: epochMs });
         },
 
         // Toggle a device's power state (on/off within the site)

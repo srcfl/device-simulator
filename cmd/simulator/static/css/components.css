@@ -794,6 +794,7 @@
     gap: var(--spacing-xs);
     padding-top: var(--spacing-sm);
     border-top: 1px solid var(--border-color);
+    margin-top: auto;
 }
 
 .status-indicator {
@@ -2232,24 +2233,110 @@
 .site-simulation-controls {
     background: rgba(15, 52, 96, 0.5);
     border-bottom: 1px solid var(--border-color);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-xs);
+    gap: 8px;
 }
 
 .sim-control-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 8px;
 }
 
-.sim-control-title {
-    font-size: var(--font-size-xs);
-    font-weight: 600;
+.sim-clock {
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.sim-clock-time {
+    font-size: 0.95rem;
+    color: var(--color-primary);
+    font-family: var(--font-mono);
+    letter-spacing: 0.4px;
+}
+
+.sim-clock-date {
+    font-size: 0.65rem;
     color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+}
+
+.sim-control-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sim-speed {
+    position: relative;
+}
+
+.sim-speed-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.sim-speed-btn:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+
+.sim-speed-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    min-width: 96px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 10;
+}
+
+.sim-speed-option {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.sim-speed-option:hover {
+    border-color: var(--color-primary);
+    color: var(--text-primary);
+}
+
+.sim-speed-option.active {
+    background: rgba(var(--color-primary-rgb), 0.15);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
 }
 
 .sim-play-btn {
@@ -2279,24 +2366,39 @@
     background: #cc8a00;
 }
 
-.sim-control-time {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    background: rgba(0, 0, 0, 0.2);
-    padding: var(--spacing-xs) var(--spacing-sm);
+.sim-reset-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 2px 6px;
     border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
 }
 
-.sim-time-label {
-    font-size: var(--font-size-xs);
-    color: var(--text-muted);
+.sim-reset-btn:hover {
+    border-color: var(--color-primary);
+    color: var(--text-primary);
 }
 
-.sim-time-value {
-    font-size: var(--font-size-sm);
-    color: var(--color-primary);
-    font-family: monospace;
+.sim-reset-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.sim-control-header.compact .sim-play-btn {
+    width: 28px;
+    height: 28px;
+}
+
+.sim-control-row.compact {
+    gap: 0;
+}
+
+.sim-control-select.compact {
+    font-size: 0.7rem;
+    padding: 4px 6px;
 }
 
 .sim-control-row {
@@ -2760,6 +2862,17 @@
     height: 14px;
 }
 
+.link-toggle.micro {
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-sm);
+}
+
+.link-toggle.micro svg {
+    width: 12px;
+    height: 12px;
+}
+
 .link-toggle:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -2789,6 +2902,11 @@
 .phase-load-row.compact {
     grid-template-columns: 26px 1fr 70px;
     margin-bottom: var(--spacing-xs);
+}
+
+.phase-load-row.compact.with-link {
+    grid-template-columns: 26px 20px 1fr 70px;
+    gap: var(--spacing-sm);
 }
 
 .phase-load-label {

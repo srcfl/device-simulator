@@ -805,6 +805,14 @@ document.addEventListener('alpine:init', () => {
         homeLoadScenario: '',
         homeLoadLoading: false,
         homeLoadDebounce: null,
+        pvScenarios: [
+            { value: 'sunny', label: '☀️ Sunny' },
+            { value: 'cloudy', label: '⛅ Cloudy' },
+            { value: 'overcast', label: '☁️ Overcast' },
+            { value: 'rainy', label: '🌧️ Rainy' },
+            { value: 'night', label: '🌙 Night' },
+            { value: 'peak_load', label: '⚡ Peak Load' }
+        ],
 
         init() {
             // Watch for simulator changes to trigger reactivity
@@ -864,6 +872,11 @@ document.addEventListener('alpine:init', () => {
         async loadHomeLoadScenarios() {
             try {
                 this.loadScenarios = await siteApi.getLoadScenarios();
+                this.syncHomeLoadFromSite();
+                const current = Alpine.store('site').data?.load_scenario;
+                if (Alpine.store('site').data && !current && this.loadScenarios.length > 0) {
+                    await this.setHomeLoadScenario(this.loadScenarios[0].key);
+                }
             } catch (e) {
                 console.error('Failed to load home load scenarios:', e);
             }
@@ -876,7 +889,11 @@ document.addEventListener('alpine:init', () => {
             this.homeLoadScenario = data.load_scenario || '';
             this.homeLoadLinked = data.load_linked ?? true;
 
-            const shouldSyncLoads = !this.homeLoadLoading || !this.isLoadManual();
+            if (!this.homeLoadScenario && this.loadScenarios.length > 0 && !this.homeLoadLoading) {
+                this.setHomeLoadScenario(this.loadScenarios[0].key);
+            }
+
+            const shouldSyncLoads = !this.homeLoadLoading || this.isSiteSimulating();
             if (shouldSyncLoads) {
                 const loads = data.phase_loads || { l1: 0, l2: 0, l3: 0 };
                 this.homeLoads = {
@@ -887,17 +904,13 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        isLoadManual() {
-            return this.homeLoadScenario === '';
-        },
-
         getHomeLoadTotal() {
             return this.homeLoads.l1 + this.homeLoads.l2 + this.homeLoads.l3;
         },
 
         // Get load scenario name from key
         getLoadScenarioName(key) {
-            if (!key) return 'Manual';
+            if (!key) return 'Profile';
             const scenario = this.loadScenarios.find(s => s.key === key);
             if (scenario) return scenario.name;
             const fallbackNames = {
@@ -943,13 +956,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         toggleHomeLoadLinked() {
-            if (!this.isLoadManual()) return;
+            if (this.isSiteSimulating()) return;
             this.homeLoadLinked = !this.homeLoadLinked;
             this.sendHomePhaseLoads();
         },
 
         onHomePhaseInput(phase, value) {
-            if (!this.isLoadManual()) return;
+            if (this.isSiteSimulating()) return;
             const newValue = parseFloat(value);
 
             if (this.homeLoadLinked) {
@@ -985,6 +998,20 @@ document.addEventListener('alpine:init', () => {
                 );
             } catch (e) {
                 console.error('Failed to set home phase loads:', e);
+            }
+        },
+
+        getInverterScenario(inv) {
+            return inv?.scenario || 'sunny';
+        },
+
+        async setInverterScenario(simId, value) {
+            const next = value || 'sunny';
+            try {
+                await api.updateAutomationConfig(simId, { scenario: next });
+                await Alpine.store('app').loadSimulators();
+            } catch (e) {
+                console.error('Failed to set PV scenario:', e);
             }
         },
 
@@ -1232,9 +1259,19 @@ document.addEventListener('alpine:init', () => {
     // Site Simulation Controls (sidebar)
     Alpine.data('siteSimulationControls', () => ({
         localTimeMultiplier: 1,
-        localScenario: 'sunny',
         changingTimeMultiplier: false,
-        changingScenario: false,
+        resettingClock: false,
+        speedOpen: false,
+        speedOptions: [
+            { value: 1, label: '1x' },
+            { value: 10, label: '10x' },
+            { value: 60, label: '60x' },
+            { value: 360, label: '360x' },
+            { value: 720, label: '720x' },
+            { value: 1440, label: '1440x' },
+            { value: 3600, label: '3600x' },
+            { value: 7200, label: '7200x' }
+        ],
         lastSiteId: null,
 
         init() {
@@ -1246,7 +1283,6 @@ document.addEventListener('alpine:init', () => {
                 if (this.lastSiteId !== currentSiteId) {
                     this.lastSiteId = currentSiteId;
                     this.changingTimeMultiplier = false;
-                    this.changingScenario = false;
                     this.syncFromStore(true);
                     return;
                 }
@@ -1261,9 +1297,6 @@ document.addEventListener('alpine:init', () => {
 
             if (force || !this.changingTimeMultiplier) {
                 this.localTimeMultiplier = data.time_multiplier || 1;
-            }
-            if (force || !this.changingScenario) {
-                this.localScenario = data.scenario || 'sunny';
             }
         },
 
@@ -1281,17 +1314,48 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async onScenarioChange(value) {
-            const next = value || 'sunny';
-            const current = Alpine.store('site').data?.scenario || 'sunny';
-            if (next === current) return;
+        get speedLabel() {
+            const match = this.speedOptions.find(opt => opt.value === this.localTimeMultiplier);
+            return match ? match.label : `${this.localTimeMultiplier}x`;
+        },
 
-            this.changingScenario = true;
-            this.localScenario = next;
+        async selectSpeed(value) {
+            this.speedOpen = false;
+            await this.onTimeMultiplierChange(value);
+        },
+
+        get clockValue() {
+            return Alpine.store('site').data?.simulated_time || 'Not started';
+        },
+
+        get clockTime() {
+            const parts = this.parseClockParts(this.clockValue);
+            return parts.time;
+        },
+
+        get clockDate() {
+            const parts = this.parseClockParts(this.clockValue);
+            return parts.date;
+        },
+
+        parseClockParts(value) {
+            if (!value || value === 'Not started') {
+                return { time: '--:--:--', date: '---- -- --' };
+            }
+            const parts = value.split(' ');
+            return {
+                date: parts[0] || '---- -- --',
+                time: parts[1] || '--:--:--'
+            };
+        },
+
+        async resetClock() {
+            if (this.resettingClock) return;
+            this.resettingClock = true;
             try {
-                await Alpine.store('site').setScenario(next);
+                await Alpine.store('site').resetClock(Date.now());
             } finally {
-                this.changingScenario = false;
+                this.resettingClock = false;
             }
         }
     }));
@@ -1722,6 +1786,7 @@ document.addEventListener('alpine:init', () => {
         batterySoc: 0,
         batteryPower: 0,
         meterPower: 0,
+        batteryCapacityKWh: 10,
 
         // Max values for sliders
         maxPvPower: 10000,
@@ -1740,6 +1805,7 @@ document.addEventListener('alpine:init', () => {
         init() {
             // Initial sync from registers
             this.syncFromRegisters();
+            this.syncFromConfig();
             this.lastSimulatorId = Alpine.store('simulator').id;
 
             // Watch for register changes
@@ -1750,11 +1816,16 @@ document.addEventListener('alpine:init', () => {
                 }
             });
 
+            this.$watch('$store.simulator.data', () => {
+                this.syncFromConfig();
+            });
+
             // Watch for simulator changes
             this.$watch('$store.simulator.id', (newId) => {
                 if (newId !== this.lastSimulatorId) {
                     this.lastSimulatorId = newId;
                     this.syncFromRegisters();
+                    this.syncFromConfig();
                 }
             });
         },
@@ -1784,6 +1855,15 @@ document.addEventListener('alpine:init', () => {
             // Meter Power (address 5599, I32 Little Endian)
             const meterReg = regs.find(r => r.address === 5599);
             if (meterReg) this.meterPower = meterReg.value || 0;
+        },
+
+        syncFromConfig() {
+            const data = Alpine.store('simulator').data;
+            if (!data) return;
+            const capacity = data.battery_capacity_kwh;
+            if (typeof capacity === 'number' && capacity > 0) {
+                this.batteryCapacityKWh = capacity;
+            }
         },
 
         get isSimulationRunning() {
@@ -1850,6 +1930,23 @@ document.addEventListener('alpine:init', () => {
             await api.writeRegister(simId, 13050, cmd);
 
             await Alpine.store('simulator').loadRegisters();
+        },
+
+        onBatteryCapacityInput(value) {
+            const parsed = parseFloat(value);
+            if (Number.isFinite(parsed)) {
+                this.batteryCapacityKWh = parsed;
+            }
+        },
+
+        async onBatteryCapacityChange(value) {
+            const parsed = parseFloat(value);
+            if (!Number.isFinite(parsed) || parsed < 2 || parsed > 300) {
+                this.syncFromConfig();
+                return;
+            }
+            this.batteryCapacityKWh = parsed;
+            await Alpine.store('simulator').updateConfig({ battery_capacity_kwh: parsed });
         },
 
         // Dialog handlers
@@ -2078,6 +2175,13 @@ document.addEventListener('alpine:init', () => {
                     };
                 }
             }
+            if (data.fuse_blown) {
+                this.fuseBlown = {
+                    l1: !!data.fuse_blown.l1,
+                    l2: !!data.fuse_blown.l2,
+                    l3: !!data.fuse_blown.l3
+                };
+            }
         },
 
         openSettingsModal() {
@@ -2157,6 +2261,7 @@ document.addEventListener('alpine:init', () => {
         toggleFuse(phase) {
             this.fuseBlown[phase] = !this.fuseBlown[phase];
             this.saveFuseState();
+            Alpine.store('site').updateConfig({ fuse_blown: this.fuseBlown });
         },
 
         // Non-linear scale: 0-fuseSize = 70% of bar, fuseSize to 3*fuseSize = remaining 30%
@@ -2284,6 +2389,7 @@ document.addEventListener('alpine:init', () => {
         mqttBasePort: 1883,
         ocppBasePort: 9000,
         modbusDisplayOffset: 0,
+        siteTickMs: 500,
         originalMqttBasePort: 1883,
         originalModbusBasePort: 5000,
         originalOcppBasePort: 9000,
@@ -2292,6 +2398,7 @@ document.addEventListener('alpine:init', () => {
         ocppDisplayOffset: 0,
         originalMqttDisplayOffset: 0,
         originalOcppDisplayOffset: 0,
+        originalSiteTickMs: 500,
         saving: false,
         needsRestart: false,
         loaded: false,
@@ -2302,7 +2409,8 @@ document.addEventListener('alpine:init', () => {
                 this.ocppBasePort !== this.originalOcppBasePort ||
                 this.modbusDisplayOffset !== this.originalModbusDisplayOffset ||
                 this.mqttDisplayOffset !== this.originalMqttDisplayOffset ||
-                this.ocppDisplayOffset !== this.originalOcppDisplayOffset;
+                this.ocppDisplayOffset !== this.originalOcppDisplayOffset ||
+                this.siteTickMs !== this.originalSiteTickMs;
         },
 
         get isDockerMode() {
@@ -2330,12 +2438,14 @@ document.addEventListener('alpine:init', () => {
                 this.modbusDisplayOffset = settings.modbusDisplayOffset || 0;
                 this.mqttDisplayOffset = settings.mqttDisplayOffset || 0;
                 this.ocppDisplayOffset = settings.ocppDisplayOffset || 0;
+                this.siteTickMs = settings.siteTickMs || 500;
                 this.originalModbusBasePort = this.modbusBasePort;
                 this.originalMqttBasePort = this.mqttBasePort;
                 this.originalOcppBasePort = this.ocppBasePort;
                 this.originalModbusDisplayOffset = this.modbusDisplayOffset;
                 this.originalMqttDisplayOffset = this.mqttDisplayOffset;
                 this.originalOcppDisplayOffset = this.ocppDisplayOffset;
+                this.originalSiteTickMs = this.siteTickMs;
                 this.loaded = true;
             } catch (e) {
                 console.error('Failed to load settings:', e);
@@ -2352,7 +2462,8 @@ document.addEventListener('alpine:init', () => {
                     ocppBasePort: this.ocppBasePort,
                     modbusDisplayOffset: this.modbusDisplayOffset,
                     mqttDisplayOffset: this.mqttDisplayOffset,
-                    ocppDisplayOffset: this.ocppDisplayOffset
+                    ocppDisplayOffset: this.ocppDisplayOffset,
+                    siteTickMs: this.siteTickMs
                 });
                 this.originalModbusBasePort = this.modbusBasePort;
                 this.originalMqttBasePort = this.mqttBasePort;
@@ -2360,6 +2471,7 @@ document.addEventListener('alpine:init', () => {
                 this.originalModbusDisplayOffset = this.modbusDisplayOffset;
                 this.originalMqttDisplayOffset = this.mqttDisplayOffset;
                 this.originalOcppDisplayOffset = this.ocppDisplayOffset;
+                this.originalSiteTickMs = this.siteTickMs;
                 this.needsRestart = true;
             } catch (e) {
                 console.error('Failed to save settings:', e);
@@ -2378,6 +2490,7 @@ document.addEventListener('alpine:init', () => {
             this.modbusDisplayOffset = this.originalModbusDisplayOffset;
             this.mqttDisplayOffset = this.originalMqttDisplayOffset;
             this.ocppDisplayOffset = this.originalOcppDisplayOffset;
+            this.siteTickMs = this.originalSiteTickMs;
         }
     }));
 
@@ -2394,6 +2507,10 @@ document.addEventListener('alpine:init', () => {
             // Load scenarios
             try {
                 this.scenarios = await siteApi.getLoadScenarios();
+                const current = Alpine.store('site').data?.load_scenario;
+                if (Alpine.store('site').data && !current && this.scenarios.length > 0) {
+                    await this.onScenarioChange(this.scenarios[0].key);
+                }
             } catch (e) {
                 console.error('Failed to load scenarios:', e);
             }
@@ -2414,25 +2531,29 @@ document.addEventListener('alpine:init', () => {
             this.activeScenario = data.load_scenario || '';
             this.loadLinked = data.load_linked ?? true;
 
+            if (!this.activeScenario && this.scenarios.length > 0 && !this.loading) {
+                this.onScenarioChange(this.scenarios[0].key);
+            }
+
             // Only sync loads if not currently dragging a slider
-            if (!this.loading) {
+            if (!this.loading || this.isSimulationRunning()) {
                 const loads = data.phase_loads || { l1: 333, l2: 333, l3: 334 };
                 this.localLoads = { l1: loads.l1, l2: loads.l2, l3: loads.l3 };
             }
         },
 
-        isManualMode() {
-            return this.activeScenario === '';
+        isSimulationRunning() {
+            return Alpine.store('site').data?.sim_running || false;
         },
 
         getScenarioName() {
-            if (!this.activeScenario) return 'Manual';
+            if (!this.activeScenario) return 'Profile';
             const s = this.scenarios.find(s => s.key === this.activeScenario);
             return s ? s.name : this.activeScenario;
         },
 
         getScenarioDescription() {
-            if (!this.activeScenario) return 'Adjust phase loads manually';
+            if (!this.activeScenario) return '';
             const s = this.scenarios.find(s => s.key === this.activeScenario);
             return s ? s.description : '';
         },
@@ -2464,6 +2585,10 @@ document.addEventListener('alpine:init', () => {
             this.activeScenario = scenario;
             try {
                 const siteId = Alpine.store('site').selectedId;
+                if (!siteId) {
+                    this.loading = false;
+                    return;
+                }
                 const result = await siteApi.setSiteLoadScenario(siteId, scenario);
                 if (result && result.phase_loads) {
                     this.localLoads = {
@@ -2479,11 +2604,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         toggleLinked() {
+            if (this.isSimulationRunning()) return;
             this.loadLinked = !this.loadLinked;
             this.sendPhaseLoads();
         },
 
         onPhaseSliderInput(phase, value) {
+            if (this.isSimulationRunning()) return;
             const newValue = parseFloat(value);
 
             if (this.loadLinked) {

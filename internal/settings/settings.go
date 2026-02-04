@@ -15,6 +15,7 @@ type AppSettings struct {
 	ModbusDisplayOffset int `json:"modbusDisplayOffset"`
 	MQTTDisplayOffset   int `json:"mqttDisplayOffset"`
 	OCPPDisplayOffset   int `json:"ocppDisplayOffset"`
+	SiteTickMs          int `json:"siteTickMs"`
 }
 
 // DefaultSettings returns settings with default values
@@ -26,6 +27,7 @@ func DefaultSettings() *AppSettings {
 		ModbusDisplayOffset: 0,
 		MQTTDisplayOffset:   0,
 		OCPPDisplayOffset:   0,
+		SiteTickMs:          500,
 	}
 }
 

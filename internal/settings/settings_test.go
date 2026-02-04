@@ -22,6 +22,9 @@ func TestDefaultSettings(t *testing.T) {
 	if s.MQTTDisplayOffset != 0 {
 		t.Errorf("Expected default MQTTDisplayOffset 0, got %d", s.MQTTDisplayOffset)
 	}
+	if s.SiteTickMs != 500 {
+		t.Errorf("Expected default SiteTickMs 500, got %d", s.SiteTickMs)
+	}
 }
 
 func TestLoadFromNonExistentFile(t *testing.T) {
@@ -61,6 +64,7 @@ func TestSaveAndLoad(t *testing.T) {
 		ModbusDisplayOffset: 0,
 		MQTTDisplayOffset:   10000,
 		OCPPDisplayOffset:   0,
+		SiteTickMs:          250,
 	}
 
 	err = SaveTo(original, path)
@@ -87,6 +91,9 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if loaded.MQTTDisplayOffset != original.MQTTDisplayOffset {
 		t.Errorf("Expected MQTTDisplayOffset %d, got %d", original.MQTTDisplayOffset, loaded.MQTTDisplayOffset)
+	}
+	if loaded.SiteTickMs != original.SiteTickMs {
+		t.Errorf("Expected SiteTickMs %d, got %d", original.SiteTickMs, loaded.SiteTickMs)
 	}
 }
 

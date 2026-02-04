@@ -17,18 +17,19 @@ type AutomationState struct {
 }
 
 type SimulatorState struct {
-	ID         int             `json:"id"`
-	Serial     string          `json:"serial"`
-	Protocol   string          `json:"protocol"`
-	Category   string          `json:"category"`
-	SlaveID    uint8           `json:"slave_id"`
-	Port       int             `json:"port"`
-	Running    bool            `json:"running"`
-	SiteID     int             `json:"site_id"`
-	DeviceOn   bool            `json:"device_on"`
-	Profile    string          `json:"profile"`
-	OCPPURL    string          `json:"ocpp_url"`
-	Automation AutomationState `json:"automation"`
+	ID                 int             `json:"id"`
+	Serial             string          `json:"serial"`
+	Protocol           string          `json:"protocol"`
+	Category           string          `json:"category"`
+	SlaveID            uint8           `json:"slave_id"`
+	Port               int             `json:"port"`
+	Running            bool            `json:"running"`
+	SiteID             int             `json:"site_id"`
+	DeviceOn           bool            `json:"device_on"`
+	BatteryCapacityKWh float64         `json:"battery_capacity_kwh"`
+	Profile            string          `json:"profile"`
+	OCPPURL            string          `json:"ocpp_url"`
+	Automation         AutomationState `json:"automation"`
 }
 
 type PhaseFactors struct {
@@ -43,6 +44,12 @@ type PhaseLoads struct {
 	L3 float64 `json:"l3"`
 }
 
+type PhaseFuses struct {
+	L1 bool `json:"l1"`
+	L2 bool `json:"l2"`
+	L3 bool `json:"l3"`
+}
+
 type SiteState struct {
 	ID             int          `json:"id"`
 	Name           string       `json:"name"`
@@ -53,6 +60,7 @@ type SiteState struct {
 	Enabled        bool         `json:"enabled"`
 	FuseSize       int          `json:"fuse_size"`
 	PhaseFactors   PhaseFactors `json:"phase_factors"`
+	FuseBlown      PhaseFuses   `json:"fuse_blown"`
 	BoundMeter     bool         `json:"bound_meter"`
 	SimulatedTime  string       `json:"simulated_time"`
 	TimeMultiplier float64      `json:"time_multiplier"`

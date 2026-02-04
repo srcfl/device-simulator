@@ -38,22 +38,23 @@ var embeddedFS embed.FS
 
 // Simulator represents a single simulator instance
 type Simulator struct {
-	ID              int                 `json:"id"`
-	Serial          string              `json:"serial"`
-	Protocol        string              `json:"protocol"`
-	Category        string              `json:"category"`
-	SlaveID         uint8               `json:"slave_id,omitempty"`
-	Port            int                 `json:"port"`
-	Running         bool                `json:"running"`
-	SiteID          int                 `json:"site_id"`   // Which site this simulator belongs to (0 = orphan)
-	DeviceOn        bool                `json:"device_on"` // Whether device is contributing power (can be off but still on site)
-	Server          *modbus.Server      `json:"-"`
-	MQTTServer      *mqtt.Server        `json:"-"`
-	OCPPServer      *ocpp.Server        `json:"-"`
-	Device          device.DeviceServer `json:"-"`
-	ProfilesManager *profiles.Manager   `json:"-"`
-	Automation      *AutomationState    `json:"-"` // Legacy - will be removed once migration complete
-	mu              sync.RWMutex
+	ID                 int                 `json:"id"`
+	Serial             string              `json:"serial"`
+	Protocol           string              `json:"protocol"`
+	Category           string              `json:"category"`
+	SlaveID            uint8               `json:"slave_id,omitempty"`
+	Port               int                 `json:"port"`
+	Running            bool                `json:"running"`
+	SiteID             int                 `json:"site_id"`   // Which site this simulator belongs to (0 = orphan)
+	DeviceOn           bool                `json:"device_on"` // Whether device is contributing power (can be off but still on site)
+	BatteryCapacityKWh float64             `json:"battery_capacity_kwh"`
+	Server             *modbus.Server      `json:"-"`
+	MQTTServer         *mqtt.Server        `json:"-"`
+	OCPPServer         *ocpp.Server        `json:"-"`
+	Device             device.DeviceServer `json:"-"`
+	ProfilesManager    *profiles.Manager   `json:"-"`
+	Automation         *AutomationState    `json:"-"` // Legacy - will be removed once migration complete
+	mu                 sync.RWMutex
 }
 
 // AutomationState holds automation config
@@ -71,9 +72,14 @@ type AutomationState struct {
 type P1UpdateMode string
 
 const (
-	P1ModeDirect P1UpdateMode = "direct" // Updates every 500ms (default)
+	P1ModeDirect P1UpdateMode = "direct" // Updates every site tick (default 500ms)
 	P1Mode1s     P1UpdateMode = "1s"     // Updates every 1 second with averaging
 	P1Mode10s    P1UpdateMode = "10s"    // Updates every 10 seconds with averaging
+)
+
+const (
+	defaultBatteryCapacityKWh = 10.0
+	defaultLoadScenarioKey    = "gaming_family"
 )
 
 // PhasePowers represents power values per phase
@@ -108,6 +114,13 @@ type PhaseCurrents struct {
 	L3 float64 `json:"l3"` // Phase 3 current in Amps
 }
 
+// PhaseFuses represents whether a phase fuse is blown
+type PhaseFuses struct {
+	L1 bool `json:"l1"`
+	L2 bool `json:"l2"`
+	L3 bool `json:"l3"`
+}
+
 // Site represents a group of simulators with aggregated energy metering
 type Site struct {
 	ID           int               `json:"id"`
@@ -119,6 +132,7 @@ type Site struct {
 	Enabled      bool              `json:"enabled"`       // Aggregation enabled
 	FuseSize     int               `json:"fuse_size"`     // Fuse size in Amps (10, 16, 20, 25, 32)
 	PhaseFactors PhaseFactors      `json:"phase_factors"` // Per-phase load distribution
+	FuseBlown    PhaseFuses        `json:"fuse_blown"`    // Per-phase blown fuse state
 	BoundMeter   bool              `json:"bound_meter"`   // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -130,7 +144,7 @@ type Site struct {
 
 	// Site Load (per-phase load control)
 	SitePhaseLoads PhaseLoads `json:"phase_loads"`   // Per-phase loads in Watts
-	LoadScenario   string     `json:"load_scenario"` // Active load scenario key ("" = manual)
+	LoadScenario   string     `json:"load_scenario"` // Active load scenario key
 	LoadLinked     bool       `json:"load_linked"`   // Whether sliders are linked
 
 	mu          sync.RWMutex
@@ -209,6 +223,7 @@ func main() {
 	modbusDisplayOffset := appSettings.ModbusDisplayOffset
 	mqttDisplayOffset := appSettings.MQTTDisplayOffset
 	ocppDisplayOffset := appSettings.OCPPDisplayOffset
+	siteTickMs := appSettings.SiteTickMs
 
 	if env := os.Getenv("MODBUS_DISPLAY_OFFSET"); env != "" {
 		if n, err := strconv.Atoi(env); err == nil {
@@ -226,6 +241,10 @@ func main() {
 		}
 	}
 
+	if siteTickMs <= 0 {
+		siteTickMs = 500
+	}
+
 	// Cache runtime settings for API/UI
 	runtimeSettings = &settings.AppSettings{
 		ModbusBasePort:      *modbusBasePort,
@@ -234,6 +253,7 @@ func main() {
 		ModbusDisplayOffset: modbusDisplayOffset,
 		MQTTDisplayOffset:   mqttDisplayOffset,
 		OCPPDisplayOffset:   ocppDisplayOffset,
+		SiteTickMs:          siteTickMs,
 	}
 
 	log.Printf("Starting Device Simulator")
@@ -425,14 +445,15 @@ func createSimulator(simType string) (*Simulator, error) {
 	}
 
 	sim := &Simulator{
-		ID:              id,
-		Protocol:        protocol,
-		Category:        category,
-		Port:            port,
-		Running:         false,
-		SiteID:          0,    // Orphan until assigned to a site
-		DeviceOn:        true, // Devices are "on" by default when added to site
-		ProfilesManager: pm,
+		ID:                 id,
+		Protocol:           protocol,
+		Category:           category,
+		Port:               port,
+		Running:            false,
+		SiteID:             0,    // Orphan until assigned to a site
+		DeviceOn:           true, // Devices are "on" by default when added to site
+		BatteryCapacityKWh: defaultBatteryCapacityKWh,
+		ProfilesManager:    pm,
 		Automation: &AutomationState{
 			TimeMultiplier: 1.0,
 			SimulatedTime:  time.Now(),
@@ -621,19 +642,23 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 	}
 
 	sim := &Simulator{
-		ID:              saved.ID,
-		Protocol:        protocol,
-		Category:        category,
-		Port:            port,
-		Running:         false,
-		SiteID:          saved.SiteID,
-		DeviceOn:        saved.DeviceOn,
-		ProfilesManager: pm,
+		ID:                 saved.ID,
+		Protocol:           protocol,
+		Category:           category,
+		Port:               port,
+		Running:            false,
+		SiteID:             saved.SiteID,
+		DeviceOn:           saved.DeviceOn,
+		BatteryCapacityKWh: saved.BatteryCapacityKWh,
+		ProfilesManager:    pm,
 		Automation: &AutomationState{
 			Enabled:        saved.Automation.Enabled,
 			TimeMultiplier: saved.Automation.TimeMultiplier,
 			Scenario:       saved.Automation.Scenario,
 		},
+	}
+	if sim.BatteryCapacityKWh <= 0 {
+		sim.BatteryCapacityKWh = defaultBatteryCapacityKWh
 	}
 	if sim.Automation.TimeMultiplier == 0 {
 		sim.Automation.TimeMultiplier = 1.0
@@ -787,6 +812,12 @@ func restoreSite(saved state.SiteState) (*Site, error) {
 		}
 	}
 
+	fuseBlown := PhaseFuses{
+		L1: saved.FuseBlown.L1,
+		L2: saved.FuseBlown.L2,
+		L3: saved.FuseBlown.L3,
+	}
+
 	site := &Site{
 		ID:             saved.ID,
 		Name:           saved.Name,
@@ -797,6 +828,7 @@ func restoreSite(saved state.SiteState) (*Site, error) {
 		Enabled:        saved.Enabled,
 		FuseSize:       saved.FuseSize,
 		PhaseFactors:   phaseFactors,
+		FuseBlown:      fuseBlown,
 		BoundMeter:     saved.BoundMeter,
 		SimulatedTime:  time.Now(),
 		TimeMultiplier: saved.TimeMultiplier,
@@ -819,6 +851,18 @@ func restoreSite(saved state.SiteState) (*Site, error) {
 	if saved.SimulatedTime != "" {
 		if t, err := time.Parse(time.RFC3339, saved.SimulatedTime); err == nil {
 			site.SimulatedTime = t
+		}
+	}
+	if site.LoadScenario == "" {
+		site.LoadScenario = defaultLoadScenarioKey
+		if ls, ok := LoadScenarios[site.LoadScenario]; ok {
+			hour := site.SimulatedTime.Hour()
+			if site.SimulatedTime.IsZero() {
+				hour = time.Now().Hour()
+			}
+			loads := ls.GetLoadForTime(hour)
+			site.SitePhaseLoads = loads
+			site.BaseLoadW = loads.Total()
 		}
 	}
 
@@ -997,6 +1041,7 @@ func startHTTPServer(port int) {
 	mux.HandleFunc("/api/version", handleVersion)
 	mux.HandleFunc("/api/update/check", handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", handleUpdateApply)
+	mux.HandleFunc("/api/restart", handleRestart)
 	// Settings endpoint
 	mux.HandleFunc("/api/settings", handleSettings)
 	// Warnings endpoint
@@ -1096,6 +1141,7 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			"modbusDisplayOffset": settingsData.ModbusDisplayOffset,
 			"mqttDisplayOffset":   settingsData.MQTTDisplayOffset,
 			"ocppDisplayOffset":   settingsData.OCPPDisplayOffset,
+			"siteTickMs":          settingsData.SiteTickMs,
 		})
 	case http.MethodPost:
 		var payload map[string]interface{}
@@ -1121,6 +1167,13 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if v, ok := payload["ocppDisplayOffset"].(float64); ok {
 			current.OCPPDisplayOffset = int(v)
+		}
+		if v, ok := payload["siteTickMs"].(float64); ok {
+			if int(v) > 0 {
+				current.SiteTickMs = int(v)
+			} else {
+				current.SiteTickMs = 500
+			}
 		}
 		if err := settings.Save(current); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1300,6 +1353,8 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 				entry["load"] = batteryPower
 				entry["meter"] = getRegisterValue(sim.Server, 5599)
 				entry["battery_direction"] = batteryDirection
+				entry["battery_capacity_kwh"] = sim.BatteryCapacityKWh
+				entry["scenario"] = sim.Automation.Scenario
 			}
 		case "mqtt":
 			state := sim.MQTTServer.GetState()
@@ -1447,6 +1502,7 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 	switch sim.Protocol {
 	case "modbus":
 		status["slave_id"] = sim.SlaveID
+		status["battery_capacity_kwh"] = sim.BatteryCapacityKWh
 		status["pv_power"] = getRegisterValue(sim.Server, 5017)
 		status["soc"] = getRegisterValue(sim.Server, 13023)
 		status["load"] = getRegisterValue(sim.Server, 13022)
@@ -1472,9 +1528,10 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 	}
 
 	var config struct {
-		SlaveID *uint8  `json:"slave_id"`
-		Serial  *string `json:"serial"`
-		OCPPURL *string `json:"ocpp_url"`
+		SlaveID            *uint8   `json:"slave_id"`
+		Serial             *string  `json:"serial"`
+		OCPPURL            *string  `json:"ocpp_url"`
+		BatteryCapacityKWh *float64 `json:"battery_capacity_kwh"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -1513,6 +1570,9 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 			sim.OCPPServer.SetOCPPURL(*config.OCPPURL)
 			log.Printf("[%s] OCPP URL set to %s", sim.Serial, *config.OCPPURL)
 		}
+	}
+	if config.BatteryCapacityKWh != nil && *config.BatteryCapacityKWh > 0 {
+		sim.BatteryCapacityKWh = *config.BatteryCapacityKWh
 	}
 	sim.mu.Unlock()
 
@@ -2068,6 +2128,9 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 			"simulator_ids":   site.SimulatorIDs,
 			"base_load_w":     site.BaseLoadW,
 			"enabled":         site.Enabled,
+			"fuse_size":       site.FuseSize,
+			"phase_factors":   site.PhaseFactors,
+			"fuse_blown":      site.FuseBlown,
 			"p1_mode":         string(p1Mode),
 			"bound_meter":     site.BoundMeter,
 			"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
@@ -2217,6 +2280,7 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 		"p1_mode":         string(p1Mode),
 		"fuse_size":       site.FuseSize,
 		"phase_factors":   site.PhaseFactors,
+		"fuse_blown":      site.FuseBlown,
 		"bound_meter":     site.BoundMeter,
 		"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
 		"time_multiplier": site.TimeMultiplier,
@@ -2308,6 +2372,18 @@ func getP1IntervalDuration(mode P1UpdateMode) time.Duration {
 	}
 }
 
+func getSiteTickInterval() time.Duration {
+	settingsData := runtimeSettings
+	if settingsData == nil {
+		settingsData = settings.Load()
+	}
+	tickMs := settingsData.SiteTickMs
+	if tickMs <= 0 {
+		tickMs = 500
+	}
+	return time.Duration(tickMs) * time.Millisecond
+}
+
 // resetEnergy clears the accumulated energy and resets the interval start time
 func (buf *P1IntervalBuffer) resetEnergy() {
 	buf.ImportEnergyDelta = 0
@@ -2326,6 +2402,7 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		BaseLoadW    *float64      `json:"base_load_w"`
 		FuseSize     *int          `json:"fuse_size"`
 		PhaseFactors *PhaseFactors `json:"phase_factors"`
+		FuseBlown    *PhaseFuses   `json:"fuse_blown"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -2372,6 +2449,9 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 			return
 		}
 		site.PhaseFactors = *config.PhaseFactors
+	}
+	if config.FuseBlown != nil {
+		site.FuseBlown = *config.FuseBlown
 	}
 	site.mu.Unlock()
 
@@ -2632,6 +2712,7 @@ func handleSiteSimulationConfig(w http.ResponseWriter, r *http.Request, site *Si
 	var config struct {
 		TimeMultiplier *float64 `json:"time_multiplier"`
 		Scenario       *string  `json:"scenario"`
+		ClockMs        *float64 `json:"clock_ms"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -2645,6 +2726,9 @@ func handleSiteSimulationConfig(w http.ResponseWriter, r *http.Request, site *Si
 	}
 	if config.Scenario != nil && *config.Scenario != "" {
 		site.Scenario = *config.Scenario
+	}
+	if config.ClockMs != nil && *config.ClockMs > 0 {
+		site.SimulatedTime = time.Unix(0, int64(*config.ClockMs)*int64(time.Millisecond)).In(time.Local)
 	}
 	site.mu.Unlock()
 
@@ -2750,14 +2834,14 @@ func handleSiteMeters(w http.ResponseWriter, r *http.Request, site *Site) {
 				return
 			}
 		}
-			site.MeterIDs = append(site.MeterIDs, req.MeterID)
-			site.mu.Unlock()
+		site.MeterIDs = append(site.MeterIDs, req.MeterID)
+		site.mu.Unlock()
 
-			startSiteAggregation(site)
+		startSiteAggregation(site)
 
-			markStateDirty()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "added"})
+		markStateDirty()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "added"})
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2976,9 +3060,6 @@ func handleSitePhaseLoads(w http.ResponseWriter, r *http.Request, site *Site) {
 	}
 
 	site.mu.Lock()
-	// Setting phase loads clears any active scenario (switch to manual)
-	site.LoadScenario = ""
-
 	if req.L1 != nil {
 		site.SitePhaseLoads.L1 = *req.L1
 	}
@@ -3022,7 +3103,7 @@ func handleSiteLoadScenario(w http.ResponseWriter, r *http.Request, site *Site) 
 		return
 	}
 
-	// Empty scenario means manual mode
+	// Allow empty scenario for backward compatibility
 	if req.Scenario != "" {
 		if _, ok := LoadScenarios[req.Scenario]; !ok {
 			http.Error(w, "Unknown load scenario: "+req.Scenario, http.StatusBadRequest)
@@ -3251,16 +3332,17 @@ func buildStateSnapshot() *state.AppState {
 	for _, sim := range sims {
 		sim.mu.RLock()
 		sState := state.SimulatorState{
-			ID:       sim.ID,
-			Serial:   sim.Serial,
-			Protocol: sim.Protocol,
-			Category: sim.Category,
-			SlaveID:  sim.SlaveID,
-			Port:     sim.Port,
-			Running:  sim.Running,
-			SiteID:   sim.SiteID,
-			DeviceOn: sim.DeviceOn,
-			Profile:  sim.ProfilesManager.GetActiveName(),
+			ID:                 sim.ID,
+			Serial:             sim.Serial,
+			Protocol:           sim.Protocol,
+			Category:           sim.Category,
+			SlaveID:            sim.SlaveID,
+			Port:               sim.Port,
+			Running:            sim.Running,
+			SiteID:             sim.SiteID,
+			DeviceOn:           sim.DeviceOn,
+			BatteryCapacityKWh: sim.BatteryCapacityKWh,
+			Profile:            sim.ProfilesManager.GetActiveName(),
 			Automation: state.AutomationState{
 				Enabled:        sim.Automation.Enabled,
 				TimeMultiplier: sim.Automation.TimeMultiplier,
@@ -3296,6 +3378,7 @@ func buildStateSnapshot() *state.AppState {
 			Enabled:        site.Enabled,
 			FuseSize:       site.FuseSize,
 			PhaseFactors:   state.PhaseFactors{L1: site.PhaseFactors.L1, L2: site.PhaseFactors.L2, L3: site.PhaseFactors.L3},
+			FuseBlown:      state.PhaseFuses{L1: site.FuseBlown.L1, L2: site.FuseBlown.L2, L3: site.FuseBlown.L3},
 			BoundMeter:     site.BoundMeter,
 			SimulatedTime:  site.SimulatedTime.Format(time.RFC3339),
 			TimeMultiplier: site.TimeMultiplier,
@@ -3373,6 +3456,68 @@ func getBatteryPowerAndDirection(server *modbus.Server) (float64, string) {
 		return math.Abs(signed), "discharging"
 	}
 	return 0, "idle"
+}
+
+func clampBatterySOC(value, minSOC, maxSOC float64) float64 {
+	if maxSOC <= 0 || maxSOC > 100 {
+		maxSOC = 100
+	}
+	if minSOC < 0 || minSOC >= maxSOC {
+		minSOC = 0
+	}
+	if value > maxSOC {
+		return maxSOC
+	}
+	if value < minSOC {
+		return minSOC
+	}
+	return value
+}
+
+func updateBatterySOC(server *modbus.Server, simHours, capacityKWh float64) {
+	if server == nil || simHours <= 0 {
+		return
+	}
+
+	power := getBatterySignedPower(server)
+	if power == 0 {
+		return
+	}
+
+	if capacityKWh <= 0 {
+		capacityKWh = defaultBatteryCapacityKWh
+	}
+	capacityWh := capacityKWh * 1000.0
+	if capacityWh <= 0 {
+		return
+	}
+
+	currentSOC := getRegisterValue(server, 13023)
+	maxSOC := getRegisterValue(server, 13058)
+	minSOC := getRegisterValue(server, 13059)
+
+	deltaSOC := (power * simHours / capacityWh) * 100.0
+	nextSOC := clampBatterySOC(currentSOC+deltaSOC, minSOC, maxSOC)
+
+	if socDef := modbus.RegisterLookup[13023]; socDef != nil {
+		server.WriteRegisterValue(socDef, nextSOC)
+	}
+
+	energyWh := math.Abs(power) * simHours
+	if energyWh == 0 {
+		return
+	}
+	if power > 0 {
+		if chargeDef := modbus.RegisterLookup[13041]; chargeDef != nil {
+			currentCharge, _ := server.ReadRegisterValue(chargeDef)
+			server.WriteRegisterValue(chargeDef, currentCharge+energyWh)
+		}
+	} else if power < 0 {
+		if dischargeDef := modbus.RegisterLookup[13027]; dischargeDef != nil {
+			currentDischarge, _ := server.ReadRegisterValue(dischargeDef)
+			server.WriteRegisterValue(dischargeDef, currentDischarge+energyWh)
+		}
+	}
 }
 
 // isSimulatorSiteMeter checks if a simulator is currently acting as a site meter
@@ -3474,8 +3619,9 @@ func startSiteAggregation(site *Site) {
 	log.Printf("[Site %d] Aggregation started", site.ID)
 
 	go func() {
-		ticker := time.NewTicker(500 * time.Millisecond)
+		ticker := time.NewTicker(getSiteTickInterval())
 		defer ticker.Stop()
+		lastTick := time.Now()
 
 		for {
 			select {
@@ -3483,7 +3629,24 @@ func startSiteAggregation(site *Site) {
 				log.Printf("[Site %d] Aggregation stopped", site.ID)
 				return
 			case <-ticker.C:
-				calculateAndUpdateMeter(site)
+				now := time.Now()
+				realDelta := now.Sub(lastTick)
+				lastTick = now
+
+				var simDelta time.Duration
+				site.mu.Lock()
+				if site.SimulatedTime.IsZero() {
+					site.SimulatedTime = now
+				}
+				multiplier := site.TimeMultiplier
+				if multiplier < 0 {
+					multiplier = 0
+				}
+				simDelta = time.Duration(float64(realDelta) * multiplier)
+				site.SimulatedTime = site.SimulatedTime.Add(simDelta)
+				site.mu.Unlock()
+
+				calculateAndUpdateMeter(site, simDelta)
 			}
 		}
 	}()
@@ -3575,7 +3738,7 @@ func stopSiteSimulation(site *Site) {
 
 // runSiteSimulationLoop is the main simulation loop that generates values for all devices
 func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(getSiteTickInterval())
 	defer ticker.Stop()
 
 	for {
@@ -3589,10 +3752,10 @@ func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
 				return
 			}
 
-			// Advance simulated time
-			elapsed := time.Duration(float64(500*time.Millisecond) * site.TimeMultiplier)
-			site.SimulatedTime = site.SimulatedTime.Add(elapsed)
 			simTime := site.SimulatedTime
+			if simTime.IsZero() {
+				simTime = time.Now()
+			}
 			scenario := site.Scenario
 			loadScenario := site.LoadScenario
 			simIDs := make([]int, len(site.SimulatorIDs))
@@ -3627,7 +3790,13 @@ func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
 					continue
 				}
 				if running && deviceOn {
-					generateValuesForSite(sim, simTime, scenario)
+					sim.Automation.mu.RLock()
+					simScenario := sim.Automation.Scenario
+					sim.Automation.mu.RUnlock()
+					if simScenario == "" {
+						simScenario = scenario
+					}
+					generateValuesForSite(sim, simTime, simScenario)
 				}
 			}
 
@@ -3640,7 +3809,13 @@ func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
 				meterSim.mu.RUnlock()
 
 				if running && category == "inverter" {
-					generateValuesForSite(meterSim, simTime, scenario)
+					meterSim.Automation.mu.RLock()
+					meterScenario := meterSim.Automation.Scenario
+					meterSim.Automation.mu.RUnlock()
+					if meterScenario == "" {
+						meterScenario = scenario
+					}
+					generateValuesForSite(meterSim, simTime, meterScenario)
 				}
 			}
 		}
@@ -3747,7 +3922,7 @@ func generateValuesForSite(sim *Simulator, simTime time.Time, scenario string) {
 }
 
 // calculateAndUpdateMeter calculates total power and updates the meter
-func calculateAndUpdateMeter(site *Site) {
+func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	site.mu.RLock()
 	meterID := site.MeterID
 	meterIDs := make([]int, len(site.MeterIDs))
@@ -3758,6 +3933,7 @@ func calculateAndUpdateMeter(site *Site) {
 	p1Buffer := site.P1Buffer
 	phaseFactors := site.PhaseFactors
 	sitePhaseLoads := site.SitePhaseLoads
+	fuseBlown := site.FuseBlown
 	site.mu.RUnlock()
 
 	// Get primary meter
@@ -3772,6 +3948,7 @@ func calculateAndUpdateMeter(site *Site) {
 		return
 	}
 	meterCategory := meterSim.Category
+	meterCapacityKWh := meterSim.BatteryCapacityKWh
 	meterSim.mu.RUnlock()
 
 	// Start with per-phase loads from SitePhaseLoads (fallback to base load if empty)
@@ -3791,7 +3968,7 @@ func calculateAndUpdateMeter(site *Site) {
 	// If meter is an inverter, read its PV/Battery values and include them in the calculation
 	// Distribute PV/battery contributions using phase factors
 	if meterCategory == "inverter" {
-	pvPower := getRegisterValue(meterSim.Server, 5017)     // PV power
+		pvPower := getRegisterValue(meterSim.Server, 5017)     // PV power
 		batteryPower := getBatterySignedPower(meterSim.Server) // Signed battery power
 
 		// Distribute PV generation (reduces load) and battery across phases
@@ -3820,6 +3997,17 @@ func calculateAndUpdateMeter(site *Site) {
 	phasePowers.L2 += otherPower * phaseFactors.L2
 	phasePowers.L3 += otherPower * phaseFactors.L3
 
+	// Apply fuse state: blown phases measure zero power
+	if fuseBlown.L1 {
+		phasePowers.L1 = 0
+	}
+	if fuseBlown.L2 {
+		phasePowers.L2 = 0
+	}
+	if fuseBlown.L3 {
+		phasePowers.L3 = 0
+	}
+
 	// Calculate total power from phase powers
 	totalPower := phasePowers.L1 + phasePowers.L2 + phasePowers.L3
 
@@ -3827,9 +4015,42 @@ func calculateAndUpdateMeter(site *Site) {
 	// This is the sum of SitePhaseLoads
 	_ = baseLoad // Kept for backward compat in API responses
 
-	// Calculate energy delta for this 0.5s tick (kWh and Wh)
-	energyDeltaKWh := math.Abs(totalPower) / 1000.0 / 7200.0 // kWh per 0.5s
-	energyDeltaWh := math.Abs(totalPower) / 7200.0           // Wh per 0.5s
+	// Calculate energy delta based on simulated time
+	simHours := simDelta.Hours()
+	if simHours < 0 {
+		simHours = 0
+	}
+	energyDeltaKWh := math.Abs(totalPower) / 1000.0 * simHours
+	energyDeltaWh := math.Abs(totalPower) * simHours
+
+	if simHours > 0 {
+		// Update battery SOC for all inverters using the central clock
+		if meterCategory == "inverter" && meterSim.Server != nil {
+			updateBatterySOC(meterSim.Server, simHours, meterCapacityKWh)
+		}
+		for _, simID := range simIDs {
+			if simID == meterID {
+				continue
+			}
+			sim := getSimulator(simID)
+			if sim == nil {
+				continue
+			}
+			sim.mu.RLock()
+			running := sim.Running
+			deviceOn := sim.DeviceOn
+			category := sim.Category
+			protocol := sim.Protocol
+			server := sim.Server
+			capacityKWh := sim.BatteryCapacityKWh
+			sim.mu.RUnlock()
+
+			if !running || !deviceOn || category != "inverter" || protocol != "modbus" || server == nil {
+				continue
+			}
+			updateBatterySOC(server, simHours, capacityKWh)
+		}
+	}
 
 	// Handle P1 interval mode
 	if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
@@ -3837,13 +4058,13 @@ func calculateAndUpdateMeter(site *Site) {
 		for _, mID := range meterIDs {
 			mSim := getSimulator(mID)
 			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && mSim.Running {
-				writeMeterRegisters(mSim, totalPower, phasePowers)
+				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown)
 				updateMeterEnergy(mSim, totalPower, energyDeltaKWh, energyDeltaWh)
 			}
 		}
 		// Also write to primary meter if not in meterIDs (backward compat)
 		if len(meterIDs) == 0 {
-			writeMeterRegisters(meterSim, totalPower, phasePowers)
+			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown)
 			updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
 		}
 	} else {
@@ -3881,7 +4102,7 @@ func calculateAndUpdateMeter(site *Site) {
 				if mSim == nil || mSim.Protocol != "modbus" || mSim.Server == nil || !mSim.Running {
 					continue
 				}
-				writeMeterRegisters(mSim, instantPower, instantPhasePowers)
+				writeMeterRegisters(mSim, instantPower, instantPhasePowers, fuseBlown)
 
 				// Write accumulated energy
 				if importDelta > 0 {
@@ -3907,7 +4128,7 @@ func calculateAndUpdateMeter(site *Site) {
 			}
 			// Also write to primary meter if not in meterIDs (backward compat)
 			if len(meterIDs) == 0 {
-				writeMeterRegisters(meterSim, instantPower, instantPhasePowers)
+				writeMeterRegisters(meterSim, instantPower, instantPhasePowers, fuseBlown)
 				if importDelta > 0 {
 					if importDef := modbus.RegisterLookup[72]; importDef != nil {
 						currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
@@ -3936,7 +4157,18 @@ func calculateAndUpdateMeter(site *Site) {
 }
 
 // writeMeterRegisters writes power values to meter registers
-func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers) {
+func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, fuseBlown PhaseFuses) {
+	if fuseBlown.L1 {
+		phasePowers.L1 = 0
+	}
+	if fuseBlown.L2 {
+		phasePowers.L2 = 0
+	}
+	if fuseBlown.L3 {
+		phasePowers.L3 = 0
+	}
+	totalPower = phasePowers.L1 + phasePowers.L2 + phasePowers.L3
+
 	// Write to meter register 5599 (positive=import, negative=export)
 	if meterDef := modbus.RegisterLookup[5599]; meterDef != nil {
 		meterSim.Server.WriteRegisterValue(meterDef, totalPower)
@@ -3997,23 +4229,36 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 	}
 
 	// Ensure voltage and frequency are always set (SDM630 registers)
+	l1Voltage := 230.0
+	l2Voltage := 230.0
+	l3Voltage := 230.0
+	if fuseBlown.L1 {
+		l1Voltage = 0
+	}
+	if fuseBlown.L2 {
+		l2Voltage = 0
+	}
+	if fuseBlown.L3 {
+		l3Voltage = 0
+	}
+
 	if l1VoltageDef := modbus.RegisterLookup[0]; l1VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l1VoltageDef, 230.0)
+		meterSim.Server.WriteRegisterValue(l1VoltageDef, l1Voltage)
 	}
 	if l2VoltageDef := modbus.RegisterLookup[2]; l2VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l2VoltageDef, 230.0)
+		meterSim.Server.WriteRegisterValue(l2VoltageDef, l2Voltage)
 	}
 	if l3VoltageDef := modbus.RegisterLookup[4]; l3VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l3VoltageDef, 230.0)
+		meterSim.Server.WriteRegisterValue(l3VoltageDef, l3Voltage)
 	}
 	if l1VoltageDef := modbus.RegisterLookup[5740]; l1VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l1VoltageDef, 230.0)
+		meterSim.Server.WriteRegisterValue(l1VoltageDef, l1Voltage)
 	}
 	if l2VoltageDef := modbus.RegisterLookup[5741]; l2VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l2VoltageDef, 230.0)
+		meterSim.Server.WriteRegisterValue(l2VoltageDef, l2Voltage)
 	}
 	if l3VoltageDef := modbus.RegisterLookup[5742]; l3VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l3VoltageDef, 230.0)
+		meterSim.Server.WriteRegisterValue(l3VoltageDef, l3Voltage)
 	}
 	if freqDef := modbus.RegisterLookup[70]; freqDef != nil {
 		meterSim.Server.WriteRegisterValue(freqDef, 50.0)
@@ -4148,13 +4393,20 @@ func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64)
 	id := nextSiteID
 	nextSiteID++
 
+	simulatedTime := time.Now()
+	loadScenario := defaultLoadScenarioKey
+	loads := PhaseLoads{L1: 333, L2: 333, L3: 334}
+	if ls, ok := LoadScenarios[loadScenario]; ok {
+		loads = ls.GetLoadForTime(simulatedTime.Hour())
+	}
+
 	site := &Site{
 		ID:           id,
 		Name:         name,
 		MeterID:      meterSim.ID,
 		MeterIDs:     []int{meterSim.ID}, // Initialize with primary meter
 		SimulatorIDs: filteredSimIDs,
-		BaseLoadW:    baseLoadW,
+		BaseLoadW:    loads.Total(),
 		Enabled:      false,
 		FuseSize:     16, // Default 16A fuse
 		PhaseFactors: PhaseFactors{
@@ -4162,16 +4414,21 @@ func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64)
 			L2: 0.333,
 			L3: 0.334,
 		},
+		FuseBlown: PhaseFuses{
+			L1: false,
+			L2: false,
+			L3: false,
+		},
 		BoundMeter: boundMeter,
 		P1Buffer:   newP1IntervalBuffer(),
 		// Simulation state initialization
-		SimulatedTime:  time.Now(),
+		SimulatedTime:  simulatedTime,
 		TimeMultiplier: 1.0,
 		SimRunning:     false,
 		Scenario:       "sunny",
-		// Site Load initialization (~1kW default, distributed across phases)
-		SitePhaseLoads: PhaseLoads{L1: 333, L2: 333, L3: 334},
-		LoadScenario:   "", // Empty = manual mode
+		// Site Load initialization (based on default profile)
+		SitePhaseLoads: loads,
+		LoadScenario:   loadScenario,
 		LoadLinked:     true,
 	}
 	sites = append(sites, site)

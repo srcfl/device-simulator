@@ -98,6 +98,8 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 				entry["load"] = batteryPower
 				entry["meter"] = getRegisterValue(sim.Server, 5599)
 				entry["battery_direction"] = batteryDirection
+				entry["battery_capacity_kwh"] = sim.BatteryCapacityKWh
+				entry["scenario"] = sim.Automation.Scenario
 			}
 		case "mqtt":
 			state := sim.MQTTServer.GetState()
@@ -166,14 +168,15 @@ func (a *App) GetSimulator(id int) (map[string]interface{}, error) {
 	defer sim.mu.RUnlock()
 
 	result := map[string]interface{}{
-		"id":       sim.ID,
-		"serial":   sim.Serial,
-		"protocol": sim.Protocol,
-		"category": sim.Category,
-		"port":     sim.Port,
-		"running":  sim.Running,
-		"slave_id": sim.SlaveID,
-		"profile":  sim.ProfilesManager.GetActiveName(),
+		"id":                   sim.ID,
+		"serial":               sim.Serial,
+		"protocol":             sim.Protocol,
+		"category":             sim.Category,
+		"port":                 sim.Port,
+		"running":              sim.Running,
+		"slave_id":             sim.SlaveID,
+		"profile":              sim.ProfilesManager.GetActiveName(),
+		"battery_capacity_kwh": sim.BatteryCapacityKWh,
 		"automation": map[string]interface{}{
 			"enabled":         sim.Automation.Enabled,
 			"time_multiplier": sim.Automation.TimeMultiplier,
@@ -213,6 +216,9 @@ func (a *App) UpdateConfig(id int, config map[string]interface{}) error {
 	}
 	if slaveID, ok := config["slave_id"].(float64); ok {
 		sim.SlaveID = uint8(slaveID)
+	}
+	if capacity, ok := config["battery_capacity_kwh"].(float64); ok && capacity > 0 {
+		sim.BatteryCapacityKWh = capacity
 	}
 	if ocppURL, ok := config["ocpp_url"].(string); ok && sim.OCPPServer != nil {
 		sim.OCPPServer.SetOCPPURL(ocppURL)
@@ -684,6 +690,7 @@ func (a *App) GetSites() []map[string]interface{} {
 			"enabled":         site.Enabled,
 			"fuse_size":       site.FuseSize,
 			"phase_factors":   site.PhaseFactors,
+			"fuse_blown":      site.FuseBlown,
 			"bound_meter":     site.BoundMeter,
 			"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
 			"time_multiplier": site.TimeMultiplier,
@@ -751,6 +758,7 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 		"enabled":         site.Enabled,
 		"fuse_size":       site.FuseSize,
 		"phase_factors":   site.PhaseFactors,
+		"fuse_blown":      site.FuseBlown,
 		"bound_meter":     site.BoundMeter,
 		"p1_mode":         string(p1Mode),
 		"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
@@ -826,6 +834,19 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 		return fmt.Errorf("site %d not found", id)
 	}
 
+	parseBool := func(value interface{}) (bool, bool) {
+		switch v := value.(type) {
+		case bool:
+			return v, true
+		case float64:
+			return v != 0, true
+		case int:
+			return v != 0, true
+		default:
+			return false, false
+		}
+	}
+
 	site.mu.Lock()
 	defer site.mu.Unlock()
 
@@ -847,6 +868,17 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 		}
 		if l3, ok := pf["l3"].(float64); ok {
 			site.PhaseFactors.L3 = l3
+		}
+	}
+	if fb, ok := config["fuse_blown"].(map[string]interface{}); ok {
+		if l1, ok := parseBool(fb["l1"]); ok {
+			site.FuseBlown.L1 = l1
+		}
+		if l2, ok := parseBool(fb["l2"]); ok {
+			site.FuseBlown.L2 = l2
+		}
+		if l3, ok := parseBool(fb["l3"]); ok {
+			site.FuseBlown.L3 = l3
 		}
 	}
 
@@ -1019,6 +1051,9 @@ func (a *App) UpdateSiteSimulationConfig(id int, config map[string]interface{}) 
 	}
 	if scenario, ok := config["scenario"].(string); ok && scenario != "" {
 		site.Scenario = scenario
+	}
+	if clockMs, ok := config["clock_ms"].(float64); ok && clockMs > 0 {
+		site.SimulatedTime = time.Unix(0, int64(clockMs)*int64(time.Millisecond)).In(time.Local)
 	}
 	site.mu.Unlock()
 
@@ -1314,6 +1349,11 @@ func (a *App) ApplyUpdate() error {
 	return DoUpdate()
 }
 
+// RestartApp restarts the application process
+func (a *App) RestartApp() error {
+	return scheduleRestart()
+}
+
 // GetWarnings returns current runtime warnings
 func (a *App) GetWarnings() map[string]interface{} {
 	return map[string]interface{}{
@@ -1340,6 +1380,7 @@ func (a *App) GetSettings() (map[string]interface{}, error) {
 		"modbusDisplayOffset": s.ModbusDisplayOffset,
 		"mqttDisplayOffset":   s.MQTTDisplayOffset,
 		"ocppDisplayOffset":   s.OCPPDisplayOffset,
+		"siteTickMs":          s.SiteTickMs,
 	}, nil
 }
 
@@ -1365,6 +1406,13 @@ func (a *App) SaveSettings(s map[string]interface{}) error {
 	if ocppOffset, ok := s["ocppDisplayOffset"].(float64); ok {
 		appSettings.OCPPDisplayOffset = int(ocppOffset)
 	}
+	if tickMs, ok := s["siteTickMs"].(float64); ok {
+		if int(tickMs) > 0 {
+			appSettings.SiteTickMs = int(tickMs)
+		} else {
+			appSettings.SiteTickMs = 500
+		}
+	}
 
 	return settings.Save(appSettings)
 }
@@ -1374,7 +1422,7 @@ func (a *App) GetLoadScenarios() []*LoadScenario {
 	return GetLoadScenariosSlice()
 }
 
-// SetSitePhaseLoads sets the per-phase loads for a site (manual mode)
+// SetSitePhaseLoads sets the per-phase loads for a site
 func (a *App) SetSitePhaseLoads(id int, l1, l2, l3 float64, linked bool) (map[string]interface{}, error) {
 	site := getSite(id)
 	if site == nil {
@@ -1382,8 +1430,6 @@ func (a *App) SetSitePhaseLoads(id int, l1, l2, l3 float64, linked bool) (map[st
 	}
 
 	site.mu.Lock()
-	// Setting phase loads clears any active scenario (switch to manual)
-	site.LoadScenario = ""
 	site.SitePhaseLoads.L1 = l1
 	site.SitePhaseLoads.L2 = l2
 	site.SitePhaseLoads.L3 = l3
@@ -1408,7 +1454,7 @@ func (a *App) SetSiteLoadScenario(id int, scenario string) (map[string]interface
 		return nil, fmt.Errorf("site %d not found", id)
 	}
 
-	// Empty scenario means manual mode
+	// Allow empty scenario for backward compatibility
 	if scenario != "" {
 		if _, ok := LoadScenarios[scenario]; !ok {
 			return nil, fmt.Errorf("unknown load scenario: %s", scenario)
