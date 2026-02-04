@@ -870,9 +870,19 @@ func (a *App) SetSiteMeter(id int, meterId int) error {
 	}
 
 	site.mu.Lock()
+	oldMeterID := site.MeterID
 	site.MeterID = meterId
+	newMeterIDs := []int{meterId}
+	for _, id := range site.MeterIDs {
+		if id == oldMeterID || id == meterId {
+			continue
+		}
+		newMeterIDs = append(newMeterIDs, id)
+	}
+	site.MeterIDs = newMeterIDs
 	site.mu.Unlock()
 
+	startSiteAggregation(site)
 	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
@@ -962,46 +972,6 @@ func (a *App) RemoveSimulatorFromSite(siteId int, simulatorId int) error {
 		sim.mu.Unlock()
 	}
 
-	markStateDirty()
-	a.emitSiteUpdate()
-	return nil
-}
-
-// EnableSite enables aggregation for a site
-func (a *App) EnableSite(id int) error {
-	site := getSite(id)
-	if site == nil {
-		return fmt.Errorf("site %d not found", id)
-	}
-
-	site.mu.RLock()
-	meterID := site.MeterID
-	site.mu.RUnlock()
-
-	if meterID == 0 {
-		return fmt.Errorf("no meter configured for site")
-	}
-
-	meterSim := getSimulator(meterID)
-	if meterSim == nil || meterSim.Protocol != "modbus" {
-		return fmt.Errorf("invalid meter simulator")
-	}
-
-	startSiteAggregation(site)
-	markStateDirty()
-	a.emitSiteUpdate()
-	return nil
-}
-
-// DisableSite disables aggregation for a site
-func (a *App) DisableSite(id int) error {
-	site := getSite(id)
-	if site == nil {
-		return fmt.Errorf("site %d not found", id)
-	}
-
-	stopSiteSimulation(site)
-	stopSiteAggregation(site)
 	markStateDirty()
 	a.emitSiteUpdate()
 	return nil
@@ -1141,6 +1111,7 @@ func (a *App) AddMeterToSite(siteId int, meterId int) error {
 	site.MeterIDs = append(site.MeterIDs, meterId)
 	site.mu.Unlock()
 
+	startSiteAggregation(site)
 	markStateDirty()
 	a.emitSiteUpdate()
 	return nil

@@ -462,26 +462,6 @@ const siteApi = {
         }
     },
 
-    async enableSite(id) {
-        if (isWails) {
-            await window.go.main.App.EnableSite(id);
-            return;
-        }
-        const resp = await fetch(`/api/sites/${id}/enable`, { method: 'POST' });
-        if (!resp.ok) {
-            const text = await resp.text();
-            throw new Error(text);
-        }
-    },
-
-    async disableSite(id) {
-        if (isWails) {
-            await window.go.main.App.DisableSite(id);
-            return;
-        }
-        await fetch(`/api/sites/${id}/disable`, { method: 'POST' });
-    },
-
     async setP1Mode(id, mode) {
         if (isWails) {
             return await window.go.main.App.SetP1Mode(id, mode);
@@ -830,7 +810,6 @@ const storage = {
                     meterId: site.meter_id,
                     simulatorIds: site.simulator_ids || [],
                     baseLoadW: site.base_load_w || 1000,
-                    enabled: site.enabled || false,
                     fuseSize: site.fuse_size || 16,
                     phaseFactors: site.phase_factors || { l1: 0.333, l2: 0.333, l3: 0.334 },
                     boundMeter: site.bound_meter || false,
@@ -843,7 +822,6 @@ const storage = {
                 existing.meterId = site.meter_id;
                 existing.simulatorIds = site.simulator_ids || [];
                 existing.baseLoadW = site.base_load_w;
-                existing.enabled = site.enabled;
                 existing.fuseSize = site.fuse_size || 16;
                 existing.phaseFactors = site.phase_factors || { l1: 0.333, l2: 0.333, l3: 0.334 };
                 existing.boundMeter = site.bound_meter || false;
@@ -1668,26 +1646,10 @@ document.addEventListener('alpine:init', () => {
             }
             await this.loadSites();
 
-            // Auto-enable all sites (aggregation is always on)
-            await this.enableAllSites();
-
             // Auto-select the first site
             if (this.sites.length > 0 && !this.selectedId) {
                 this.selectSite(this.sites[0].id);
             }
-        },
-
-        async enableAllSites() {
-            for (const site of this.sites) {
-                if (!site.enabled) {
-                    try {
-                        await siteApi.enableSite(site.id);
-                    } catch (e) {
-                        console.error('Auto-enable site error:', e);
-                    }
-                }
-            }
-            await this.loadSites();
         },
 
         async createDefaultSite() {
@@ -1700,8 +1662,7 @@ document.addEventListener('alpine:init', () => {
                     name: 'My Home',
                     meterSerial: null,
                     simulatorSerials: [],
-                    baseLoadW: 1000,
-                    enabled: false
+                    baseLoadW: 1000
                 });
 
                 await Alpine.store('app').loadSimulators();
@@ -1761,10 +1722,6 @@ document.addEventListener('alpine:init', () => {
                         }
                     }
 
-                    // Enable if it was enabled
-                    if (config.enabled) {
-                        await siteApi.enableSite(newSite.id);
-                    }
                 } catch (e) {
                     console.error('Restore site error:', e);
                 }
@@ -1782,8 +1739,7 @@ document.addEventListener('alpine:init', () => {
                     name: name,
                     meterSerial: meter?.serial || null,
                     simulatorSerials: [],
-                    baseLoadW: baseLoadW,
-                    enabled: false
+                    baseLoadW: baseLoadW
                 });
 
                 await Promise.all([
@@ -1830,9 +1786,6 @@ document.addEventListener('alpine:init', () => {
             this.refreshInterval = setInterval(() => this.loadSiteData(), 1000);
 
             this.loadSiteData();
-
-            // Auto-enable aggregation (sites are always aggregating)
-            this.ensureEnabled(id);
         },
 
         ensureRefreshing() {
@@ -1840,19 +1793,6 @@ document.addEventListener('alpine:init', () => {
             if (this.refreshInterval) return;
             this.refreshInterval = setInterval(() => this.loadSiteData(), 1000);
             this.loadSiteData();
-        },
-
-        async ensureEnabled(id) {
-            // Check if site is enabled, if not enable it
-            const site = this.sites.find(s => s.id === id);
-            if (site && !site.enabled) {
-                try {
-                    await siteApi.enableSite(id);
-                    await this.loadSites();
-                } catch (e) {
-                    console.error('Auto-enable site error:', e);
-                }
-            }
         },
 
         clearSelection() {
@@ -1887,8 +1827,7 @@ document.addEventListener('alpine:init', () => {
             storage.updateSiteConfig(this.data.name, {
                 meterSerial: meter?.serial || null,
                 simulatorSerials: simulatorSerials,
-                baseLoadW: this.data.base_load_w,
-                enabled: this.data.enabled
+                baseLoadW: this.data.base_load_w
             });
         },
 
@@ -1948,22 +1887,6 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
-        async toggleEnabled() {
-            if (!this.selectedId || !this.data) return;
-            try {
-                if (this.data.enabled) {
-                    await siteApi.disableSite(this.selectedId);
-                } else {
-                    await siteApi.enableSite(this.selectedId);
-                }
-                await this.loadSiteData();
-                await this.loadSites();
-                this.syncCurrentSiteToStorage();
-            } catch (e) {
-                console.error('Toggle enabled error:', e);
-                await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
-            }
-        },
 
         getAvailableSimulators() {
             // Return simulators not in any site, or in current site
