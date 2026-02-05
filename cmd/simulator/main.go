@@ -131,9 +131,12 @@ type Site struct {
 	BaseLoadW    float64           `json:"base_load_w"`   // Configurable 0-10kW
 	Enabled      bool              `json:"enabled"`       // Aggregation enabled
 	FuseSize     int               `json:"fuse_size"`     // Fuse size in Amps (10, 16, 20, 25, 32)
+	FuseProfile  string            `json:"fuse_profile"`  // Fuse profile identifier
 	PhaseFactors PhaseFactors      `json:"phase_factors"` // Per-phase load distribution
 	FuseBlown    PhaseFuses        `json:"fuse_blown"`    // Per-phase blown fuse state
-	BoundMeter   bool              `json:"bound_meter"`   // True if meter was auto-created with site
+	FuseDamage   PhaseLoads        `json:"-"`
+	FuseOverload FuseOverload      `json:"-"`
+	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
 	// Simulation state (moved from per-simulator AutomationState)
@@ -808,6 +811,7 @@ func restoreSite(saved state.SiteState) (*Site, error) {
 		BaseLoadW:      saved.BaseLoadW,
 		Enabled:        saved.Enabled,
 		FuseSize:       saved.FuseSize,
+		FuseProfile:    saved.FuseProfile,
 		PhaseFactors:   phaseFactors,
 		FuseBlown:      fuseBlown,
 		BoundMeter:     saved.BoundMeter,
@@ -822,6 +826,12 @@ func restoreSite(saved state.SiteState) (*Site, error) {
 	}
 	if site.FuseSize == 0 {
 		site.FuseSize = 16
+	}
+	if site.FuseProfile == "" {
+		site.FuseProfile = FuseProfileManual
+	}
+	if _, ok := fuseProfiles[site.FuseProfile]; !ok {
+		site.FuseProfile = FuseProfileManual
 	}
 	if site.TimeMultiplier == 0 {
 		site.TimeMultiplier = 1.0
@@ -2142,6 +2152,7 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 			"base_load_w":     site.BaseLoadW,
 			"enabled":         site.Enabled,
 			"fuse_size":       site.FuseSize,
+			"fuse_profile":    site.FuseProfile,
 			"phase_factors":   site.PhaseFactors,
 			"fuse_blown":      site.FuseBlown,
 			"p1_mode":         string(p1Mode),
@@ -2292,8 +2303,10 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 		"enabled":         site.Enabled,
 		"p1_mode":         string(p1Mode),
 		"fuse_size":       site.FuseSize,
+		"fuse_profile":    site.FuseProfile,
 		"phase_factors":   site.PhaseFactors,
 		"fuse_blown":      site.FuseBlown,
+		"fuse_overload":   site.FuseOverload,
 		"bound_meter":     site.BoundMeter,
 		"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
 		"time_multiplier": site.TimeMultiplier,
@@ -2414,6 +2427,7 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		Name         *string       `json:"name"`
 		BaseLoadW    *float64      `json:"base_load_w"`
 		FuseSize     *int          `json:"fuse_size"`
+		FuseProfile  *string       `json:"fuse_profile"`
 		PhaseFactors *PhaseFactors `json:"phase_factors"`
 		FuseBlown    *PhaseFuses   `json:"fuse_blown"`
 	}
@@ -2444,6 +2458,20 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 			return
 		}
 		site.FuseSize = *config.FuseSize
+		site.FuseDamage = PhaseLoads{}
+		site.FuseOverload = FuseOverload{}
+	}
+	if config.FuseProfile != nil {
+		if _, ok := fuseProfiles[*config.FuseProfile]; !ok {
+			site.mu.Unlock()
+			http.Error(w, "Unknown fuse profile", http.StatusBadRequest)
+			return
+		}
+		if site.FuseProfile != *config.FuseProfile {
+			site.FuseProfile = *config.FuseProfile
+			site.FuseDamage = PhaseLoads{}
+			site.FuseOverload = FuseOverload{}
+		}
 	}
 	if config.PhaseFactors != nil {
 		// Validate phase factors sum to approximately 1.0
@@ -2464,6 +2492,15 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		site.PhaseFactors = *config.PhaseFactors
 	}
 	if config.FuseBlown != nil {
+		if site.FuseBlown.L1 && !config.FuseBlown.L1 {
+			site.FuseDamage.L1 = 0
+		}
+		if site.FuseBlown.L2 && !config.FuseBlown.L2 {
+			site.FuseDamage.L2 = 0
+		}
+		if site.FuseBlown.L3 && !config.FuseBlown.L3 {
+			site.FuseDamage.L3 = 0
+		}
 		site.FuseBlown = *config.FuseBlown
 	}
 	site.mu.Unlock()
@@ -3390,6 +3427,7 @@ func buildStateSnapshot() *state.AppState {
 			BaseLoadW:      site.BaseLoadW,
 			Enabled:        site.Enabled,
 			FuseSize:       site.FuseSize,
+			FuseProfile:    site.FuseProfile,
 			PhaseFactors:   state.PhaseFactors{L1: site.PhaseFactors.L1, L2: site.PhaseFactors.L2, L3: site.PhaseFactors.L3},
 			FuseBlown:      state.PhaseFuses{L1: site.FuseBlown.L1, L2: site.FuseBlown.L2, L3: site.FuseBlown.L3},
 			BoundMeter:     site.BoundMeter,
@@ -3946,7 +3984,6 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	p1Buffer := site.P1Buffer
 	phaseFactors := site.PhaseFactors
 	sitePhaseLoads := site.SitePhaseLoads
-	fuseBlown := site.FuseBlown
 	site.mu.RUnlock()
 
 	// Get primary meter
@@ -4009,6 +4046,9 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	phasePowers.L1 += otherPower * phaseFactors.L1
 	phasePowers.L2 += otherPower * phaseFactors.L2
 	phasePowers.L3 += otherPower * phaseFactors.L3
+
+	// Update fuse state based on overload profile (before applying blown phases)
+	fuseBlown := updateFuseState(site, phasePowers, simDelta)
 
 	// Apply fuse state: blown phases measure zero power
 	if fuseBlown.L1 {
@@ -4422,6 +4462,7 @@ func createSite(name string, meterID int, simulatorIDs []int, baseLoadW float64)
 		BaseLoadW:    loads.Total(),
 		Enabled:      false,
 		FuseSize:     16, // Default 16A fuse
+		FuseProfile:  FuseProfileManual,
 		PhaseFactors: PhaseFactors{
 			L1: 0.333,
 			L2: 0.333,

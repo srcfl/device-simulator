@@ -1415,6 +1415,30 @@
     text-align: right;
 }
 
+.phase-value-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    min-width: 70px;
+}
+
+.phase-countdown {
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    color: var(--color-warning);
+    margin-top: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.phase-countdown.warning {
+    color: var(--color-warning);
+}
+
+.phase-countdown.danger {
+    color: var(--color-error);
+}
+
 .phase-bar-scale {
     display: flex;
     align-items: center;
@@ -1455,7 +1479,7 @@
 }
 
 .phase-bar-scale .scale-spacer-end {
-    min-width: 55px;
+    min-width: 70px;
 }
 
 .phase-legend {

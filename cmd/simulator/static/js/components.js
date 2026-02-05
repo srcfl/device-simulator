@@ -2140,9 +2140,11 @@ document.addEventListener('alpine:init', () => {
         localPhaseFactors: { l1: 0.333, l2: 0.333, l3: 0.334 },
         localSiteName: '',
         localFuseSize: 16,
+        localFuseProfile: 'manual',
         editingSiteName: false,
         editingPhaseFactors: false,
         changingFuseSize: false,
+        changingFuseProfile: false,
         lastSiteId: null,
         fuseBlown: { l1: false, l2: false, l3: false },
 
@@ -2158,6 +2160,7 @@ document.addEventListener('alpine:init', () => {
                     this.editingSiteName = false;
                     this.editingPhaseFactors = false;
                     this.changingFuseSize = false;
+                    this.changingFuseProfile = false;
                     this.syncSettingsFromStore(true);
                     return;
                 }
@@ -2208,6 +2211,9 @@ document.addEventListener('alpine:init', () => {
             if (force || !this.changingFuseSize) {
                 this.localFuseSize = data.fuse_size || 16;
             }
+            if (force || !this.changingFuseProfile) {
+                this.localFuseProfile = data.fuse_profile || 'manual';
+            }
             if (force || !this.editingPhaseFactors) {
                 const factors = data.phase_factors;
                 if (factors) {
@@ -2237,6 +2243,7 @@ document.addEventListener('alpine:init', () => {
             this.editingSiteName = false;
             this.editingPhaseFactors = false;
             this.changingFuseSize = false;
+            this.changingFuseProfile = false;
         },
 
         onSiteNameFocus() {
@@ -2271,6 +2278,20 @@ document.addEventListener('alpine:init', () => {
                 await Alpine.store('site').updateConfig({ fuse_size: next });
             } finally {
                 this.changingFuseSize = false;
+            }
+        },
+
+        async onFuseProfileChange(value) {
+            const next = value || 'manual';
+            const current = Alpine.store('site').data?.fuse_profile || 'manual';
+            if (next === current) return;
+
+            this.changingFuseProfile = true;
+            this.localFuseProfile = next;
+            try {
+                await Alpine.store('site').updateConfig({ fuse_profile: next });
+            } finally {
+                this.changingFuseProfile = false;
             }
         },
 
@@ -2356,6 +2377,45 @@ document.addEventListener('alpine:init', () => {
                 l2: powers.l2 || 0,
                 l3: powers.l3 || 0
             };
+        },
+
+        getFuseOverload(phase) {
+            const overload = Alpine.store('site').data?.fuse_overload || {};
+            return overload[phase] || null;
+        },
+
+        hasFuseCountdown(phase) {
+            const info = this.getFuseOverload(phase);
+            if (!info || !info.active) return false;
+            if (this.fuseBlown[phase]) return false;
+            return (info.remaining_s || 0) > 0;
+        },
+
+        getFuseCountdownLabel(phase) {
+            const info = this.getFuseOverload(phase);
+            if (!info) return '';
+            const remaining = info.remaining_s || 0;
+            if (remaining <= 0) return '';
+            if (remaining < 1) return 'Trip now';
+            if (remaining < 60) return `Trip in ${Math.ceil(remaining)}s`;
+            if (remaining < 3600) return `Trip in ${Math.ceil(remaining / 60)}m`;
+            return `Trip in ${Math.ceil(remaining / 3600)}h`;
+        },
+
+        getFuseCountdownTitle(phase) {
+            const info = this.getFuseOverload(phase);
+            if (!info || !info.active) return '';
+            if (!info.ratio) return '';
+            return `${info.ratio.toFixed(2)}x In`;
+        },
+
+        getFuseCountdownClass(phase) {
+            const info = this.getFuseOverload(phase);
+            if (!info || !info.active) return '';
+            const remaining = info.remaining_s || 0;
+            if (remaining <= 5) return 'danger';
+            if (remaining <= 15) return 'warning';
+            return '';
         },
 
         // Bidirectional bar: center = 0, left = export (negative), right = import (positive)

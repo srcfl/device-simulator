@@ -59,6 +59,7 @@ type SiteState struct {
 	BaseLoadW      float64      `json:"base_load_w"`
 	Enabled        bool         `json:"enabled"`
 	FuseSize       int          `json:"fuse_size"`
+	FuseProfile    string       `json:"fuse_profile"`
 	PhaseFactors   PhaseFactors `json:"phase_factors"`
 	FuseBlown      PhaseFuses   `json:"fuse_blown"`
 	BoundMeter     bool         `json:"bound_meter"`

@@ -701,6 +701,7 @@ func (a *App) GetSites() []map[string]interface{} {
 			"base_load_w":     site.BaseLoadW,
 			"enabled":         site.Enabled,
 			"fuse_size":       site.FuseSize,
+			"fuse_profile":    site.FuseProfile,
 			"phase_factors":   site.PhaseFactors,
 			"fuse_blown":      site.FuseBlown,
 			"bound_meter":     site.BoundMeter,
@@ -769,8 +770,10 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 		"base_load_w":     site.BaseLoadW,
 		"enabled":         site.Enabled,
 		"fuse_size":       site.FuseSize,
+		"fuse_profile":    site.FuseProfile,
 		"phase_factors":   site.PhaseFactors,
 		"fuse_blown":      site.FuseBlown,
+		"fuse_overload":   site.FuseOverload,
 		"bound_meter":     site.BoundMeter,
 		"p1_mode":         string(p1Mode),
 		"simulated_time":  site.SimulatedTime.Format("2006-01-02 15:04:05"),
@@ -870,6 +873,18 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 	}
 	if fuseSize, ok := config["fuse_size"].(float64); ok {
 		site.FuseSize = int(fuseSize)
+		site.FuseDamage = PhaseLoads{}
+		site.FuseOverload = FuseOverload{}
+	}
+	if fuseProfile, ok := config["fuse_profile"].(string); ok {
+		if _, exists := fuseProfiles[fuseProfile]; !exists {
+			return fmt.Errorf("unknown fuse profile")
+		}
+		if site.FuseProfile != fuseProfile {
+			site.FuseProfile = fuseProfile
+			site.FuseDamage = PhaseLoads{}
+			site.FuseOverload = FuseOverload{}
+		}
 	}
 	if pf, ok := config["phase_factors"].(map[string]interface{}); ok {
 		if l1, ok := pf["l1"].(float64); ok {
@@ -884,12 +899,21 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 	}
 	if fb, ok := config["fuse_blown"].(map[string]interface{}); ok {
 		if l1, ok := parseBool(fb["l1"]); ok {
+			if site.FuseBlown.L1 && !l1 {
+				site.FuseDamage.L1 = 0
+			}
 			site.FuseBlown.L1 = l1
 		}
 		if l2, ok := parseBool(fb["l2"]); ok {
+			if site.FuseBlown.L2 && !l2 {
+				site.FuseDamage.L2 = 0
+			}
 			site.FuseBlown.L2 = l2
 		}
 		if l3, ok := parseBool(fb["l3"]); ok {
+			if site.FuseBlown.L3 && !l3 {
+				site.FuseDamage.L3 = 0
+			}
 			site.FuseBlown.L3 = l3
 		}
 	}

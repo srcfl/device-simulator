@@ -440,7 +440,14 @@
                                 <div class="fuse-limit-marker import"></div>
                                 <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l1, fuseBlown.l1)"></div>
                             </div>
-                            <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="formatPhasePower(getPhasePowers().l1)"></div>
+                            <div class="phase-value-stack">
+                                <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="formatPhasePower(getPhasePowers().l1)"></div>
+                                <div class="phase-countdown"
+                                     x-show="hasFuseCountdown('l1')"
+                                     :class="getFuseCountdownClass('l1')"
+                                     :title="getFuseCountdownTitle('l1')"
+                                     x-text="getFuseCountdownLabel('l1')"></div>
+                            </div>
                         </div>
                         <div class="phase-bar-container">
                             <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l2 }" @click="toggleFuse('l2')" title="Click to toggle fuse">
@@ -453,7 +460,14 @@
                                 <div class="fuse-limit-marker import"></div>
                                 <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l2, fuseBlown.l2)"></div>
                             </div>
-                            <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="formatPhasePower(getPhasePowers().l2)"></div>
+                            <div class="phase-value-stack">
+                                <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="formatPhasePower(getPhasePowers().l2)"></div>
+                                <div class="phase-countdown"
+                                     x-show="hasFuseCountdown('l2')"
+                                     :class="getFuseCountdownClass('l2')"
+                                     :title="getFuseCountdownTitle('l2')"
+                                     x-text="getFuseCountdownLabel('l2')"></div>
+                            </div>
                         </div>
                         <div class="phase-bar-container">
                             <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l3 }" @click="toggleFuse('l3')" title="Click to toggle fuse">
@@ -466,7 +480,14 @@
                                 <div class="fuse-limit-marker import"></div>
                                 <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l3, fuseBlown.l3)"></div>
                             </div>
-                            <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="formatPhasePower(getPhasePowers().l3)"></div>
+                            <div class="phase-value-stack">
+                                <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="formatPhasePower(getPhasePowers().l3)"></div>
+                                <div class="phase-countdown"
+                                     x-show="hasFuseCountdown('l3')"
+                                     :class="getFuseCountdownClass('l3')"
+                                     :title="getFuseCountdownTitle('l3')"
+                                     x-text="getFuseCountdownLabel('l3')"></div>
+                            </div>
                         </div>
                         <!-- Scale labels -->
                         <div class="phase-bar-scale">
@@ -513,6 +534,18 @@
                                             <option value="20">20 A</option>
                                             <option value="25">25 A</option>
                                             <option value="32">32 A</option>
+                                        </select>
+                                    </div>
+                                    <div class="modal-field">
+                                        <label>Fuse Profile</label>
+                                        <select x-model="localFuseProfile"
+                                                @change="onFuseProfileChange($event.target.value)">
+                                            <option value="manual">Manual (no auto trip)</option>
+                                            <option value="iec_gg">IEC 60269 gG/gL (general purpose)</option>
+                                            <option value="iec_gm">IEC 60269 gM (motor, dual-rated) - UK common</option>
+                                            <option value="iec_am">IEC 60269 aM (motor, short-circuit)</option>
+                                            <option value="iec_gr">IEC 60269 gR (semiconductor, fast)</option>
+                                            <option value="iec_gs">IEC 60269 gS (semiconductor, full-range)</option>
                                         </select>
                                     </div>
                                     <div class="modal-field-group">

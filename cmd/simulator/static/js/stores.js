@@ -824,6 +824,7 @@ const storage = {
                     simulatorIds: site.simulator_ids || [],
                     baseLoadW: site.base_load_w || 1000,
                     fuseSize: site.fuse_size || 16,
+                    fuseProfile: site.fuse_profile || 'manual',
                     phaseFactors: site.phase_factors || { l1: 0.333, l2: 0.333, l3: 0.334 },
                     boundMeter: site.bound_meter || false,
                     createdAt: new Date().toISOString(),
@@ -836,6 +837,7 @@ const storage = {
                 existing.simulatorIds = site.simulator_ids || [];
                 existing.baseLoadW = site.base_load_w;
                 existing.fuseSize = site.fuse_size || 16;
+                existing.fuseProfile = site.fuse_profile || 'manual';
                 existing.phaseFactors = site.phase_factors || { l1: 0.333, l2: 0.333, l3: 0.334 };
                 existing.boundMeter = site.bound_meter || false;
                 existing.lastModified = new Date().toISOString();
@@ -1770,7 +1772,8 @@ document.addEventListener('alpine:init', () => {
                     name: name,
                     meterSerial: meter?.serial || null,
                     simulatorSerials: [],
-                    baseLoadW: baseLoadW
+                    baseLoadW: baseLoadW,
+                    fuseProfile: 'manual'
                 });
 
                 await Promise.all([
@@ -1858,7 +1861,8 @@ document.addEventListener('alpine:init', () => {
             storage.updateSiteConfig(this.data.name, {
                 meterSerial: meter?.serial || null,
                 simulatorSerials: simulatorSerials,
-                baseLoadW: this.data.base_load_w
+                baseLoadW: this.data.base_load_w,
+                fuseProfile: this.data.fuse_profile || 'manual'
             });
         },
 
