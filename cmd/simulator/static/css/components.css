@@ -499,6 +499,18 @@
     pointer-events: none;
     opacity: 0.5;
 }
+.member-card.offline .member-control-row select {
+    pointer-events: none;
+    opacity: 0.5;
+}
+.member-card.offline .mini-toggle {
+    pointer-events: none;
+    opacity: 0.5;
+}
+.member-card.offline .mini-toggle.emu-toggle {
+    pointer-events: auto;
+    opacity: 1;
+}
 .member-card.offline .power-value,
 .member-card.offline .control-value {
     color: var(--text-secondary) !important;
@@ -689,6 +701,11 @@
 
 .mini-toggle.on {
     background: var(--color-success);
+}
+.mini-toggle.disabled {
+    cursor: default;
+    opacity: 0.5;
+    pointer-events: none;
 }
 
 .mini-toggle .mini-toggle-thumb {

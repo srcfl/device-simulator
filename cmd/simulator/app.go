@@ -177,6 +177,7 @@ func (a *App) GetSimulator(id int) (map[string]interface{}, error) {
 		"slave_id":             sim.SlaveID,
 		"profile":              sim.ProfilesManager.GetActiveName(),
 		"battery_capacity_kwh": sim.BatteryCapacityKWh,
+		"runtime_serial":       getRuntimeSerial(sim),
 		"automation": map[string]interface{}{
 			"enabled":         sim.Automation.Enabled,
 			"time_multiplier": sim.Automation.TimeMultiplier,
@@ -210,8 +211,19 @@ func (a *App) UpdateConfig(id int, config map[string]interface{}) error {
 
 	if serial, ok := config["serial"].(string); ok && serial != "" {
 		sim.Serial = serial
-		if sim.Server != nil {
-			sim.Server.SetSerialNumber(serial)
+		switch sim.Protocol {
+		case "modbus":
+			if sim.Server != nil {
+				sim.Server.SetSerialNumber(serial)
+			}
+		case "mqtt":
+			if sim.MQTTServer != nil {
+				sim.MQTTServer.SetSerialNumber(serial)
+			}
+		case "ocpp":
+			if sim.OCPPServer != nil {
+				sim.OCPPServer.SetSerialNumber(serial)
+			}
 		}
 	}
 	if slaveID, ok := config["slave_id"].(float64); ok {

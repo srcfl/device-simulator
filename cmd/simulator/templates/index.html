@@ -221,13 +221,37 @@
                                     <div class="sim-serial" x-text="sim.serial"></div>
                                     <div class="sim-ports">
                                         <template x-if="sim.protocol === 'modbus'">
-                                            <span x-text="`Modbus :${sim.port + $store.app.modbusDisplayOffset} | Unit ${sim.slave_id}`"></span>
+                                            <template x-if="sim.running && sim.port">
+                                                <span x-text="`Modbus :${sim.port + $store.app.modbusDisplayOffset} | Unit ${sim.slave_id}`"></span>
+                                            </template>
+                                            <template x-if="!sim.running && sim.port">
+                                                <span class="sim-port-last" x-text="`Last Modbus :${sim.port + $store.app.modbusDisplayOffset} | Unit ${sim.slave_id}`"></span>
+                                            </template>
+                                            <template x-if="!sim.port">
+                                                <span class="sim-port-unassigned">Port not allocated</span>
+                                            </template>
                                         </template>
                                         <template x-if="sim.protocol === 'mqtt'">
-                                            <span x-text="`MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
+                                            <template x-if="sim.running && sim.port">
+                                                <span x-text="`MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
+                                            </template>
+                                            <template x-if="!sim.running && sim.port">
+                                                <span class="sim-port-last" x-text="`Last MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
+                                            </template>
+                                            <template x-if="!sim.port">
+                                                <span class="sim-port-unassigned">Port not allocated</span>
+                                            </template>
                                         </template>
                                         <template x-if="sim.protocol === 'ocpp'">
-                                            <span x-text="`WS :${sim.port + $store.app.ocppDisplayOffset}`"></span>
+                                            <template x-if="sim.running && sim.port">
+                                                <span x-text="`WS :${sim.port + $store.app.ocppDisplayOffset}`"></span>
+                                            </template>
+                                            <template x-if="!sim.running && sim.port">
+                                                <span class="sim-port-last" x-text="`Last WS :${sim.port + $store.app.ocppDisplayOffset}`"></span>
+                                            </template>
+                                            <template x-if="!sim.port">
+                                                <span class="sim-port-unassigned">Port not allocated</span>
+                                            </template>
                                         </template>
                                     </div>
                                     <div class="sim-stats">
@@ -708,6 +732,14 @@
                                           x-text="formatInverterPvPower(inv)"></span>
                                 </div>
                                 <div class="member-controls">
+                                    <div class="member-control-row">
+                                        <span class="control-label">Emu</span>
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
+                                             @click="toggleEmulator(inv.id)">
+                                            <div class="mini-toggle-thumb"></div>
+                                        </div>
+                                        <span class="control-status" x-text="inv.running ? 'Running' : 'Stopped'"></span>
+                                    </div>
                                     <div class="member-control-row load-profile-row">
                                         <span class="control-label">Profile</span>
                                         <select class="site-load-select member-load-select"
@@ -768,6 +800,14 @@
                                           x-text="formatInverterBatteryPower(inv)"></span>
                                 </div>
                                 <div class="member-controls">
+                                    <div class="member-control-row">
+                                        <span class="control-label">Emu</span>
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
+                                             @click="toggleEmulator(inv.id)">
+                                            <div class="mini-toggle-thumb"></div>
+                                        </div>
+                                        <span class="control-status" x-text="inv.running ? 'Running' : 'Stopped'"></span>
+                                    </div>
                                     <div class="member-control-row">
                                         <span class="control-label">SoC</span>
                                         <div class="mini-progress">
@@ -834,9 +874,17 @@
                                 <template x-if="getSimInfo(simId).protocol === 'mqtt'">
                                     <div class="member-controls">
                                         <div class="member-control-row">
+                                            <span class="control-label">Emu</span>
+                                            <div class="mini-toggle emu-toggle" :class="{ 'on': getSimInfo(simId).running }"
+                                                 @click="toggleEmulator(simId)">
+                                                <div class="mini-toggle-thumb"></div>
+                                            </div>
+                                            <span class="control-status" x-text="getSimInfo(simId).running ? 'Running' : 'Stopped'"></span>
+                                        </div>
+                                        <div class="member-control-row">
                                             <span class="control-label">EV</span>
-                                            <div class="mini-toggle" :class="{ 'on': getMqttEvConnected(simId) }"
-                                                 @click="toggleMqttEvConnected(simId)">
+                                            <div class="mini-toggle" :class="{ 'on': getMqttEvConnected(simId), 'disabled': !getSimInfo(simId).running }"
+                                                 @click="if (!getSimInfo(simId).running) return; toggleMqttEvConnected(simId)">
                                                 <div class="mini-toggle-thumb"></div>
                                             </div>
                                             <span class="control-status" x-text="getMqttEvConnected(simId) ? 'Connected' : 'Disconnected'"></span>
@@ -847,6 +895,8 @@
                                                 <input type="range" class="mini-slider mqtt-power"
                                                        :min="-getMqttMaxDischarge(simId)" :max="getMqttMaxCharge(simId)"
                                                        :value="getMqttPower(simId)" step="500"
+                                                       :disabled="!getSimInfo(simId).running"
+                                                       :class="{ 'disabled': !getSimInfo(simId).running }"
                                                        @change="setMqttPower(simId, parseInt($event.target.value))">
                                             </div>
                                             <span class="control-value" :style="getPowerColorStyle(getMqttPower(simId), 'mqtt')"
@@ -866,9 +916,17 @@
                                 <template x-if="getSimInfo(simId).protocol === 'ocpp'">
                                     <div class="member-controls">
                                         <div class="member-control-row">
+                                            <span class="control-label">Emu</span>
+                                            <div class="mini-toggle emu-toggle" :class="{ 'on': getSimInfo(simId).running }"
+                                                 @click="toggleEmulator(simId)">
+                                                <div class="mini-toggle-thumb"></div>
+                                            </div>
+                                            <span class="control-status" x-text="getSimInfo(simId).running ? 'Running' : 'Stopped'"></span>
+                                        </div>
+                                        <div class="member-control-row">
                                             <span class="control-label">EV</span>
-                                            <div class="mini-toggle" :class="{ 'on': getOcppEvConnected(simId) }"
-                                                 @click="toggleOcppEvConnected(simId)">
+                                            <div class="mini-toggle" :class="{ 'on': getOcppEvConnected(simId), 'disabled': !getSimInfo(simId).running }"
+                                                 @click="if (!getSimInfo(simId).running) return; toggleOcppEvConnected(simId)">
                                                 <div class="mini-toggle-thumb"></div>
                                             </div>
                                             <span class="control-status" x-text="getOcppEvConnected(simId) ? 'Connected' : 'Disconnected'"></span>
@@ -879,7 +937,8 @@
                                                 <input type="range" class="mini-slider ocpp-power"
                                                        min="0" :max="getOcppMaxPower(simId)"
                                                        :value="getOcppPower(simId)" step="500"
-                                                       :disabled="!getOcppEvConnected(simId)"
+                                                       :disabled="!getSimInfo(simId).running || !getOcppEvConnected(simId)"
+                                                       :class="{ 'disabled': !getSimInfo(simId).running }"
                                                        @change="setOcppPower(simId, parseInt($event.target.value))">
                                             </div>
                                             <span class="control-value" :style="getPowerColorStyle(getOcppPower(simId), 'ocpp')"
@@ -893,8 +952,8 @@
                                     <div class="member-controls">
                                         <div class="member-control-row">
                                             <span class="control-label">Emu</span>
-                                            <div class="mini-toggle" :class="{ 'on': getModbusRunning(simId) }"
-                                                 @click="toggleModbusRunning(simId)">
+                                            <div class="mini-toggle emu-toggle" :class="{ 'on': getModbusRunning(simId) }"
+                                                 @click="toggleEmulator(simId)">
                                                 <div class="mini-toggle-thumb"></div>
                                             </div>
                                             <span class="control-status" x-text="getModbusRunning(simId) ? 'Running' : 'Stopped'"></span>
@@ -993,7 +1052,7 @@
                                        placeholder="0-4294967295">
                             </template>
                             <template x-if="$store.simulator.data?.running">
-                                <div class="value readonly" x-text="localSerial"></div>
+                                <div class="value live" x-text="getRuntimeSerial()"></div>
                             </template>
                         </div>
                         <div class="config-item">
@@ -1005,7 +1064,7 @@
                                        @blur="onSlaveIdBlur()">
                             </template>
                             <template x-if="$store.simulator.data?.running">
-                                <div class="value readonly" x-text="localSlaveId"></div>
+                                <div class="value live" x-text="getRuntimeSlaveId()"></div>
                             </template>
                         </div>
                         <div class="config-item">
@@ -1018,12 +1077,20 @@
                                 </select>
                             </template>
                             <template x-if="$store.simulator.data?.running">
-                                <div class="value readonly" x-text="localProfile"></div>
+                                <div class="value live" x-text="localProfile"></div>
                             </template>
                         </div>
                         <div class="config-item">
                             <label>Modbus Port</label>
-                            <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset"></div>
+                            <template x-if="$store.simulator.data?.running && $store.simulator.data?.port">
+                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset"></div>
+                            </template>
+                            <template x-if="!$store.simulator.data?.running && $store.simulator.data?.port">
+                                <div class="value" style="color: var(--text-muted);" x-text="`Last: ${($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset}`"></div>
+                            </template>
+                            <template x-if="!$store.simulator.data?.port">
+                                <div class="value" style="color: var(--text-muted);">Not allocated</div>
+                            </template>
                         </div>
                         <div class="config-item">
                             <label>Site</label>
@@ -1182,7 +1249,7 @@
                                        @blur="onSerialBlur()">
                             </template>
                             <template x-if="$store.simulator.data?.running">
-                                <div class="value readonly" x-text="localSerial"></div>
+                                <div class="value live" x-text="getRuntimeSerial()"></div>
                             </template>
                         </div>
 
@@ -1197,14 +1264,22 @@
                                            @blur="onSlaveIdBlur()">
                                 </template>
                                 <template x-if="$store.simulator.data?.running">
-                                    <div class="value readonly" x-text="localSlaveId"></div>
+                                    <div class="value live" x-text="getRuntimeSlaveId()"></div>
                                 </template>
                             </div>
                         </template>
                         <template x-if="$store.app.selectedProtocol === 'modbus'">
                             <div class="config-item">
                                 <label>Modbus Port</label>
-                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset"></div>
+                                <template x-if="$store.simulator.data?.running && $store.simulator.data?.port">
+                                    <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset"></div>
+                                </template>
+                                <template x-if="!$store.simulator.data?.running && $store.simulator.data?.port">
+                                    <div class="value" style="color: var(--text-muted);" x-text="`Last: ${($store.simulator.data?.port || 0) + $store.app.modbusDisplayOffset}`"></div>
+                                </template>
+                                <template x-if="!$store.simulator.data?.port">
+                                    <div class="value" style="color: var(--text-muted);">Not allocated</div>
+                                </template>
                             </div>
                         </template>
 
@@ -1212,14 +1287,30 @@
                         <template x-if="$store.app.selectedProtocol === 'mqtt'">
                             <div class="config-item">
                                 <label>MQTT Port</label>
-                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.mqttDisplayOffset"></div>
+                                <template x-if="$store.simulator.data?.running && $store.simulator.data?.port">
+                                    <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.mqttDisplayOffset"></div>
+                                </template>
+                                <template x-if="!$store.simulator.data?.running && $store.simulator.data?.port">
+                                    <div class="value" style="color: var(--text-muted);" x-text="`Last: ${($store.simulator.data?.port || 0) + $store.app.mqttDisplayOffset}`"></div>
+                                </template>
+                                <template x-if="!$store.simulator.data?.port">
+                                    <div class="value" style="color: var(--text-muted);">Not allocated</div>
+                                </template>
                             </div>
                         </template>
 
                         <template x-if="$store.app.selectedProtocol === 'ocpp'">
                             <div class="config-item">
                                 <label>OCPP Port</label>
-                                <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.ocppDisplayOffset"></div>
+                                <template x-if="$store.simulator.data?.running && $store.simulator.data?.port">
+                                    <div class="value" x-text="($store.simulator.data?.port || 0) + $store.app.ocppDisplayOffset"></div>
+                                </template>
+                                <template x-if="!$store.simulator.data?.running && $store.simulator.data?.port">
+                                    <div class="value" style="color: var(--text-muted);" x-text="`Last: ${($store.simulator.data?.port || 0) + $store.app.ocppDisplayOffset}`"></div>
+                                </template>
+                                <template x-if="!$store.simulator.data?.port">
+                                    <div class="value" style="color: var(--text-muted);">Not allocated</div>
+                                </template>
                             </div>
                         </template>
 
@@ -1236,7 +1327,7 @@
                                            style="flex: 1; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
                                 </template>
                                 <template x-if="$store.simulator.data?.running">
-                                    <div class="value readonly" style="flex: 1; word-break: break-all;" x-text="localOcppUrl || '(not set)'"></div>
+                                    <div class="value live" style="flex: 1; word-break: break-all;" x-text="getRuntimeOcppUrl() || '(not set)'"></div>
                                 </template>
                             </div>
                         </template>
@@ -1260,7 +1351,7 @@
                                 </select>
                             </template>
                             <template x-if="$store.simulator.data?.running">
-                                <div class="value readonly" x-text="localProfile"></div>
+                                <div class="value live" x-text="localProfile"></div>
                             </template>
                         </div>
 

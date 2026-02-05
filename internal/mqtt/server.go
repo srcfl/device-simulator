@@ -78,9 +78,9 @@ type V2XState struct {
 	DischargePowerMin float64 `json:"dischargePowerMin"`
 
 	// Vehicle state
-	SoC                   float64 `json:"soc"`
-	TargetEnergyRequest   float64 `json:"targetEnergyRequest"`
-	RequestedTargetPower  float64 `json:"requestedTargetPower"`
+	SoC                  float64 `json:"soc"`
+	TargetEnergyRequest  float64 `json:"targetEnergyRequest"`
+	RequestedTargetPower float64 `json:"requestedTargetPower"`
 
 	// Control inputs (subscribed topics)
 	TargetPower      float64 `json:"targetPower"`
@@ -166,6 +166,10 @@ func (s *Server) Start() error {
 
 	if s.running {
 		return nil
+	}
+
+	if s.port == 0 {
+		return fmt.Errorf("mqtt port not set")
 	}
 
 	// Recreate stop channel (may have been closed by previous Stop)
@@ -332,9 +336,9 @@ func (s *Server) handleMessage(topic string, payload []byte, clientID string, cl
 	payloadStr := string(payload)
 
 	s.addLog("message", map[string]interface{}{
-		"topic":      topic,
-		"payload":    payloadStr,
-		"client_id":  clientID,
+		"topic":       topic,
+		"payload":     payloadStr,
+		"client_id":   clientID,
 		"client_addr": clientAddr,
 	})
 
@@ -492,7 +496,7 @@ func (s *Server) startLowPowerTimeout() {
 				s.updateCurrents()
 
 				s.addLog("auto-pause", map[string]interface{}{
-					"reason":       "low power timeout",
+					"reason":        "low power timeout",
 					"previousPower": absPower,
 				})
 			}
@@ -678,6 +682,13 @@ func (s *Server) SerialNumber() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.serialNumber
+}
+
+// SetPort updates the server port (should be called while stopped)
+func (s *Server) SetPort(port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.port = port
 }
 
 // SetSerialNumber sets the serial number

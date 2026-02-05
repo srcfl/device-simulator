@@ -61,6 +61,32 @@ document.addEventListener('alpine:init', () => {
             this.localProfile = Alpine.store('simulator').activeProfile || '';
         },
 
+        getRuntimeSerial() {
+            const data = Alpine.store('simulator').data;
+            const runtime = data?.runtime_serial;
+            if (runtime !== undefined && runtime !== null && runtime !== '') {
+                return runtime;
+            }
+            return this.localSerial;
+        },
+
+        getRuntimeSlaveId() {
+            const data = Alpine.store('simulator').data;
+            if (data?.slave_id !== undefined && data?.slave_id !== null) {
+                return data.slave_id;
+            }
+            return this.localSlaveId;
+        },
+
+        getRuntimeOcppUrl() {
+            const data = Alpine.store('simulator').data;
+            const runtime = data?.state?.ocppURL ?? data?.ocpp_url;
+            if (runtime !== undefined && runtime !== null && runtime !== '') {
+                return runtime;
+            }
+            return this.localOcppUrl || '';
+        },
+
         // Serial field handlers
         onSerialFocus() {
             this.editingSerial = true;
@@ -1149,6 +1175,8 @@ document.addEventListener('alpine:init', () => {
         async toggleMqttEvConnected(simId) {
             await this.withToggleLock(`mqtt-ev-${simId}`, async () => {
                 try {
+                    const sim = this.getSimulator(simId);
+                    if (!sim?.running) return;
                     const current = this.getMqttEvConnected(simId);
                     await api.setState(simId, 'evConnected', !current);
                     await Alpine.store('app').loadSimulators();
@@ -1159,6 +1187,8 @@ document.addEventListener('alpine:init', () => {
         },
 
         async setMqttPower(simId, power) {
+            const sim = this.getSimulator(simId);
+            if (!sim?.running) return;
             await api.setPower(simId, power);
         },
 
@@ -1190,6 +1220,8 @@ document.addEventListener('alpine:init', () => {
         async toggleOcppEvConnected(simId) {
             await this.withToggleLock(`ocpp-ev-${simId}`, async () => {
                 try {
+                    const sim = this.getSimulator(simId);
+                    if (!sim?.running) return;
                     const current = this.getOcppEvConnected(simId);
                     await api.setState(simId, 'evConnected', !current);
                     await Alpine.store('app').loadSimulators();
@@ -1201,6 +1233,7 @@ document.addEventListener('alpine:init', () => {
 
         async setOcppPower(simId, power) {
             const sim = this.getSimulator(simId);
+            if (!sim?.running) return;
             const wasCharging = sim?.has_active_transaction || false;
 
             if (power > 0 && !wasCharging) {
@@ -1235,6 +1268,16 @@ document.addEventListener('alpine:init', () => {
                     await Alpine.store('app').loadSimulators();
                 } catch (e) {
                     console.error('Toggle Modbus running error:', e);
+                }
+            });
+        },
+
+        async toggleEmulator(simId) {
+            await this.withToggleLock(`emu-${simId}`, async () => {
+                try {
+                    await Alpine.store('app').toggleEmulatorRunning(simId);
+                } catch (e) {
+                    console.error('Toggle emulator error:', e);
                 }
             });
         },

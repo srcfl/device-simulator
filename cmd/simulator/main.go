@@ -419,10 +419,7 @@ func createSimulator(simType string) (*Simulator, error) {
 		return nil, fmt.Errorf("unknown simulator type: %s", simType)
 	}
 
-	port := portAllocator.AllocateAvailableString(protocol)
-	if port == 0 {
-		return nil, fmt.Errorf("no available port for %s", protocol)
-	}
+	port := 0
 
 	nextIDMu.Lock()
 	id := nextSimulatorID
@@ -611,22 +608,6 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 	}
 
 	port := saved.Port
-	if port == 0 {
-		port = portAllocator.AllocateAvailableString(protocol)
-		if port == 0 {
-			return nil, fmt.Errorf("no available port for %s", protocol)
-		}
-		addWarning(fmt.Sprintf("%s: port reassigned to %d", saved.Serial, port))
-	} else {
-		if !portAllocator.Reserve(port) {
-			newPort := portAllocator.AllocateAvailableString(protocol)
-			if newPort == 0 {
-				return nil, fmt.Errorf("no available port for %s", protocol)
-			}
-			addWarning(fmt.Sprintf("%s: port %d unavailable, assigned %d", saved.Serial, port, newPort))
-			port = newPort
-		}
-	}
 
 	pm := profiles.NewManager("profiles")
 	pm.InitEmbedded()
@@ -951,11 +932,37 @@ func startSimulatorServer(sim *Simulator) error {
 		return nil // Already running
 	}
 
+	// Ensure a port is available and reserved for this simulator
+	port := sim.Port
+	if port != 0 {
+		if !portAllocator.Reserve(port) {
+			port = 0
+		}
+	}
+	if port == 0 {
+		port = portAllocator.AllocateAvailableString(sim.Protocol)
+		if port == 0 {
+			return fmt.Errorf("no available port for %s", sim.Protocol)
+		}
+		sim.Port = port
+	}
+	switch sim.Protocol {
+	case "mqtt":
+		if sim.MQTTServer != nil {
+			sim.MQTTServer.SetPort(sim.Port)
+		}
+	case "ocpp":
+		if sim.OCPPServer != nil {
+			sim.OCPPServer.SetPort(sim.Port)
+		}
+	}
+
 	var err error
 	switch sim.Protocol {
 	case "modbus":
 		addr := fmt.Sprintf(":%d", sim.Port)
 		if err = sim.Server.Listen(addr); err != nil {
+			portAllocator.Release(sim.Port)
 			return fmt.Errorf("modbus listen error: %v", err)
 		}
 		go func() {
@@ -967,12 +974,14 @@ func startSimulatorServer(sim *Simulator) error {
 
 	case "mqtt":
 		if err = sim.MQTTServer.Start(); err != nil {
+			portAllocator.Release(sim.Port)
 			return fmt.Errorf("mqtt start error: %v", err)
 		}
 		log.Printf("[%s] Started MQTT broker on port %d", sim.Serial, sim.Port)
 
 	case "ocpp":
 		if err = sim.OCPPServer.Start(); err != nil {
+			portAllocator.Release(sim.Port)
 			return fmt.Errorf("ocpp start error: %v", err)
 		}
 		log.Printf("[%s] Started OCPP server on port %d", sim.Serial, sim.Port)
@@ -1007,6 +1016,9 @@ func stopSimulatorServer(sim *Simulator) {
 	}
 
 	sim.Running = false
+	if sim.Port != 0 {
+		portAllocator.Release(sim.Port)
+	}
 	markStateDirty()
 }
 
@@ -1484,12 +1496,13 @@ func getSimulator(id int) *Simulator {
 func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 	sim.mu.RLock()
 	status := map[string]interface{}{
-		"id":       sim.ID,
-		"serial":   sim.Serial,
-		"protocol": sim.Protocol,
-		"category": sim.Category,
-		"port":     sim.Port,
-		"running":  sim.Running,
+		"id":             sim.ID,
+		"serial":         sim.Serial,
+		"protocol":       sim.Protocol,
+		"category":       sim.Category,
+		"port":           sim.Port,
+		"running":        sim.Running,
+		"runtime_serial": getRuntimeSerial(sim),
 		"automation": map[string]interface{}{
 			"enabled":         sim.Automation.Enabled,
 			"time_multiplier": sim.Automation.TimeMultiplier,

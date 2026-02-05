@@ -65,9 +65,9 @@ type Server struct {
 	stopChan        chan struct{}
 
 	// Client mode fields
-	ocppURL         string // Central System URL to connect to (client mode)
-	clientMode      bool   // true = connect to URL, false = listen for connections
-	reconnectDelay  time.Duration
+	ocppURL        string // Central System URL to connect to (client mode)
+	clientMode     bool   // true = connect to URL, false = listen for connections
+	reconnectDelay time.Duration
 
 	// 3-phase metering
 	voltageL1 float64
@@ -78,9 +78,9 @@ type Server struct {
 	currentL3 float64
 
 	// Simulation control
-	targetPowerW   float64 // Target charging power in watts
-	evConnected    bool    // Whether an EV is plugged in
-	nextTxId       int     // Counter for local transaction IDs
+	targetPowerW float64 // Target charging power in watts
+	evConnected  bool    // Whether an EV is plugged in
+	nextTxId     int     // Counter for local transaction IDs
 }
 
 // NewServer creates a new OCPP charge point simulator
@@ -163,6 +163,10 @@ func (s *Server) Start() error {
 		s.running = true
 		log.Printf("[%s] OCPP client connecting to %s", s.serialNumber, s.ocppURL)
 		return nil
+	}
+
+	if s.port == 0 {
+		return fmt.Errorf("ocpp port not set")
 	}
 
 	// Server mode: wait for connections
@@ -383,6 +387,7 @@ func (s *Server) Stop() error {
 
 	if s.wsConn != nil {
 		s.wsConn.Close()
+		s.wsConn = nil
 	}
 
 	if s.httpServer != nil {
@@ -966,13 +971,13 @@ func (s *Server) GetState() map[string]interface{} {
 		"ocppURL":       s.ocppURL,
 		"clientMode":    s.clientMode,
 		// 3-phase metering
-		"voltageL1":   s.voltageL1,
-		"voltageL2":   s.voltageL2,
-		"voltageL3":   s.voltageL3,
-		"currentL1":   s.currentL1,
-		"currentL2":   s.currentL2,
-		"currentL3":   s.currentL3,
-		"totalPower":  totalPower,
+		"voltageL1":  s.voltageL1,
+		"voltageL2":  s.voltageL2,
+		"voltageL3":  s.voltageL3,
+		"currentL1":  s.currentL1,
+		"currentL2":  s.currentL2,
+		"currentL3":  s.currentL3,
+		"totalPower": totalPower,
 		// Control state
 		"evConnected":          s.evConnected,
 		"targetPowerW":         s.targetPowerW,
@@ -1302,6 +1307,13 @@ func (s *Server) SerialNumber() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.serialNumber
+}
+
+// SetPort updates the server port (should be called while stopped)
+func (s *Server) SetPort(port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.port = port
 }
 
 // SetSerialNumber sets the serial number

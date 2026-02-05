@@ -2,6 +2,7 @@ package modbus
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -22,27 +23,29 @@ type LogEntry struct {
 
 // ClientInfo represents a connected Modbus client
 type ClientInfo struct {
-	ID         string    `json:"id"`
-	RemoteAddr string    `json:"remote_addr"`
+	ID          string    `json:"id"`
+	RemoteAddr  string    `json:"remote_addr"`
 	ConnectedAt time.Time `json:"connected_at"`
-	LastSeen   time.Time `json:"last_seen"`
+	LastSeen    time.Time `json:"last_seen"`
 }
 
 // Server is a Modbus TCP server
 type Server struct {
-	mu             sync.RWMutex
-	holdingRegs    []uint16
-	inputRegs      []uint16
-	listener       net.Listener
-	logs           []LogEntry
-	maxLogs        int
-	logMu          sync.RWMutex
-	mirrorToInput  bool
-	serialNumber   string
-	onWrite        func(addr uint16, values []uint16) // callback when registers are written
-	clients        map[string]*ClientInfo
-	clientsMu      sync.RWMutex
-	nextClientID   int
+	mu            sync.RWMutex
+	holdingRegs   []uint16
+	inputRegs     []uint16
+	listener      net.Listener
+	conns         map[string]net.Conn
+	connsMu       sync.Mutex
+	logs          []LogEntry
+	maxLogs       int
+	logMu         sync.RWMutex
+	mirrorToInput bool
+	serialNumber  string
+	onWrite       func(addr uint16, values []uint16) // callback when registers are written
+	clients       map[string]*ClientInfo
+	clientsMu     sync.RWMutex
+	nextClientID  int
 }
 
 // NewServer creates a new Modbus server with the specified register count
@@ -54,6 +57,7 @@ func NewServer(regCount int) *Server {
 		maxLogs:       500,
 		mirrorToInput: true,
 		clients:       make(map[string]*ClientInfo),
+		conns:         make(map[string]net.Conn),
 	}
 	return s
 }
@@ -210,6 +214,9 @@ func (s *Server) Serve() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
 			return err
 		}
 		go s.handleConnection(conn)
@@ -219,8 +226,9 @@ func (s *Server) Serve() error {
 // Close closes the server
 func (s *Server) Close() error {
 	if s.listener != nil {
-		return s.listener.Close()
+		_ = s.listener.Close()
 	}
+	s.closeAllConnections()
 	return nil
 }
 
@@ -276,6 +284,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	// Track client
 	clientID := s.addClient(remoteAddr)
+	s.addConnection(clientID, conn)
+	defer s.removeConnection(clientID)
 	defer s.removeClient(clientID)
 
 	buf := make([]byte, 256)
@@ -351,6 +361,32 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if response != nil {
 			conn.Write(response)
 		}
+	}
+}
+
+func (s *Server) addConnection(clientID string, conn net.Conn) {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	s.conns[clientID] = conn
+}
+
+func (s *Server) removeConnection(clientID string) {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	delete(s.conns, clientID)
+}
+
+func (s *Server) closeAllConnections() {
+	s.connsMu.Lock()
+	conns := make([]net.Conn, 0, len(s.conns))
+	for _, conn := range s.conns {
+		conns = append(conns, conn)
+	}
+	s.conns = make(map[string]net.Conn)
+	s.connsMu.Unlock()
+
+	for _, conn := range conns {
+		_ = conn.Close()
 	}
 }
 

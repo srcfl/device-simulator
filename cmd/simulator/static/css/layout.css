@@ -308,6 +308,8 @@
 .sim-profile.inactive { color: var(--text-muted); font-style: italic; }
 .sim-serial { font-size: 0.65rem; color: var(--text-secondary); }
 .sim-ports { font-size: 0.65rem; color: var(--text-muted); margin-top: 3px; }
+.sim-port-unassigned { color: var(--text-muted); font-style: italic; }
+.sim-port-last { color: var(--text-muted); font-style: italic; }
 .sim-stats { font-size: var(--font-size-sm); color: var(--text-secondary); margin-top: 3px; display: flex; gap: var(--spacing-sm); align-items: center; }
 
 .sim-mode {
@@ -520,6 +522,11 @@
     height: 32px;
     display: flex;
     align-items: center;
+}
+
+.config-item .value.live {
+    min-width: 120px;
+    padding: 0 0.6rem;
 }
 
 .config-item .value.readonly {
