@@ -35,12 +35,12 @@ type OCPPConfig struct {
 
 // Profile defines a device simulation profile
 type Profile struct {
-	Name        string                     `json:"name"`
-	Description string                     `json:"description"`
-	Protocol    string                     `json:"protocol"`             // modbus, mqtt, ocpp
-	DeviceType  string                     `json:"device_type"`
-	Categories  []string                   `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
-	EVCCRef     string                     `json:"evcc_ref,omitempty"`   // Link to EVCC template
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Protocol    string   `json:"protocol"` // modbus, mqtt, ocpp
+	DeviceType  string   `json:"device_type"`
+	Categories  []string `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
+	EVCCRef     string   `json:"evcc_ref,omitempty"`   // Link to EVCC template
 
 	// Modbus-specific
 	Defaults map[uint16]float64 `json:"defaults,omitempty"`
@@ -551,26 +551,26 @@ var EmbeddedProfiles = map[string]*Profile{
 			BaseTopic:         "device/evCharger/0",
 			PublishIntervalMs: 1000,
 			Defaults: map[string]interface{}{
-				"sessionState":       "IDLE",
-				"controlMode":        "CONTROLLABLE",
-				"evConnected":        false,
-				"chargeProtocol":     "CCS",
-				"powerAc":            float64(0),
-				"powerDc":            float64(0),
-				"currentAc1":         float64(0),
-				"currentAc2":         float64(0),
-				"currentAc3":         float64(0),
-				"voltageAc1":         float64(230),
-				"voltageAc2":         float64(230),
-				"voltageAc3":         float64(230),
-				"frequency":          float64(50),
-				"soc":                float64(50),
-				"chargePowerMax":     float64(11000),
-				"dischargePowerMax":  float64(11000),
-				"chargePowerMin":     float64(1400),
-				"dischargePowerMin":  float64(1400),
-				"energyAcImport":     float64(0),
-				"energyAcExport":     float64(0),
+				"sessionState":      "IDLE",
+				"controlMode":       "CONTROLLABLE",
+				"evConnected":       false,
+				"chargeProtocol":    "CCS",
+				"powerAc":           float64(0),
+				"powerDc":           float64(0),
+				"currentAc1":        float64(0),
+				"currentAc2":        float64(0),
+				"currentAc3":        float64(0),
+				"voltageAc1":        float64(230),
+				"voltageAc2":        float64(230),
+				"voltageAc3":        float64(230),
+				"frequency":         float64(50),
+				"soc":               float64(50),
+				"chargePowerMax":    float64(11000),
+				"dischargePowerMax": float64(11000),
+				"chargePowerMin":    float64(1400),
+				"dischargePowerMin": float64(1400),
+				"energyAcImport":    float64(0),
+				"energyAcExport":    float64(0),
 			},
 		},
 	},
@@ -611,9 +611,11 @@ var EmbeddedProfiles = map[string]*Profile{
 			NumConnectors: 1,
 			MaxPowerKW:    7.7,
 			Configuration: map[string]string{
-				"HeartbeatInterval":        "60",
-				"MeterValueSampleInterval": "30",
-				"NumberOfConnectors":       "1",
+				"HeartbeatInterval":                       "60",
+				"MeterValueSampleInterval":                "30",
+				"NumberOfConnectors":                      "1",
+				"ConnectorSwitch3to1PhaseSupported":       "false",
+				"ChargingScheduleAllowedChargingRateUnit": "Current",
 			},
 			DefaultStatus: "Available",
 		},

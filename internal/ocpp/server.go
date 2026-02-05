@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,26 +45,27 @@ type Transaction struct {
 
 // Server represents an OCPP charge point simulator
 type Server struct {
-	mu              sync.RWMutex
-	writeMu         sync.Mutex // Mutex for serializing WebSocket writes
-	id              int
-	serialNumber    string
-	port            int
-	vendor          string
-	model           string
-	numConnectors   int
-	maxPowerKW      float64
-	connectors      map[int]*Connector
-	transactions    map[int]*Transaction
-	configuration   map[string]string
-	logs            []device.LogEntry
-	maxLogs         int
-	running         bool
-	httpServer      *http.Server
-	wsConn          *websocket.Conn
-	messageIdSeq    int64
-	pendingRequests map[string]chan json.RawMessage
-	stopChan        chan struct{}
+	mu               sync.RWMutex
+	writeMu          sync.Mutex // Mutex for serializing WebSocket writes
+	id               int
+	serialNumber     string
+	port             int
+	vendor           string
+	model            string
+	numConnectors    int
+	maxPowerKW       float64
+	connectors       map[int]*Connector
+	transactions     map[int]*Transaction
+	chargingProfiles map[int]*ChargingProfile
+	configuration    map[string]string
+	logs             []device.LogEntry
+	maxLogs          int
+	running          bool
+	httpServer       *http.Server
+	wsConn           *websocket.Conn
+	messageIdSeq     int64
+	pendingRequests  map[string]chan json.RawMessage
+	stopChan         chan struct{}
 
 	// Client mode fields
 	ocppURL        string // Central System URL to connect to (client mode)
@@ -97,15 +100,16 @@ func NewServer(id int, port int, vendor, model string, numConnectors int, maxPow
 	}
 
 	return &Server{
-		id:            id,
-		serialNumber:  fmt.Sprintf("OCPPSIM%02d", id),
-		port:          port,
-		vendor:        vendor,
-		model:         model,
-		numConnectors: numConnectors,
-		maxPowerKW:    maxPowerKW,
-		connectors:    connectors,
-		transactions:  make(map[int]*Transaction),
+		id:               id,
+		serialNumber:     fmt.Sprintf("OCPPSIM%02d", id),
+		port:             port,
+		vendor:           vendor,
+		model:            model,
+		numConnectors:    numConnectors,
+		maxPowerKW:       maxPowerKW,
+		connectors:       connectors,
+		transactions:     make(map[int]*Transaction),
+		chargingProfiles: make(map[int]*ChargingProfile),
 		configuration: map[string]string{
 			"HeartbeatInterval":        "60",
 			"MeterValueSampleInterval": "30",
@@ -143,6 +147,21 @@ func (s *Server) SetVendorModel(vendor, model string) {
 	defer s.mu.Unlock()
 	s.vendor = vendor
 	s.model = model
+}
+
+// ApplyConfiguration merges configuration values into the OCPP configuration map
+func (s *Server) ApplyConfiguration(config map[string]string) {
+	if config == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.configuration == nil {
+		s.configuration = make(map[string]string)
+	}
+	for k, v := range config {
+		s.configuration[k] = v
+	}
 }
 
 // Start starts the OCPP server (or connects as client if URL is set)
@@ -299,14 +318,16 @@ func (s *Server) readLoop(conn *websocket.Conn) {
 
 // meterValuesLoop periodically sends meter values during active transactions
 func (s *Server) meterValuesLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
 	for {
+		intervalSeconds := s.getMeterValueSampleInterval()
+		if intervalSeconds <= 0 {
+			intervalSeconds = 30
+		}
+
 		select {
 		case <-s.stopChan:
 			return
-		case <-ticker.C:
+		case <-time.After(time.Duration(intervalSeconds) * time.Second):
 			s.sendMeterValuesForActiveTransactions()
 		}
 	}
@@ -486,6 +507,18 @@ func (s *Server) handleCall(messageId, action string, payload json.RawMessage) {
 			response = s.handleRemoteStopTransaction(req)
 		}
 
+	case ActionSetChargingProfile:
+		var req SetChargingProfileRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleSetChargingProfile(req)
+		}
+
+	case ActionClearChargingProfile:
+		var req ClearChargingProfileRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleClearChargingProfile(req)
+		}
+
 	case ActionGetConfiguration:
 		var req GetConfigurationRequest
 		if err = json.Unmarshal(payload, &req); err == nil {
@@ -579,6 +612,11 @@ func (s *Server) handleRemoteStartTransaction(req RemoteStartTransactionRequest)
 
 	conn.Status = StatusCharging
 
+	// Apply charging profile if provided
+	if req.ChargingProfile != nil {
+		s.applyChargingProfile(connectorId, req.ChargingProfile)
+	}
+
 	// Send StatusNotification and StartTransaction asynchronously
 	go func() {
 		s.sendStatusNotification(connectorId, StatusPreparing)
@@ -622,6 +660,23 @@ func (s *Server) handleRemoteStopTransaction(req RemoteStopTransactionRequest) *
 	}()
 
 	return &RemoteStopTransactionResponse{Status: "Accepted"}
+}
+
+func (s *Server) handleSetChargingProfile(req SetChargingProfileRequest) *SetChargingProfileResponse {
+	if req.ConnectorId <= 0 {
+		return &SetChargingProfileResponse{Status: "Rejected"}
+	}
+
+	s.applyChargingProfile(req.ConnectorId, &req.CsChargingProfiles)
+	return &SetChargingProfileResponse{Status: "Accepted"}
+}
+
+func (s *Server) handleClearChargingProfile(req ClearChargingProfileRequest) *ClearChargingProfileResponse {
+	cleared := s.clearChargingProfiles(req)
+	if cleared {
+		return &ClearChargingProfileResponse{Status: "Accepted"}
+	}
+	return &ClearChargingProfileResponse{Status: "Unknown"}
 }
 
 func (s *Server) handleGetConfiguration(req GetConfigurationRequest) *GetConfigurationResponse {
@@ -696,6 +751,116 @@ func (s *Server) handleReset(req ResetRequest) *ResetResponse {
 	}
 
 	return &ResetResponse{Status: "Accepted"}
+}
+
+func (s *Server) applyChargingProfile(connectorId int, profile *ChargingProfile) {
+	if profile == nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.chargingProfiles == nil {
+		s.chargingProfiles = make(map[int]*ChargingProfile)
+	}
+	s.chargingProfiles[connectorId] = profile
+
+	powerW := s.computePowerFromProfileLocked(profile)
+	if powerW < 0 {
+		powerW = 0
+	}
+	s.targetPowerW = powerW
+}
+
+func (s *Server) clearChargingProfiles(req ClearChargingProfileRequest) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cleared := false
+	for connectorId, profile := range s.chargingProfiles {
+		if profile == nil {
+			continue
+		}
+		if req.ConnectorId != nil && connectorId != *req.ConnectorId {
+			continue
+		}
+		if req.Id != nil && profile.ChargingProfileId != *req.Id {
+			continue
+		}
+		if req.ChargingProfilePurpose != "" && profile.ChargingProfilePurpose != req.ChargingProfilePurpose {
+			continue
+		}
+		if req.StackLevel != nil && profile.StackLevel != *req.StackLevel {
+			continue
+		}
+		delete(s.chargingProfiles, connectorId)
+		cleared = true
+	}
+
+	if cleared {
+		s.targetPowerW = 0
+	}
+
+	return cleared
+}
+
+func (s *Server) computePowerFromProfileLocked(profile *ChargingProfile) float64 {
+	if profile == nil {
+		return 0
+	}
+
+	schedule := profile.ChargingSchedule
+	if len(schedule.ChargingSchedulePeriod) == 0 {
+		return 0
+	}
+
+	period := schedule.ChargingSchedulePeriod[0]
+	limit := period.Limit
+	if limit <= 0 {
+		return 0
+	}
+
+	unit := strings.ToUpper(strings.TrimSpace(schedule.ChargingRateUnit))
+	switch unit {
+	case "A", "AMPERE", "CURRENT":
+		phases := 3
+		if period.NumberPhases != nil && *period.NumberPhases > 0 {
+			phases = *period.NumberPhases
+		}
+		avgVoltage := s.averagePhaseVoltageLocked()
+		return limit * float64(phases) * avgVoltage
+	case "W", "WATT", "POWER":
+		return limit
+	default:
+		return 0
+	}
+}
+
+func (s *Server) averagePhaseVoltageLocked() float64 {
+	v1, v2, v3 := s.voltageL1, s.voltageL2, s.voltageL3
+	if v1 <= 0 && v2 <= 0 && v3 <= 0 {
+		return 230.0
+	}
+	return (v1 + v2 + v3) / 3.0
+}
+
+func (s *Server) getMeterValueSampleInterval() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.configuration == nil {
+		return 30
+	}
+	value, ok := s.configuration["MeterValueSampleInterval"]
+	if !ok {
+		return 30
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 30
+	}
+	return parsed
 }
 
 func (s *Server) sendBootNotification() {
@@ -928,7 +1093,16 @@ func (s *Server) GetState() map[string]interface{} {
 	defer s.mu.RUnlock()
 
 	connectors := make([]map[string]interface{}, 0)
-	for _, c := range s.connectors {
+	ids := make([]int, 0, len(s.connectors))
+	for id := range s.connectors {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	for _, id := range ids {
+		c := s.connectors[id]
+		if c == nil {
+			continue
+		}
 		connectors = append(connectors, map[string]interface{}{
 			"id":           c.ID,
 			"status":       c.Status,
@@ -959,6 +1133,39 @@ func (s *Server) GetState() map[string]interface{} {
 	// Check if there's an active transaction
 	hasActiveTransaction := len(s.transactions) > 0
 
+	// Copy configuration for safe external use
+	configCopy := make(map[string]string, len(s.configuration))
+	for k, v := range s.configuration {
+		configCopy[k] = v
+	}
+
+	phaseMode := "unknown"
+	phaseSwitchingSupported := false
+	if val, ok := configCopy["ConnectorSwitch3to1PhaseSupported"]; ok {
+		if parsed, err := strconv.ParseBool(val); err == nil {
+			phaseSwitchingSupported = parsed
+			if parsed {
+				phaseMode = "1/3-phase"
+			} else {
+				phaseMode = "3-phase only"
+			}
+		}
+	}
+
+	rateUnitAllowed := configCopy["ChargingScheduleAllowedChargingRateUnit"]
+	if strings.EqualFold(rateUnitAllowed, "Current") {
+		rateUnitAllowed = "Current (A)"
+	} else if strings.EqualFold(rateUnitAllowed, "Power") {
+		rateUnitAllowed = "Power (W)"
+	}
+
+	meterInterval := 0
+	if val, ok := configCopy["MeterValueSampleInterval"]; ok {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			meterInterval = parsed
+		}
+	}
+
 	return map[string]interface{}{
 		"serialNumber":  s.serialNumber,
 		"vendor":        s.vendor,
@@ -979,9 +1186,14 @@ func (s *Server) GetState() map[string]interface{} {
 		"currentL3":  s.currentL3,
 		"totalPower": totalPower,
 		// Control state
-		"evConnected":          s.evConnected,
-		"targetPowerW":         s.targetPowerW,
-		"hasActiveTransaction": hasActiveTransaction,
+		"evConnected":              s.evConnected,
+		"targetPowerW":             s.targetPowerW,
+		"hasActiveTransaction":     hasActiveTransaction,
+		"configuration":            configCopy,
+		"phaseMode":                phaseMode,
+		"phaseSwitchingSupported":  phaseSwitchingSupported,
+		"chargingRateUnitAllowed":  rateUnitAllowed,
+		"meterValueSampleInterval": meterInterval,
 	}
 }
 

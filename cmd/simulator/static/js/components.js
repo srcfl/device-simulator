@@ -684,6 +684,9 @@ document.addEventListener('alpine:init', () => {
                 { label: 'Connection', value: s.connected ? 'Connected' : 'Disconnected', highlight: true, colorStyle: s.connected ? 'color: var(--color-primary);' : 'color: var(--text-muted);' },
                 { label: 'Vendor', value: s.vendor || 'SimulatorCo' },
                 { label: 'Model', value: s.model || 'SimCharger' },
+                { label: 'Phase Mode', value: s.phaseMode || 'unknown' },
+                { label: 'Rate Unit', value: s.chargingRateUnitAllowed || 'unknown' },
+                { label: 'Meter Interval', value: s.meterValueSampleInterval ? `${s.meterValueSampleInterval} s` : 'unknown' },
                 { label: 'Total Power', value: `${(s.totalPower || 0).toFixed(0)} W`, highlight: true },
                 { label: 'L1 Voltage', value: `${(s.voltageL1 || 0).toFixed(1)} V` },
                 { label: 'L2 Voltage', value: `${(s.voltageL2 || 0).toFixed(1)} V` },
@@ -827,7 +830,10 @@ document.addEventListener('alpine:init', () => {
         // Home load state (mirrors Site Load dashboard)
         loadScenarios: [],
         homeLoads: { l1: 0, l2: 0, l3: 0 },
-        homeLoadLinked: true,
+        homeLoadLinks: { l1: true, l2: true, l3: true },
+        homeLoadLinksInitialized: false,
+        homeLoadLinksDirty: false,
+        homeLoadSiteId: null,
         homeLoadScenario: '',
         homeLoadLoading: false,
         homeLoadDebounce: null,
@@ -912,8 +918,19 @@ document.addEventListener('alpine:init', () => {
             const data = Alpine.store('site').data;
             if (!data) return;
 
+            const siteId = Alpine.store('site').selectedId;
+            if (siteId !== this.homeLoadSiteId) {
+                this.homeLoadSiteId = siteId;
+                this.homeLoadLinksDirty = false;
+                this.homeLoadLinksInitialized = false;
+            }
+
             this.homeLoadScenario = data.load_scenario || '';
-            this.homeLoadLinked = data.load_linked ?? true;
+            const linked = data.load_linked ?? true;
+            if (!this.homeLoadLinksInitialized || !this.homeLoadLinksDirty) {
+                this.homeLoadLinks = { l1: linked, l2: linked, l3: linked };
+                this.homeLoadLinksInitialized = true;
+            }
 
             if (!this.homeLoadScenario && this.loadScenarios.length > 0 && !this.homeLoadLoading) {
                 this.setHomeLoadScenario(this.loadScenarios[0].key);
@@ -981,9 +998,23 @@ document.addEventListener('alpine:init', () => {
             this.homeLoadLoading = false;
         },
 
-        toggleHomeLoadLinked() {
+        getHomeLinkedPhases(phase) {
+            if (!this.homeLoadLinks[phase]) return [phase];
+            const phases = ['l1', 'l2', 'l3'].filter(p => this.homeLoadLinks[p]);
+            return phases.length > 0 ? phases : [phase];
+        },
+
+        areHomeLinksAllActive() {
+            return this.homeLoadLinks.l1 && this.homeLoadLinks.l2 && this.homeLoadLinks.l3;
+        },
+
+        toggleHomeLoadLink(phase) {
             if (this.isSiteSimulating()) return;
-            this.homeLoadLinked = !this.homeLoadLinked;
+            this.homeLoadLinksDirty = true;
+            this.homeLoadLinks = {
+                ...this.homeLoadLinks,
+                [phase]: !this.homeLoadLinks[phase]
+            };
             this.sendHomePhaseLoads();
         },
 
@@ -991,13 +1022,14 @@ document.addEventListener('alpine:init', () => {
             if (this.isSiteSimulating()) return;
             const newValue = parseFloat(value);
 
-            if (this.homeLoadLinked) {
+            const linkedPhases = this.getHomeLinkedPhases(phase);
+            if (linkedPhases.length > 1) {
                 const oldValue = this.homeLoads[phase];
                 const delta = newValue - oldValue;
 
-                this.homeLoads.l1 = Math.max(0, Math.min(5000, this.homeLoads.l1 + delta));
-                this.homeLoads.l2 = Math.max(0, Math.min(5000, this.homeLoads.l2 + delta));
-                this.homeLoads.l3 = Math.max(0, Math.min(5000, this.homeLoads.l3 + delta));
+                linkedPhases.forEach(p => {
+                    this.homeLoads[p] = Math.max(0, Math.min(5000, this.homeLoads[p] + delta));
+                });
             } else {
                 this.homeLoads[phase] = newValue;
             }
@@ -1020,7 +1052,7 @@ document.addEventListener('alpine:init', () => {
                     this.homeLoads.l1,
                     this.homeLoads.l2,
                     this.homeLoads.l3,
-                    this.homeLoadLinked
+                    this.areHomeLinksAllActive()
                 );
             } catch (e) {
                 console.error('Failed to set home phase loads:', e);

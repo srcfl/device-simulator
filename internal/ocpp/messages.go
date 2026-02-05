@@ -14,17 +14,19 @@ const (
 
 // OCPP 1.6 Actions
 const (
-	ActionBootNotification        = "BootNotification"
-	ActionHeartbeat               = "Heartbeat"
-	ActionStatusNotification      = "StatusNotification"
-	ActionStartTransaction        = "StartTransaction"
-	ActionStopTransaction         = "StopTransaction"
-	ActionMeterValues             = "MeterValues"
-	ActionRemoteStartTransaction  = "RemoteStartTransaction"
-	ActionRemoteStopTransaction   = "RemoteStopTransaction"
-	ActionChangeConfiguration     = "ChangeConfiguration"
-	ActionGetConfiguration        = "GetConfiguration"
-	ActionReset                   = "Reset"
+	ActionBootNotification       = "BootNotification"
+	ActionHeartbeat              = "Heartbeat"
+	ActionStatusNotification     = "StatusNotification"
+	ActionStartTransaction       = "StartTransaction"
+	ActionStopTransaction        = "StopTransaction"
+	ActionMeterValues            = "MeterValues"
+	ActionRemoteStartTransaction = "RemoteStartTransaction"
+	ActionRemoteStopTransaction  = "RemoteStopTransaction"
+	ActionChangeConfiguration    = "ChangeConfiguration"
+	ActionGetConfiguration       = "GetConfiguration"
+	ActionReset                  = "Reset"
+	ActionSetChargingProfile     = "SetChargingProfile"
+	ActionClearChargingProfile   = "ClearChargingProfile"
 )
 
 // Connector Status values (OCPP 1.6)
@@ -148,9 +150,9 @@ type IdTagInfo struct {
 
 // RemoteStartTransactionRequest represents a RemoteStartTransaction.req from central system
 type RemoteStartTransactionRequest struct {
-	ConnectorId     int    `json:"connectorId,omitempty"`
-	IdTag           string `json:"idTag"`
-	ChargingProfile string `json:"chargingProfile,omitempty"`
+	ConnectorId     int              `json:"connectorId,omitempty"`
+	IdTag           string           `json:"idTag"`
+	ChargingProfile *ChargingProfile `json:"chargingProfile,omitempty"`
 }
 
 // RemoteStartTransactionResponse represents a RemoteStartTransaction.conf
@@ -205,6 +207,60 @@ type ResetRequest struct {
 // ResetResponse represents a Reset.conf
 type ResetResponse struct {
 	Status string `json:"status"` // Accepted, Rejected
+}
+
+// ChargingProfile represents a ChargingProfile object (OCPP 1.6)
+// Note: Date fields are kept as strings to avoid parsing at the emulator layer.
+type ChargingProfile struct {
+	ChargingProfileId      int64            `json:"chargingProfileId"`
+	TransactionId          *int64           `json:"transactionId,omitempty"`
+	StackLevel             int              `json:"stackLevel"`
+	ChargingProfilePurpose string           `json:"chargingProfilePurpose"`
+	ChargingProfileKind    string           `json:"chargingProfileKind"`
+	RecurrencyKind         string           `json:"recurrencyKind,omitempty"`
+	ValidFrom              string           `json:"validFrom,omitempty"`
+	ValidTo                string           `json:"validTo,omitempty"`
+	ChargingSchedule       ChargingSchedule `json:"chargingSchedule"`
+}
+
+// ChargingSchedule represents a ChargingSchedule object (OCPP 1.6)
+type ChargingSchedule struct {
+	Duration               *int64                   `json:"duration,omitempty"`
+	StartSchedule          string                   `json:"startSchedule,omitempty"`
+	ChargingRateUnit       string                   `json:"chargingRateUnit"`
+	ChargingSchedulePeriod []ChargingSchedulePeriod `json:"chargingSchedulePeriod"`
+	MinChargingRate        *float64                 `json:"minChargingRate,omitempty"`
+}
+
+// ChargingSchedulePeriod represents a ChargingSchedulePeriod object (OCPP 1.6)
+type ChargingSchedulePeriod struct {
+	StartPeriod  int64   `json:"startPeriod"`
+	Limit        float64 `json:"limit"`
+	NumberPhases *int    `json:"numberPhases,omitempty"`
+}
+
+// SetChargingProfileRequest represents a SetChargingProfile.req
+type SetChargingProfileRequest struct {
+	ConnectorId        int             `json:"connectorId"`
+	CsChargingProfiles ChargingProfile `json:"csChargingProfiles"`
+}
+
+// SetChargingProfileResponse represents a SetChargingProfile.conf
+type SetChargingProfileResponse struct {
+	Status string `json:"status"`
+}
+
+// ClearChargingProfileRequest represents a ClearChargingProfile.req
+type ClearChargingProfileRequest struct {
+	Id                     *int64 `json:"id,omitempty"`
+	ConnectorId            *int   `json:"connectorId,omitempty"`
+	ChargingProfilePurpose string `json:"chargingProfilePurpose,omitempty"`
+	StackLevel             *int   `json:"stackLevel,omitempty"`
+}
+
+// ClearChargingProfileResponse represents a ClearChargingProfile.conf
+type ClearChargingProfileResponse struct {
+	Status string `json:"status"`
 }
 
 // ParseOCPPMessage parses an OCPP WebSocket message

@@ -609,10 +609,7 @@
                     </div>
                     <div class="member-grid">
                         <!-- Home Load Card - synced with Site Load dashboard -->
-                        <div class="member-card load"
-                             @click="$store.app.selectSiteLoad()"
-                             style="cursor: pointer;"
-                             title="Click to open Site Load dashboard">
+                        <div class="member-card load">
                             <div class="member-header">
                                 <div class="member-info">
                                     <span class="member-serial">Home Load</span>
@@ -651,15 +648,15 @@
                                     <div class="phase-load-row compact with-link">
                                         <span class="phase-load-label">L1</span>
                                         <button class="link-toggle micro"
-                                                :class="{ 'linked': homeLoadLinked }"
+                                                :class="{ 'linked': homeLoadLinks.l1 }"
                                                 :disabled="isSiteSimulating()"
-                                                @click.stop="toggleHomeLoadLinked()"
-                                                :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
-                                            <svg x-show="homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                @click.stop="toggleHomeLoadLink('l1')"
+                                                :title="homeLoadLinks.l1 ? 'Unlink this phase' : 'Link this phase'">
+                                            <svg x-show="homeLoadLinks.l1" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                                                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                                             </svg>
-                                            <svg x-show="!homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <svg x-show="!homeLoadLinks.l1" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/>
                                                 <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71"/>
                                                 <line x1="8" y1="2" x2="8" y2="5"/>
@@ -679,15 +676,15 @@
                                     <div class="phase-load-row compact with-link">
                                         <span class="phase-load-label">L2</span>
                                         <button class="link-toggle micro"
-                                                :class="{ 'linked': homeLoadLinked }"
+                                                :class="{ 'linked': homeLoadLinks.l2 }"
                                                 :disabled="isSiteSimulating()"
-                                                @click.stop="toggleHomeLoadLinked()"
-                                                :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
-                                            <svg x-show="homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                @click.stop="toggleHomeLoadLink('l2')"
+                                                :title="homeLoadLinks.l2 ? 'Unlink this phase' : 'Link this phase'">
+                                            <svg x-show="homeLoadLinks.l2" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                                                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                                             </svg>
-                                            <svg x-show="!homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <svg x-show="!homeLoadLinks.l2" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/>
                                                 <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 0 0 0 6.95 0l1.71-1.71"/>
                                                 <line x1="8" y1="2" x2="8" y2="5"/>
@@ -707,15 +704,15 @@
                                     <div class="phase-load-row compact with-link">
                                         <span class="phase-load-label">L3</span>
                                         <button class="link-toggle micro"
-                                                :class="{ 'linked': homeLoadLinked }"
+                                                :class="{ 'linked': homeLoadLinks.l3 }"
                                                 :disabled="isSiteSimulating()"
-                                                @click.stop="toggleHomeLoadLinked()"
-                                                :title="homeLoadLinked ? 'Unlink phases (adjust individually)' : 'Link phases (adjust together)'">
-                                            <svg x-show="homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                @click.stop="toggleHomeLoadLink('l3')"
+                                                :title="homeLoadLinks.l3 ? 'Unlink this phase' : 'Link this phase'">
+                                            <svg x-show="homeLoadLinks.l3" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
                                                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                                             </svg>
-                                            <svg x-show="!homeLoadLinked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <svg x-show="!homeLoadLinks.l3" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 0 0 0-6.95 0l-1.72 1.71"/>
                                                 <path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 0 0 0 6.95 0l1.71-1.71"/>
                                                 <line x1="8" y1="2" x2="8" y2="5"/>
@@ -1644,7 +1641,7 @@
                         <div class="section-title">Connectors</div>
                         <div class="connector-grid">
                             <template x-for="conn in connectors" :key="conn.id">
-                                <div class="connector-card">
+                                <div class="connector-card" :class="{ 'connector-system': conn.id === 0 }">
                                     <div class="connector-header">
                                         <span class="connector-id" x-text="`Connector ${conn.id}`"></span>
                                         <span class="connector-status"

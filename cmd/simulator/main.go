@@ -504,6 +504,7 @@ func createSimulator(simType string) (*Simulator, error) {
 		model := "SimCharger-22"
 		numConnectors := 2
 		maxPowerKW := 22.0
+		var profileConfig map[string]string
 
 		if len(availableProfiles) > 0 {
 			if profile := pm.Get(availableProfiles[0].Name); profile != nil && profile.OCPPConfig != nil {
@@ -511,10 +512,14 @@ func createSimulator(simType string) (*Simulator, error) {
 				model = profile.OCPPConfig.Model
 				numConnectors = profile.OCPPConfig.NumConnectors
 				maxPowerKW = profile.OCPPConfig.MaxPowerKW
+				profileConfig = profile.OCPPConfig.Configuration
 			}
 		}
 
 		ocppServer := ocpp.NewServer(id, port, vendor, model, numConnectors, maxPowerKW)
+		if profileConfig != nil {
+			ocppServer.ApplyConfiguration(profileConfig)
+		}
 		sim.Serial = ocppServer.SerialNumber()
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
@@ -1767,6 +1772,7 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 		case "ocpp":
 			if profile.OCPPConfig != nil && sim.OCPPServer != nil {
 				sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
+				sim.OCPPServer.ApplyConfiguration(profile.OCPPConfig.Configuration)
 				log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
 			}
 		}
