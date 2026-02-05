@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Simulator - Documentation</title>
+
+    <link rel="stylesheet" href="/static/css/variables.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/docs.css">
+</head>
+<body class="docs-body">
+    <header class="docs-header">
+        <div class="docs-title">Documentation</div>
+        <div class="docs-actions">
+            <a class="docs-close-btn" href="/" title="Close documentation">Close</a>
+        </div>
+    </header>
+
+    <main class="docs-main">
+        <div class="docs-tabs">
+            <button class="docs-tab active" data-tab="developers">For Developers</button>
+            <button class="docs-tab" data-tab="agents">For Agents</button>
+        </div>
+
+        <section class="docs-panel active" id="tab-developers">
+            <div class="docs-section">
+                <div class="docs-section-header">
+                    <h2>API Reference (OpenAPI)</h2>
+                    <a class="docs-link" href="/openapi.json" target="_blank" rel="noopener">OpenAPI JSON</a>
+                </div>
+                <p class="docs-muted">
+                    This page renders the OpenAPI spec shipped with the app. If an endpoint changes, update
+                    <code>/openapi.json</code>, the MCP tools, and these docs together.
+                </p>
+                <div class="docs-callout">
+                    <div><strong>Base URL:</strong> <code data-base-url>http://localhost:8762</code></div>
+                    <div class="docs-muted">Use this as the root for API requests (e.g. <code data-base-url></code><code>/api/simulators</code>).</div>
+                </div>
+            </div>
+            <iframe class="swagger-iframe"
+                    title="Swagger UI"
+                    src="/static/vendor/swagger-ui/index.html"></iframe>
+        </section>
+
+        <section class="docs-panel" id="tab-agents">
+            <div class="docs-section">
+                <h2>MCP (Model Context Protocol)</h2>
+                <p>
+                    Agents can control the simulator through the MCP endpoint. This MCP server exposes one tool per
+                    HTTP API endpoint plus a generic <code>api_request</code> tool for any path.
+                </p>
+                <div class="docs-callout">
+                    <div><strong>Endpoint:</strong> <code>/mcp</code> (JSON-RPC 2.0, streamable HTTP)</div>
+                    <div><strong>Discovery:</strong> <code>/.well-known/mcp</code></div>
+                    <div><strong>Base URL:</strong> <code data-base-url>http://localhost:8762</code></div>
+                </div>
+                <p class="docs-muted" style="margin-top: 0.75rem;">
+                    The base URL is the origin of the app window. In desktop mode it is typically <code>http://localhost:8762</code>.
+                    In Docker/server mode it is usually <code>http://localhost</code> (or your host IP).
+                </p>
+            </div>
+
+            <div class="docs-section">
+                <h3>Initialize</h3>
+                <pre class="docs-code">{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {}
+}</pre>
+            </div>
+
+            <div class="docs-section">
+                <h3>List Tools</h3>
+                <pre class="docs-code">{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}</pre>
+            </div>
+
+            <div class="docs-section">
+                <h3>Call a Tool</h3>
+                <pre class="docs-code">{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "simulators.list",
+    "arguments": {}
+  }
+}</pre>
+            </div>
+
+            <div class="docs-section">
+                <h3>Streamable HTTP (SSE)</h3>
+                <p class="docs-muted">Set <code>Accept: text/event-stream</code> or append <code>?stream=true</code> to get SSE responses.</p>
+                <pre class="docs-code">curl -N -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/list"}' \
+  http://localhost:8762/mcp</pre>
+            </div>
+
+            <div class="docs-section">
+                <h3>Generic API Tool</h3>
+                <pre class="docs-code">{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "api_request",
+    "arguments": {
+      "method": "POST",
+      "path": "/api/simulators",
+      "body": { "type": "inverter" }
+    }
+  }
+}</pre>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/js/docs.js"></script>
+</body>
+</html>

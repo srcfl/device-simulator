@@ -215,8 +215,9 @@
     to { transform: rotate(360deg); }
 }
 
-/* Settings Header Button */
-.settings-header-btn {
+/* Settings + Docs Header Buttons */
+.settings-header-btn,
+.docs-header-btn {
     background: transparent;
     border: none;
     color: var(--text-muted);
@@ -229,7 +230,8 @@
     justify-content: center;
 }
 
-.settings-header-btn:hover {
+.settings-header-btn:hover,
+.docs-header-btn:hover {
     color: var(--text-primary);
     background: var(--bg-tertiary);
 }

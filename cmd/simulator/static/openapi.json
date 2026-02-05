@@ -1,0 +1,484 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Device Simulator API",
+    "version": "dev",
+    "description": "HTTP API for the Device Simulator."
+  },
+  "servers": [
+    { "url": "/" }
+  ],
+  "paths": {
+    "/api/simulators": {
+      "get": {
+        "summary": "List all simulators",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array" } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a simulator",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object" } } }
+        },
+        "responses": {
+          "200": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/simulators/{id}": {
+      "get": {
+        "summary": "Get simulator details",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete a simulator",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/simulators/{id}/config": {
+      "post": {
+        "summary": "Update simulator config",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/simulators/{id}/registers": {
+      "get": {
+        "summary": "List simulator registers",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array" } } } } }
+      }
+    },
+    "/api/simulators/{id}/registers/{addr}": {
+      "get": {
+        "summary": "Get a simulator register",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "addr", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      },
+      "post": {
+        "summary": "Write a simulator register",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "addr", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/simulators/{id}/logs": {
+      "get": {
+        "summary": "Get simulator logs",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array" } } } } }
+      }
+    },
+    "/api/simulators/{id}/profiles": {
+      "get": {
+        "summary": "List simulator profiles",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array" } } } } }
+      }
+    },
+    "/api/simulators/{id}/profiles/{name}/apply": {
+      "post": {
+        "summary": "Apply a profile",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Applied" } }
+      }
+    },
+    "/api/simulators/{id}/automation": {
+      "get": {
+        "summary": "Get automation status",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/simulators/{id}/automation/start": {
+      "post": {
+        "summary": "Start automation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Started" } }
+      }
+    },
+    "/api/simulators/{id}/automation/stop": {
+      "post": {
+        "summary": "Stop automation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Stopped" } }
+      }
+    },
+    "/api/simulators/{id}/automation/config": {
+      "post": {
+        "summary": "Configure automation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/simulators/{id}/start": {
+      "post": {
+        "summary": "Start simulator server",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Started" } }
+      }
+    },
+    "/api/simulators/{id}/stop": {
+      "post": {
+        "summary": "Stop simulator server",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Stopped" } }
+      }
+    },
+    "/api/simulators/{id}/simulation/start": {
+      "post": {
+        "summary": "Start simulator simulation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Started" } }
+      }
+    },
+    "/api/simulators/{id}/simulation/stop": {
+      "post": {
+        "summary": "Stop simulator simulation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Stopped" } }
+      }
+    },
+    "/api/simulators/{id}/state": {
+      "post": {
+        "summary": "Update simulator state",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/simulators/{id}/clients": {
+      "get": {
+        "summary": "List simulator clients",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/simulators/{id}/wakeup": {
+      "post": {
+        "summary": "Wake up simulator",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Woke up" } }
+      }
+    },
+    "/api/simulators/{id}/power": {
+      "post": {
+        "summary": "Update simulator power",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/simulators/{id}/debug/meter-values": {
+      "get": {
+        "summary": "Debug meter values",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/simulators/{id}/reset": {
+      "post": {
+        "summary": "Reset simulator",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Reset" } }
+      }
+    },
+    "/api/sites": {
+      "get": {
+        "summary": "List sites",
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array" } } } } }
+      },
+      "post": {
+        "summary": "Create a site",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Created" } }
+      }
+    },
+    "/api/sites/{id}": {
+      "get": {
+        "summary": "Get site details",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "delete": {
+        "summary": "Delete a site",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/api/sites/{id}/config": {
+      "post": {
+        "summary": "Update site config",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/meter": {
+      "post": {
+        "summary": "Set site meter",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/simulators": {
+      "post": {
+        "summary": "Add simulator to site",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Added" } }
+      }
+    },
+    "/api/sites/{id}/simulators/{simId}": {
+      "delete": {
+        "summary": "Remove simulator from site",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "simId", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Removed" } }
+      }
+    },
+    "/api/sites/{id}/simulation/start": {
+      "post": {
+        "summary": "Start site simulation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Started" } }
+      }
+    },
+    "/api/sites/{id}/simulation/stop": {
+      "post": {
+        "summary": "Stop site simulation",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Stopped" } }
+      }
+    },
+    "/api/sites/{id}/simulation/config": {
+      "post": {
+        "summary": "Update site simulation config",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/device-power": {
+      "post": {
+        "summary": "Set device power state",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/meters": {
+      "get": {
+        "summary": "List site meters",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "summary": "Add a meter to site",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Added" } }
+      }
+    },
+    "/api/sites/{id}/p1-mode": {
+      "post": {
+        "summary": "Set site P1 mode",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/virtual-devices": {
+      "get": {
+        "summary": "List virtual devices",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/sites/{id}/virtual-devices/{type}": {
+      "post": {
+        "summary": "Write to a virtual device",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "type", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/phase-loads": {
+      "post": {
+        "summary": "Update site phase loads",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/sites/{id}/load-scenario": {
+      "post": {
+        "summary": "Set site load scenario",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/load-scenarios": {
+      "get": {
+        "summary": "List load scenarios",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/system": {
+      "get": {
+        "summary": "Get system info",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "summary": "Get application version",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "summary": "Get runtime settings",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "summary": "Update runtime settings",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/api/restart": {
+      "post": {
+        "summary": "Restart the application",
+        "responses": { "200": { "description": "Restarting" } }
+      }
+    },
+    "/api/warnings": {
+      "get": {
+        "summary": "List warnings",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/warnings/clear": {
+      "post": {
+        "summary": "Clear warnings",
+        "responses": { "200": { "description": "Cleared" } }
+      }
+    },
+    "/api/update/check": {
+      "get": {
+        "summary": "Check for updates",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/update/apply": {
+      "post": {
+        "summary": "Apply update",
+        "responses": { "200": { "description": "Applied" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

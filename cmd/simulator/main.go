@@ -22,6 +22,7 @@ import (
 
 	"github.com/srcfl/device-simulator/internal/device"
 	"github.com/srcfl/device-simulator/internal/modbus"
+	"github.com/srcfl/device-simulator/internal/mcp"
 	"github.com/srcfl/device-simulator/internal/mqtt"
 	"github.com/srcfl/device-simulator/internal/ocpp"
 	"github.com/srcfl/device-simulator/internal/ports"
@@ -1052,14 +1053,25 @@ func stopSimulatorAutomation(sim *Simulator) {
 }
 
 func startHTTPServer(port int) {
+	mux := buildHTTPMux()
+	addr := fmt.Sprintf(":%d", port)
+	log.Printf("HTTP server listening on %s", addr)
+	if err := http.ListenAndServe(addr, corsMiddleware(mux)); err != nil {
+		log.Printf("HTTP server error: %v", err)
+	}
+}
+
+func buildHTTPMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Serve static files (CSS, JS)
 	staticFS, _ := fs.Sub(embeddedFS, "static")
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
-	// Dashboard
+	// Dashboard + docs
 	mux.HandleFunc("/", handleDashboard)
+	mux.HandleFunc("/docs", handleDocs)
+	mux.HandleFunc("/openapi.json", handleOpenAPI)
 
 	// System info
 	mux.HandleFunc("/api/system", handleSystemInfo)
@@ -1088,11 +1100,12 @@ func startHTTPServer(port int) {
 	// Load scenarios endpoint
 	mux.HandleFunc("/api/load-scenarios", handleLoadScenarios)
 
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("HTTP server listening on %s", addr)
-	if err := http.ListenAndServe(addr, corsMiddleware(mux)); err != nil {
-		log.Printf("HTTP server error: %v", err)
-	}
+	// MCP endpoints
+	mcpServer := mcp.NewServer(mux)
+	mux.HandleFunc("/mcp", mcpServer.HandleMCP)
+	mux.HandleFunc("/.well-known/mcp", mcpServer.HandleDiscovery)
+
+	return mux
 }
 
 // getLocalIP returns the local IP address (from HOST_IP env var or auto-detected)
@@ -1297,6 +1310,39 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, nil)
+}
+
+func handleDocs(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/docs" {
+		http.NotFound(w, r)
+		return
+	}
+
+	tmpl, err := template.ParseFS(embeddedFS, "templates/docs.html")
+	if err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		log.Printf("Docs template error: %v", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	tmpl.Execute(w, nil)
+}
+
+func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/openapi.json" {
+		http.NotFound(w, r)
+		return
+	}
+
+	data, err := embeddedFS.ReadFile("static/openapi.json")
+	if err != nil {
+		http.Error(w, "OpenAPI spec not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
 
 func handleSimulatorsList(w http.ResponseWriter, r *http.Request) {

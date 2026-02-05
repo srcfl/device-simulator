@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "device-simulator": {
+      "type": "url",
+      "url": "http://localhost/mcp"
+    }
+  }
+}

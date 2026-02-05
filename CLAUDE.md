@@ -125,6 +125,8 @@ GET  /api/update/check                    # Check for updates
 POST /api/update/apply                    # Apply update
 ```
 
+**API Change Policy:** Whenever any API endpoint is added, removed, or modified, update the OpenAPI spec (`cmd/simulator/static/openapi.json`), the MCP tool mapping (`internal/mcp/server.go`), and the in-app docs at `/docs` to keep them in sync.
+
 ## Wails Integration
 
 The app uses [Wails v2](https://wails.io/) for the desktop UI. Key concepts:
