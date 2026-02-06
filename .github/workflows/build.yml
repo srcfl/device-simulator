@@ -77,10 +77,12 @@ jobs:
 
             # Extract commit body (everything after first line, trimmed)
             # Use heredoc for multiline output (GitHub Actions recommended approach)
+            COMMIT_BODY=$(echo "$COMMIT_MSG" | tail -n +2 | sed '/./,$!d' | sed -e :a -e '/^\s*$/d;N;ba' | sed '/^Co-Authored-By:/d' || true)
+            DELIM="EOF_$(date +%s%N)"
             {
-              echo 'release_body<<EOF'
-              echo "$COMMIT_MSG" | tail -n +2 | sed '/./,$!d' | sed -e :a -e '/^\s*$/d;N;ba' | grep -v "^Co-Authored-By:"
-              echo 'EOF'
+              echo "release_body<<$DELIM"
+              echo "$COMMIT_BODY"
+              echo "$DELIM"
             } >> $GITHUB_OUTPUT
           fi
 
