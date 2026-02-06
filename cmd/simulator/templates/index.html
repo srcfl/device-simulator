@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Device Simulator - Don't Panic</title>
+    <link rel="icon" type="image/png" href="/static/app-icon.png">
 
     <!-- CSS Modules -->
     <link rel="stylesheet" href="/static/css/variables.css">
@@ -24,8 +25,22 @@
 <body x-data x-init="$store.app.init()">
     <!-- Top Site Tabs Bar -->
     <header class="site-header" x-data="siteTabs()">
-        <div class="site-header-left">
-            <h1 class="site-header-title">Device Simulator</h1>
+        <div class="site-header-tabs">
+            <template x-for="site in $store.site.sites" :key="site.id">
+                <div class="site-header-tab"
+                     :class="{ 'active': $store.site.selectedId === site.id }"
+                     @click="$store.site.selectSite(site.id); $store.app.selectedId = null;">
+                    <span class="site-header-tab-icon">🏠</span>
+                    <span class="site-header-tab-name" x-text="site.name"></span>
+                    <button class="site-header-tab-close"
+                            x-show="$store.site.sites.length > 1"
+                            @click.stop="deleteSiteTab(site.id)"
+                            title="Delete site">×</button>
+                </div>
+            </template>
+            <button class="site-header-tab-add" @click="createNewSite()" title="Add new site">+</button>
+        </div>
+        <div class="site-header-actions">
             <button class="update-check-btn"
                     @click="$store.app.showUpdateModal = true; $store.app.checkForUpdate()"
                     :class="{ 'checking': $store.app.updateChecking, 'has-update': $store.app.updateAvailable }"
@@ -60,21 +75,6 @@
                 </svg>
             </button>
         </div>
-        <div class="site-header-tabs">
-            <template x-for="site in $store.site.sites" :key="site.id">
-                <div class="site-header-tab"
-                     :class="{ 'active': $store.site.selectedId === site.id }"
-                     @click="$store.site.selectSite(site.id); $store.app.selectedId = null;">
-                    <span class="site-header-tab-icon">🏠</span>
-                    <span class="site-header-tab-name" x-text="site.name"></span>
-                    <button class="site-header-tab-close"
-                            x-show="$store.site.sites.length > 1"
-                            @click.stop="deleteSiteTab(site.id)"
-                            title="Delete site">×</button>
-                </div>
-            </template>
-            <button class="site-header-tab-add" @click="createNewSite()" title="Add new site">+</button>
-        </div>
     </header>
 
     <!-- Warnings Banner -->
@@ -91,100 +91,290 @@
         </div>
     </template>
 
-    <!-- App Container - Sidebar + Main -->
+    <!-- App Container - Top Row + Sidebar/Main -->
     <div class="app-container">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-site-link"
-                 x-show="$store.site.selectedId && $store.site.data"
-                 :class="{ 'active': !$store.app.selectedId && $store.app.selectedView !== 'site_load' }"
-                 @click="$store.app.selectedId = null; $store.app.selectedView = null; $store.site.ensureRefreshing()"
-                 title="Go to site view">
-                <span class="sidebar-site-name" x-text="$store.site.data?.name || 'Select a site'"></span>
-                <svg class="sidebar-site-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-            </div>
-        </div>
-
-        <!-- Site Simulation Controls (shown when site is selected) -->
+        <!-- Site Top Row (Clock + Phase) -->
         <template x-if="$store.site.selectedId && $store.site.data">
-            <div class="site-simulation-controls" x-data="siteSimulationControls()">
-                <div class="sim-control-header compact">
-                    <div class="sim-clock compact">
-                        <div class="sim-clock-time" x-text="clockTime"></div>
-                        <div class="sim-clock-date" x-text="clockDate"></div>
-                    </div>
-                    <button class="sim-reset-btn compact"
-                            :disabled="resettingClock"
-                            @click="resetClock()"
-                            title="Reset clock to now">
-                        Now
-                    </button>
-                    <div class="sim-control-actions compact">
-                        <div class="sim-speed" @click.window="speedOpen = false">
-                            <button class="sim-speed-btn" @click.stop="speedOpen = !speedOpen">
-                                <span x-text="speedLabel"></span>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="6 9 12 15 18 9"></polyline>
-                                </svg>
-                            </button>
-                            <div class="sim-speed-menu" x-show="speedOpen" x-transition @click.stop>
-                                <template x-for="opt in speedOptions" :key="opt.value">
-                                    <button class="sim-speed-option"
-                                            :class="{ 'active': localTimeMultiplier === opt.value }"
-                                            @click="selectSpeed(opt.value)">
-                                        <span x-text="opt.label"></span>
-                                    </button>
-                                </template>
-                            </div>
-                        </div>
-                        <button class="sim-play-btn compact"
-                                :class="{ 'running': $store.site.data?.sim_running }"
-                                @click="$store.site.toggleSimulation()"
-                                :title="$store.site.data?.sim_running ? 'Stop Simulation' : 'Start Simulation'">
-                            <template x-if="!$store.site.data?.sim_running">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                    <polygon points="5 3 19 12 5 21 5 3"/>
-                                </svg>
-                            </template>
-                            <template x-if="$store.site.data?.sim_running">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                                    <rect x="6" y="4" width="4" height="16"/>
-                                    <rect x="14" y="4" width="4" height="16"/>
-                                </svg>
-                            </template>
+            <div class="site-top-row" x-data="phaseVisualization()">
+                <div class="site-top-left">
+                    <div class="site-top-settings">
+                        <span class="site-top-settings-label">Site Settings</span>
+                        <button class="settings-btn" @click="openSettingsModal()" title="Site Settings">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                            </svg>
                         </button>
                     </div>
+                    <div class="site-simulation-controls" x-data="siteSimulationControls()">
+                        <div class="sim-control-header compact">
+                            <div class="sim-clock compact">
+                                <div class="sim-clock-time" x-text="clockTime"></div>
+                                <div class="sim-clock-date" x-text="clockDate"></div>
+                            </div>
+                            <button class="sim-reset-btn compact"
+                                    :disabled="resettingClock"
+                                    @click="resetClock()"
+                                    title="Reset clock to now">
+                                Now
+                            </button>
+                            <div class="sim-control-actions compact">
+                                <div class="sim-speed" @click.window="speedOpen = false">
+                                    <button class="sim-speed-btn" @click.stop="speedOpen = !speedOpen">
+                                        <span x-text="speedLabel"></span>
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="6 9 12 15 18 9"></polyline>
+                                        </svg>
+                                    </button>
+                                    <div class="sim-speed-menu" x-show="speedOpen" x-transition @click.stop>
+                                        <template x-for="opt in speedOptions" :key="opt.value">
+                                            <button class="sim-speed-option"
+                                                    :class="{ 'active': localTimeMultiplier === opt.value }"
+                                                    @click="selectSpeed(opt.value)">
+                                                <span x-text="opt.label"></span>
+                                            </button>
+                                        </template>
+                                    </div>
+                                </div>
+                                <button class="sim-play-btn compact"
+                                        :class="{ 'running': $store.site.data?.sim_running }"
+                                        @click="$store.site.toggleSimulation()"
+                                        :title="$store.site.data?.sim_running ? 'Stop Simulation' : 'Start Simulation'">
+                                    <template x-if="!$store.site.data?.sim_running">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                            <polygon points="5 3 19 12 5 21 5 3"/>
+                                        </svg>
+                                    </template>
+                                    <template x-if="$store.site.data?.sim_running">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                            <rect x="6" y="4" width="4" height="16"/>
+                                            <rect x="14" y="4" width="4" height="16"/>
+                                        </svg>
+                                    </template>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="site-top-dashboards">
+                        <div class="site-dashboard-item site-overview-sidebar-item"
+                             :class="{ 'active': !$store.app.selectedId && $store.app.selectedView !== 'site_load' }"
+                             @click="$store.app.selectedId = null; $store.app.selectedView = null; $store.site.ensureRefreshing()">
+                            <span class="site-dashboard-icon">📊</span>
+                            <div class="site-dashboard-info">
+                                <span class="site-dashboard-name">Site Overview</span>
+                                <span class="site-dashboard-value">Overview</span>
+                            </div>
+                        </div>
+                        <div class="site-dashboard-item site-load-sidebar-item"
+                             :class="{ 'active': $store.app.selectedView === 'site_load' }"
+                             @click="$store.app.selectSiteLoad()"
+                             x-data="{
+                                 formatSidebarPower(w) {
+                                     if (Math.abs(w) >= 1000) return (w/1000).toFixed(1) + ' kW';
+                                     return Math.round(w) + ' W';
+                                 },
+                                 getScenarioBadge(key) {
+                                     const icons = { gaming_family: '🎮', old_couple: '👴', weed_factory: '🌿', work_from_home: '💻', night_owl: '🦉' };
+                                     return icons[key] || '📊';
+                                 }
+                             }">
+                            <span class="site-load-icon site-dashboard-icon">🏠</span>
+                            <div class="site-load-info site-dashboard-info">
+                                <span class="site-load-name">Site Load</span>
+                                <span class="site-load-value" x-text="formatSidebarPower($store.site.data?.base_load_w || 0)"></span>
+                            </div>
+                            <span class="site-load-scenario-badge" x-show="$store.site.data?.load_scenario"
+                                  x-text="getScenarioBadge($store.site.data?.load_scenario)"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="site-top-right">
+                    <div class="site-top-panel">
+                        <div class="section">
+
+                            <!-- Phase Bars -->
+                            <div class="phase-visualization">
+                                <div class="phase-bar-container">
+                                    <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l1 }" @click="toggleFuse('l1')" title="Click to toggle fuse">
+                                        <div class="fuse-toggle-indicator"></div>
+                                    </div>
+                                    <div class="phase-label">L1</div>
+                                    <div class="phase-bar-track bidirectional">
+                                        <div class="center-line"></div>
+                                        <div class="fuse-limit-marker export"></div>
+                                        <div class="fuse-limit-marker import"></div>
+                                        <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l1, fuseBlown.l1)"></div>
+                                    </div>
+                                    <div class="phase-value-stack">
+                                        <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="formatPhasePower(getPhasePowers().l1)"></div>
+                                        <div class="phase-countdown"
+                                             x-show="hasFuseCountdown('l1')"
+                                             :class="getFuseCountdownClass('l1')"
+                                             :title="getFuseCountdownTitle('l1')"
+                                             x-text="getFuseCountdownLabel('l1')"></div>
+                                    </div>
+                                </div>
+                                <div class="phase-bar-container">
+                                    <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l2 }" @click="toggleFuse('l2')" title="Click to toggle fuse">
+                                        <div class="fuse-toggle-indicator"></div>
+                                    </div>
+                                    <div class="phase-label">L2</div>
+                                    <div class="phase-bar-track bidirectional">
+                                        <div class="center-line"></div>
+                                        <div class="fuse-limit-marker export"></div>
+                                        <div class="fuse-limit-marker import"></div>
+                                        <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l2, fuseBlown.l2)"></div>
+                                    </div>
+                                    <div class="phase-value-stack">
+                                        <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="formatPhasePower(getPhasePowers().l2)"></div>
+                                        <div class="phase-countdown"
+                                             x-show="hasFuseCountdown('l2')"
+                                             :class="getFuseCountdownClass('l2')"
+                                             :title="getFuseCountdownTitle('l2')"
+                                             x-text="getFuseCountdownLabel('l2')"></div>
+                                    </div>
+                                </div>
+                                <div class="phase-bar-container">
+                                    <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l3 }" @click="toggleFuse('l3')" title="Click to toggle fuse">
+                                        <div class="fuse-toggle-indicator"></div>
+                                    </div>
+                                    <div class="phase-label">L3</div>
+                                    <div class="phase-bar-track bidirectional">
+                                        <div class="center-line"></div>
+                                        <div class="fuse-limit-marker export"></div>
+                                        <div class="fuse-limit-marker import"></div>
+                                        <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l3, fuseBlown.l3)"></div>
+                                    </div>
+                                    <div class="phase-value-stack">
+                                        <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="formatPhasePower(getPhasePowers().l3)"></div>
+                                        <div class="phase-countdown"
+                                             x-show="hasFuseCountdown('l3')"
+                                             :class="getFuseCountdownClass('l3')"
+                                             :title="getFuseCountdownTitle('l3')"
+                                             x-text="getFuseCountdownLabel('l3')"></div>
+                                    </div>
+                                </div>
+                                <!-- Scale labels -->
+                                <div class="phase-bar-scale">
+                                    <div class="scale-spacer"></div>
+                                    <div class="scale-track">
+                                        <span class="scale-label export" x-text="`${$store.site.data?.fuse_size || 16}A`"></span>
+                                        <span class="scale-label center">0</span>
+                                        <span class="scale-label import" x-text="`${$store.site.data?.fuse_size || 16}A`"></span>
+                                    </div>
+                                    <div class="scale-spacer-end"></div>
+                                </div>
+                                <div class="phase-legend">
+                                    <span class="fuse-indicator">
+                                        <span class="fuse-marker-icon"></span>
+                                        <span x-text="`Fuse limit (${$store.site.data?.fuse_size || 16}A)`"></span>
+                                    </span>
+                                    <span class="meter-total" :class="{ 'exporting': meterPower < 0 }" x-text="formatMeterPower()"></span>
+                                </div>
+                            </div>
+
+                            <!-- Settings Modal -->
+                            <template x-if="showSettingsModal">
+                                <div class="site-settings-modal-backdrop" @click="closeSettingsModal()">
+                                    <div class="site-settings-modal" @click.stop>
+                                        <div class="modal-header">
+                                            <h3>Site Settings</h3>
+                                            <button class="modal-close" @click="closeSettingsModal()">×</button>
+                                        </div>
+                                        <div class="modal-info">Settings are stored locally in your browser</div>
+                                        <div class="modal-body">
+                                            <div class="modal-field">
+                                                <label>Site Name</label>
+                                                <input type="text"
+                                                       x-model="localSiteName"
+                                                       @focus="onSiteNameFocus()"
+                                                       @blur="onSiteNameBlur()">
+                                            </div>
+                                            <div class="modal-field">
+                                                <label>Fuse Size</label>
+                                                <select x-model.number="localFuseSize"
+                                                        @change="onFuseSizeChange($event.target.value)">
+                                                    <option value="10">10 A</option>
+                                                    <option value="16">16 A</option>
+                                                    <option value="20">20 A</option>
+                                                    <option value="25">25 A</option>
+                                                    <option value="32">32 A</option>
+                                                </select>
+                                            </div>
+                                            <div class="modal-field">
+                                                <label>Fuse Profile</label>
+                                                <select x-model="localFuseProfile"
+                                                        @change="onFuseProfileChange($event.target.value)">
+                                                    <option value="manual">Manual (no auto trip)</option>
+                                                    <option value="iec_gg">IEC 60269 gG/gL (general purpose)</option>
+                                                    <option value="iec_gm">IEC 60269 gM (motor, dual-rated) - UK common</option>
+                                                    <option value="iec_am">IEC 60269 aM (motor, short-circuit)</option>
+                                                    <option value="iec_gr">IEC 60269 gR (semiconductor, fast)</option>
+                                                    <option value="iec_gs">IEC 60269 gS (semiconductor, full-range)</option>
+                                                </select>
+                                            </div>
+                                            <div class="modal-field-group">
+                                                <label>Phase Distribution</label>
+                                                <div class="phase-inputs">
+                                                    <div class="phase-input">
+                                                        <span>L1</span>
+                                                        <input type="number" step="0.01" min="0" max="1"
+                                                               :value="localPhaseFactors.l1"
+                                                               @focus="onPhaseFactorFocus()"
+                                                               @blur="onPhaseFactorBlur()"
+                                                               @input="localPhaseFactors.l1 = parseFloat($event.target.value) || 0">
+                                                    </div>
+                                                    <div class="phase-input">
+                                                        <span>L2</span>
+                                                        <input type="number" step="0.01" min="0" max="1"
+                                                               :value="localPhaseFactors.l2"
+                                                               @focus="onPhaseFactorFocus()"
+                                                               @blur="onPhaseFactorBlur()"
+                                                               @input="localPhaseFactors.l2 = parseFloat($event.target.value) || 0">
+                                                    </div>
+                                                    <div class="phase-input">
+                                                        <span>L3</span>
+                                                        <input type="number" step="0.01" min="0" max="1"
+                                                               :value="localPhaseFactors.l3"
+                                                               @focus="onPhaseFactorFocus()"
+                                                               @blur="onPhaseFactorBlur()"
+                                                               @input="localPhaseFactors.l3 = parseFloat($event.target.value) || 0">
+                                                    </div>
+                                                </div>
+                                                <div class="phase-sum" :class="{ 'invalid': !isPhaseFactorsValid() }">
+                                                    Sum: <span x-text="(localPhaseFactors.l1 + localPhaseFactors.l2 + localPhaseFactors.l3).toFixed(3)"></span>
+                                                    <span x-show="!isPhaseFactorsValid()" class="error-hint">(must equal 1.0)</span>
+                                                </div>
+                                            </div>
+                                            <div class="modal-field">
+                                                <label>P1 Update Mode</label>
+                                                <div class="p1-mode-toggle">
+                                                    <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === 'direct' }"
+                                                            @click="$store.site.setP1Mode('direct')">Direct</button>
+                                                    <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === '1s' }"
+                                                            @click="$store.site.setP1Mode('1s')">1s</button>
+                                                    <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === '10s' }"
+                                                            @click="$store.site.setP1Mode('10s')">10s</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button class="btn btn-secondary" @click="closeSettingsModal()">Cancel</button>
+                                            <button class="btn btn-primary" :disabled="!isPhaseFactorsValid()" @click="savePhaseFactors()">Save</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </div>
         </template>
 
-        <!-- Site Load Item - shown when site is selected -->
-        <template x-if="$store.site.selectedId">
-            <div class="site-load-sidebar-item"
-                 :class="{ 'active': $store.app.selectedView === 'site_load' }"
-                 @click="$store.app.selectSiteLoad()"
-                 x-data="{
-                     formatSidebarPower(w) {
-                         if (Math.abs(w) >= 1000) return (w/1000).toFixed(1) + ' kW';
-                         return Math.round(w) + ' W';
-                     },
-                     getScenarioBadge(key) {
-                         const icons = { gaming_family: '🎮', old_couple: '👴', weed_factory: '🌿', work_from_home: '💻', night_owl: '🦉' };
-                         return icons[key] || '📊';
-                     }
-                 }">
-                <span class="site-load-icon">🏠</span>
-                <div class="site-load-info">
-                    <span class="site-load-name">Site Load</span>
-                    <span class="site-load-value" x-text="formatSidebarPower($store.site.data?.base_load_w || 0)"></span>
-                </div>
-                <span class="site-load-scenario-badge" x-show="$store.site.data?.load_scenario"
-                      x-text="getScenarioBadge($store.site.data?.load_scenario)"></span>
-            </div>
-        </template>
+        <div class="app-body">
+        <!-- Sidebar -->
+        <aside class="sidebar">
 
         <!-- Simulator List - filtered by selected site -->
         <div class="simulator-list" id="simulatorList">
@@ -313,19 +503,19 @@
                 <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('ocpp_charger')">🔌 OCPP Charger</button>
             </div>
         </div>
-    </aside>
+        </aside>
 
-    <!-- Main Content -->
-    <main class="main">
-        <!-- Content Area -->
-        <div class="main-content">
-            <!-- Site Load Dashboard - shown when Site Load is selected -->
-            <template x-if="$store.site.selectedId && $store.app.selectedView === 'site_load'">
-                <div class="site-load-dashboard" x-data="siteLoadControls()">
-                    <div class="dashboard-header">
-                        <h2 class="dashboard-title">Site Load</h2>
-                        <span class="dashboard-total" x-text="formatPower(getTotalPower())"></span>
-                    </div>
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Content Area -->
+            <div class="main-content">
+                <!-- Site Load Dashboard - shown when Site Load is selected -->
+                <template x-if="$store.site.selectedId && $store.app.selectedView === 'site_load'">
+                    <div class="site-load-dashboard" x-data="siteLoadControls()">
+                        <div class="dashboard-header">
+                            <h2 class="dashboard-title">Site Load</h2>
+                            <span class="dashboard-total" x-text="formatPower(getTotalPower())"></span>
+                        </div>
 
                     <!-- Scenario Selector -->
                     <div class="section">
@@ -426,193 +616,6 @@
             <!-- Site View - shown when site is selected but no simulator or site_load is selected -->
             <template x-if="$store.site.selectedId && $store.site.data && !$store.app.selectedId && $store.app.selectedView !== 'site_load'">
                 <div x-data="siteView()">
-                <!-- Phase Visualization Section -->
-                <div class="section" x-data="phaseVisualization()">
-                    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
-                        <span>Site Energy Balance</span>
-                        <button class="settings-btn" @click="openSettingsModal()" title="Site Settings">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="3"/>
-                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <!-- Phase Bars -->
-                    <div class="phase-visualization">
-                        <div class="phase-bar-container">
-                            <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l1 }" @click="toggleFuse('l1')" title="Click to toggle fuse">
-                                <div class="fuse-toggle-indicator"></div>
-                            </div>
-                            <div class="phase-label">L1</div>
-                            <div class="phase-bar-track bidirectional">
-                                <div class="center-line"></div>
-                                <div class="fuse-limit-marker export"></div>
-                                <div class="fuse-limit-marker import"></div>
-                                <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l1, fuseBlown.l1)"></div>
-                            </div>
-                            <div class="phase-value-stack">
-                                <div class="phase-value" :class="{ 'blown': fuseBlown.l1 }" x-text="formatPhasePower(getPhasePowers().l1)"></div>
-                                <div class="phase-countdown"
-                                     x-show="hasFuseCountdown('l1')"
-                                     :class="getFuseCountdownClass('l1')"
-                                     :title="getFuseCountdownTitle('l1')"
-                                     x-text="getFuseCountdownLabel('l1')"></div>
-                            </div>
-                        </div>
-                        <div class="phase-bar-container">
-                            <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l2 }" @click="toggleFuse('l2')" title="Click to toggle fuse">
-                                <div class="fuse-toggle-indicator"></div>
-                            </div>
-                            <div class="phase-label">L2</div>
-                            <div class="phase-bar-track bidirectional">
-                                <div class="center-line"></div>
-                                <div class="fuse-limit-marker export"></div>
-                                <div class="fuse-limit-marker import"></div>
-                                <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l2, fuseBlown.l2)"></div>
-                            </div>
-                            <div class="phase-value-stack">
-                                <div class="phase-value" :class="{ 'blown': fuseBlown.l2 }" x-text="formatPhasePower(getPhasePowers().l2)"></div>
-                                <div class="phase-countdown"
-                                     x-show="hasFuseCountdown('l2')"
-                                     :class="getFuseCountdownClass('l2')"
-                                     :title="getFuseCountdownTitle('l2')"
-                                     x-text="getFuseCountdownLabel('l2')"></div>
-                            </div>
-                        </div>
-                        <div class="phase-bar-container">
-                            <div class="fuse-toggle" :class="{ 'blown': fuseBlown.l3 }" @click="toggleFuse('l3')" title="Click to toggle fuse">
-                                <div class="fuse-toggle-indicator"></div>
-                            </div>
-                            <div class="phase-label">L3</div>
-                            <div class="phase-bar-track bidirectional">
-                                <div class="center-line"></div>
-                                <div class="fuse-limit-marker export"></div>
-                                <div class="fuse-limit-marker import"></div>
-                                <div class="phase-bar-fill bidirectional" :style="getBidirectionalBarStyle(getPhasePowers().l3, fuseBlown.l3)"></div>
-                            </div>
-                            <div class="phase-value-stack">
-                                <div class="phase-value" :class="{ 'blown': fuseBlown.l3 }" x-text="formatPhasePower(getPhasePowers().l3)"></div>
-                                <div class="phase-countdown"
-                                     x-show="hasFuseCountdown('l3')"
-                                     :class="getFuseCountdownClass('l3')"
-                                     :title="getFuseCountdownTitle('l3')"
-                                     x-text="getFuseCountdownLabel('l3')"></div>
-                            </div>
-                        </div>
-                        <!-- Scale labels -->
-                        <div class="phase-bar-scale">
-                            <div class="scale-spacer"></div>
-                            <div class="scale-track">
-                                <span class="scale-label export" x-text="`${$store.site.data?.fuse_size || 16}A`"></span>
-                                <span class="scale-label center">0</span>
-                                <span class="scale-label import" x-text="`${$store.site.data?.fuse_size || 16}A`"></span>
-                            </div>
-                            <div class="scale-spacer-end"></div>
-                        </div>
-                        <div class="phase-legend">
-                            <span class="fuse-indicator">
-                                <span class="fuse-marker-icon"></span>
-                                <span x-text="`Fuse limit (${$store.site.data?.fuse_size || 16}A)`"></span>
-                            </span>
-                            <span class="meter-total" :class="{ 'exporting': meterPower < 0 }" x-text="formatMeterPower()"></span>
-                        </div>
-                    </div>
-
-                    <!-- Settings Modal -->
-                    <template x-if="showSettingsModal">
-                        <div class="site-settings-modal-backdrop" @click="closeSettingsModal()">
-                            <div class="site-settings-modal" @click.stop>
-                                <div class="modal-header">
-                                    <h3>Site Settings</h3>
-                                    <button class="modal-close" @click="closeSettingsModal()">×</button>
-                                </div>
-                                <div class="modal-info">Settings are stored locally in your browser</div>
-                                <div class="modal-body">
-                                    <div class="modal-field">
-                                        <label>Site Name</label>
-                                        <input type="text"
-                                               x-model="localSiteName"
-                                               @focus="onSiteNameFocus()"
-                                               @blur="onSiteNameBlur()">
-                                    </div>
-                                    <div class="modal-field">
-                                        <label>Fuse Size</label>
-                                        <select x-model.number="localFuseSize"
-                                                @change="onFuseSizeChange($event.target.value)">
-                                            <option value="10">10 A</option>
-                                            <option value="16">16 A</option>
-                                            <option value="20">20 A</option>
-                                            <option value="25">25 A</option>
-                                            <option value="32">32 A</option>
-                                        </select>
-                                    </div>
-                                    <div class="modal-field">
-                                        <label>Fuse Profile</label>
-                                        <select x-model="localFuseProfile"
-                                                @change="onFuseProfileChange($event.target.value)">
-                                            <option value="manual">Manual (no auto trip)</option>
-                                            <option value="iec_gg">IEC 60269 gG/gL (general purpose)</option>
-                                            <option value="iec_gm">IEC 60269 gM (motor, dual-rated) - UK common</option>
-                                            <option value="iec_am">IEC 60269 aM (motor, short-circuit)</option>
-                                            <option value="iec_gr">IEC 60269 gR (semiconductor, fast)</option>
-                                            <option value="iec_gs">IEC 60269 gS (semiconductor, full-range)</option>
-                                        </select>
-                                    </div>
-                                    <div class="modal-field-group">
-                                        <label>Phase Distribution</label>
-                                        <div class="phase-inputs">
-                                            <div class="phase-input">
-                                                <span>L1</span>
-                                                <input type="number" step="0.01" min="0" max="1"
-                                                       :value="localPhaseFactors.l1"
-                                                       @focus="onPhaseFactorFocus()"
-                                                       @blur="onPhaseFactorBlur()"
-                                                       @input="localPhaseFactors.l1 = parseFloat($event.target.value) || 0">
-                                            </div>
-                                            <div class="phase-input">
-                                                <span>L2</span>
-                                                <input type="number" step="0.01" min="0" max="1"
-                                                       :value="localPhaseFactors.l2"
-                                                       @focus="onPhaseFactorFocus()"
-                                                       @blur="onPhaseFactorBlur()"
-                                                       @input="localPhaseFactors.l2 = parseFloat($event.target.value) || 0">
-                                            </div>
-                                            <div class="phase-input">
-                                                <span>L3</span>
-                                                <input type="number" step="0.01" min="0" max="1"
-                                                       :value="localPhaseFactors.l3"
-                                                       @focus="onPhaseFactorFocus()"
-                                                       @blur="onPhaseFactorBlur()"
-                                                       @input="localPhaseFactors.l3 = parseFloat($event.target.value) || 0">
-                                            </div>
-                                        </div>
-                                        <div class="phase-sum" :class="{ 'invalid': !isPhaseFactorsValid() }">
-                                            Sum: <span x-text="(localPhaseFactors.l1 + localPhaseFactors.l2 + localPhaseFactors.l3).toFixed(3)"></span>
-                                            <span x-show="!isPhaseFactorsValid()" class="error-hint">(must equal 1.0)</span>
-                                        </div>
-                                    </div>
-                                    <div class="modal-field">
-                                        <label>P1 Update Mode</label>
-                                        <div class="p1-mode-toggle">
-                                            <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === 'direct' }"
-                                                    @click="$store.site.setP1Mode('direct')">Direct</button>
-                                            <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === '1s' }"
-                                                    @click="$store.site.setP1Mode('1s')">1s</button>
-                                            <button class="p1-mode-btn" :class="{ 'active': ($store.site.data?.p1_mode || 'direct') === '10s' }"
-                                                    @click="$store.site.setP1Mode('10s')">10s</button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="modal-footer">
-                                    <button class="btn btn-secondary" @click="closeSettingsModal()">Cancel</button>
-                                    <button class="btn btn-primary" :disabled="!isPhaseFactorsValid()" @click="savePhaseFactors()">Save</button>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-
                 <!-- Member Devices Section -->
                 <div class="section" x-data="siteMemberControls()">
                     <div class="section-title">
@@ -1948,6 +1951,7 @@
         </template>
         </div><!-- /main-content -->
     </main>
+    </div><!-- /app-body -->
     </div><!-- /app-container -->
 
     <!-- Update Modal -->
