@@ -227,6 +227,8 @@ jobs:
               <string>Device Simulator</string>
               <key>CFBundleDisplayName</key>
               <string>Device Simulator</string>
+              <key>CFBundleIconFile</key>
+              <string>iconfile</string>
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
@@ -240,6 +242,22 @@ jobs:
           </dict>
           </plist>
           EOF
+
+          # Generate app icon from tracked PNG
+          ICON_SOURCE="cmd/simulator/build/appicon.png"
+          ICONSET_DIR="$RUNNER_TEMP/appicon.iconset"
+          mkdir -p "$ICONSET_DIR"
+          sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_16x16.png"
+          sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_16x16@2x.png"
+          sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_32x32.png"
+          sips -z 64 64 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_32x32@2x.png"
+          sips -z 128 128 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_128x128.png"
+          sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_128x128@2x.png"
+          sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_256x256.png"
+          sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_256x256@2x.png"
+          sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_512x512.png"
+          sips -z 1024 1024 "$ICON_SOURCE" --out "$ICONSET_DIR/icon_512x512@2x.png"
+          iconutil -c icns "$ICONSET_DIR" -o "build/macos/${APP_NAME}.app/Contents/Resources/iconfile.icns"
 
           # Create entitlements file for hardened runtime
           cat > build/entitlements.plist << 'EOF'
