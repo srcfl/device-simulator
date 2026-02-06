@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "80:80"               # Web dashboard
+      - "${HTTP_PORT:-80}:${HTTP_PORT:-80}"  # Web dashboard
       - "5100-5104:5100-5104" # Modbus TCP servers (inverters)
       - "11883-11885:1883-1885" # MQTT brokers (V2X chargers) - host ports offset to avoid conflict with local mosquitto
       - "9000-9001:9000-9001" # OCPP WebSocket servers (OCPP chargers)
@@ -16,7 +16,7 @@ services:
       - MQTT_BASE_PORT=1883
       - MQTT_DISPLAY_OFFSET=10000
       - OCPP_BASE_PORT=9000
-      - HTTP_PORT=80
+      - HTTP_PORT=${HTTP_PORT:-80}
       - HOST_IP=${HOST_IP:-}
       - DEVICE_SIMULATOR_DATA_DIR=/data
     volumes:
