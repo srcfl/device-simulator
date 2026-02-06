@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "next_simulator_id": 12,
+  "next_simulator_id": 15,
   "next_site_id": 2,
   "simulators": [
     {
@@ -10,17 +10,17 @@
       "category": "v2x_charger",
       "slave_id": 0,
       "port": 1883,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "ambibox",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -30,17 +30,17 @@
       "category": "v2x_charger",
       "slave_id": 0,
       "port": 1884,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "ambibox",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -51,7 +51,7 @@
       "slave_id": 1,
       "port": 5100,
       "running": true,
-      "site_id": 0,
+      "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "sdm630",
@@ -70,17 +70,17 @@
       "category": "energy_meter",
       "slave_id": 1,
       "port": 5102,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "sdm630",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -90,17 +90,17 @@
       "category": "energy_meter",
       "slave_id": 1,
       "port": 5101,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "sdm630",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -110,17 +110,17 @@
       "category": "energy_meter",
       "slave_id": 1,
       "port": 5103,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "sdm630",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -130,17 +130,17 @@
       "category": "energy_meter",
       "slave_id": 1,
       "port": 5104,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "sdm630",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -150,17 +150,17 @@
       "category": "inverter",
       "slave_id": 1,
       "port": 5106,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "commercial-50kw",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -170,17 +170,17 @@
       "category": "inverter",
       "slave_id": 1,
       "port": 5105,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "commercial-50kw",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -190,17 +190,17 @@
       "category": "v2x_charger",
       "slave_id": 0,
       "port": 1885,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "ambibox",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
       }
     },
     {
@@ -210,17 +210,77 @@
       "category": "v2x_charger",
       "slave_id": 0,
       "port": 1886,
-      "running": true,
+      "running": false,
       "site_id": 0,
       "device_on": true,
       "battery_capacity_kwh": 10,
       "profile": "ambibox",
       "ocpp_url": "",
       "automation": {
-        "enabled": true,
+        "enabled": false,
         "time_multiplier": 1,
         "scenario": "sunny",
-        "simulated_time": "2026-02-05T18:39:15Z"
+        "simulated_time": "2026-02-05T19:04:09Z"
+      }
+    },
+    {
+      "id": 12,
+      "serial": "INVSIM12",
+      "protocol": "modbus",
+      "category": "inverter",
+      "slave_id": 1,
+      "port": 5101,
+      "running": false,
+      "site_id": 1,
+      "device_on": true,
+      "battery_capacity_kwh": 10,
+      "profile": "commercial-50kw",
+      "ocpp_url": "",
+      "automation": {
+        "enabled": false,
+        "time_multiplier": 1,
+        "scenario": "sunny",
+        "simulated_time": "2026-02-05T18:41:00Z"
+      }
+    },
+    {
+      "id": 13,
+      "serial": "OCPPSIM13",
+      "protocol": "ocpp",
+      "category": "ocpp_charger",
+      "slave_id": 0,
+      "port": 9000,
+      "running": false,
+      "site_id": 1,
+      "device_on": true,
+      "battery_capacity_kwh": 10,
+      "profile": "chargeamps-dawn",
+      "ocpp_url": "",
+      "automation": {
+        "enabled": false,
+        "time_multiplier": 1,
+        "scenario": "idle",
+        "simulated_time": "2026-02-05T18:41:02Z"
+      }
+    },
+    {
+      "id": 14,
+      "serial": "V2XSIM14",
+      "protocol": "mqtt",
+      "category": "v2x_charger",
+      "slave_id": 0,
+      "port": 0,
+      "running": false,
+      "site_id": 1,
+      "device_on": true,
+      "battery_capacity_kwh": 10,
+      "profile": "ambibox",
+      "ocpp_url": "",
+      "automation": {
+        "enabled": false,
+        "time_multiplier": 1,
+        "scenario": "idle",
+        "simulated_time": "2026-02-06T06:25:47Z"
       }
     }
   ],
@@ -232,7 +292,11 @@
       "meter_ids": [
         3
       ],
-      "simulator_ids": [],
+      "simulator_ids": [
+        12,
+        13,
+        14
+      ],
       "base_load_w": 5500,
       "enabled": true,
       "fuse_size": 16,
@@ -248,7 +312,7 @@
         "l3": false
       },
       "bound_meter": true,
-      "simulated_time": "2026-02-05T18:39:15Z",
+      "simulated_time": "2026-02-05T20:39:39Z",
       "time_multiplier": 1,
       "sim_running": false,
       "scenario": "sunny",

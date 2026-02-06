@@ -13,6 +13,14 @@ body {
 /* App Container - holds sidebar and main */
 .app-container {
     display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* App Body - sidebar + main columns */
+.app-body {
+    display: flex;
     flex: 1;
     overflow: hidden;
 }

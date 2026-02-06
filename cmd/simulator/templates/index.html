@@ -30,7 +30,12 @@
                 <div class="site-header-tab"
                      :class="{ 'active': $store.site.selectedId === site.id }"
                      @click="$store.site.selectSite(site.id); $store.app.selectedId = null;">
-                    <span class="site-header-tab-icon">🏠</span>
+                    <svg class="site-header-tab-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+                        <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                    </svg>
                     <span class="site-header-tab-name" x-text="site.name"></span>
                     <button class="site-header-tab-close"
                             x-show="$store.site.sites.length > 1"
@@ -160,7 +165,12 @@
                         <div class="site-dashboard-item site-overview-sidebar-item"
                              :class="{ 'active': !$store.app.selectedId && $store.app.selectedView !== 'site_load' }"
                              @click="$store.app.selectedId = null; $store.app.selectedView = null; $store.site.ensureRefreshing()">
-                            <span class="site-dashboard-icon">📊</span>
+                            <svg class="site-dashboard-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+                                <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                            </svg>
                             <div class="site-dashboard-info">
                                 <span class="site-dashboard-name">Site Overview</span>
                                 <span class="site-dashboard-value">Overview</span>
@@ -179,7 +189,14 @@
                                      return icons[key] || '📊';
                                  }
                              }">
-                            <span class="site-load-icon site-dashboard-icon">🏠</span>
+                            <svg class="site-load-icon site-dashboard-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M10 12V8.964" />
+                                <path d="M14 12V8.964" />
+                                <path d="M15 12a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2a1 1 0 0 1 1-1z" />
+                                <path d="M8.5 21H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2h-5a2 2 0 0 1-2-2v-2" />
+                            </svg>
                             <div class="site-load-info site-dashboard-info">
                                 <span class="site-load-name">Site Load</span>
                                 <span class="site-load-value" x-text="formatSidebarPower($store.site.data?.base_load_w || 0)"></span>
@@ -390,7 +407,33 @@
                 <template x-if="sims.length > 0">
                     <div class="category-section">
                         <div class="category-header" @click="$store.app.toggleCategory(cat)">
-                            <span class="category-icon" x-text="$store.app.categories[cat].icon"></span>
+                            <template x-if="cat === 'inverter'">
+                                <svg class="category-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                     stroke-linecap="round" stroke-linejoin="round">
+                                    <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+                                    <path d="M12.667 8 10 12h4l-2.667 4" />
+                                </svg>
+                            </template>
+                            <template x-if="cat === 'energy_meter'">
+                                <svg class="category-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                     stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m12 14 4-4" />
+                                    <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+                                </svg>
+                            </template>
+                            <template x-if="cat === 'v2x_charger' || cat === 'ocpp_charger'">
+                                <svg class="category-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                     stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 4 0v-6.998a2 2 0 0 0-.59-1.42L18 5" />
+                                    <path d="M14 21V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v16" />
+                                    <path d="M2 21h13" />
+                                    <path d="M3 7h11" />
+                                    <path d="m9 11-2 3h3l-2 3" />
+                                </svg>
+                            </template>
                             <span class="category-name" x-text="$store.app.categories[cat].name"></span>
                             <span class="category-count" x-text="sims.length"></span>
                         </div>
