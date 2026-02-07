@@ -7,8 +7,25 @@
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     padding: 0 var(--spacing-lg);
-    height: 48px;
+    padding-left: 80px;
+    height: 52px;
     flex-shrink: 0;
+    --wails-draggable: drag;
+}
+
+.site-header-leading {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    margin-right: var(--spacing-sm);
+    padding-left: var(--spacing-sm);
+}
+
+.site-header-tab,
+.site-header-tab-add,
+.site-header-actions button,
+.site-header-leading button {
+    --wails-draggable: no-drag;
 }
 
 .site-header-tabs {
@@ -215,7 +232,7 @@
 .docs-header-btn {
     background: transparent;
     border: none;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     cursor: pointer;
     padding: 4px;
     border-radius: var(--radius-sm);
@@ -223,12 +240,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .settings-header-btn:hover,
 .docs-header-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
+    color: var(--color-primary);
+    background: rgba(var(--color-primary-rgb), 0.1);
 }
 
 .simulator-list {

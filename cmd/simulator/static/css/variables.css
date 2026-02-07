@@ -47,6 +47,7 @@
     --color-primary-rgb: 0, 255, 132;
     --color-primary-hover: rgba(0, 255, 132, 0.1);
     --color-primary-active: rgba(0, 255, 132, 0.2);
+    --color-primary-text: #064e2a;
 
     /* Colors - Status */
     --color-success: #00FF84;

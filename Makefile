@@ -44,10 +44,25 @@ build-macos:
 	@printf '#!/bin/bash\nDIR="$$(cd "$$(dirname "$$0")" && pwd)"\nexec "$$DIR/device-simulator" --desktop "$$@"\n' \
 		> "build/macos/Device Simulator.app/Contents/MacOS/device-simulator-wrapper"
 	@chmod +x "build/macos/Device Simulator.app/Contents/MacOS/device-simulator-wrapper"
+	@# Generate app icon
+	@mkdir -p /tmp/appicon.iconset
+	@sips -z 16 16 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_16x16.png >/dev/null
+	@sips -z 32 32 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_16x16@2x.png >/dev/null
+	@sips -z 32 32 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_32x32.png >/dev/null
+	@sips -z 64 64 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_32x32@2x.png >/dev/null
+	@sips -z 128 128 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_128x128.png >/dev/null
+	@sips -z 256 256 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_128x128@2x.png >/dev/null
+	@sips -z 256 256 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_256x256.png >/dev/null
+	@sips -z 512 512 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_256x256@2x.png >/dev/null
+	@sips -z 512 512 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_512x512.png >/dev/null
+	@sips -z 1024 1024 cmd/simulator/build/appicon.png --out /tmp/appicon.iconset/icon_512x512@2x.png >/dev/null
+	@iconutil -c icns /tmp/appicon.iconset -o "build/macos/Device Simulator.app/Contents/Resources/appicon.icns"
+	@rm -rf /tmp/appicon.iconset
 	@printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
 		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
 		'<plist version="1.0"><dict>' \
 		'<key>CFBundleExecutable</key><string>device-simulator-wrapper</string>' \
+		'<key>CFBundleIconFile</key><string>appicon</string>' \
 		'<key>CFBundleIdentifier</key><string>io.srcful.device-simulator</string>' \
 		'<key>CFBundleName</key><string>Device Simulator</string>' \
 		'<key>CFBundlePackageType</key><string>APPL</string>' \

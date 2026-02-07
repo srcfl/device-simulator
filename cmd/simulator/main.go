@@ -33,6 +33,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
 //go:embed templates/* static/*
@@ -329,6 +330,10 @@ func runWailsApp(httpPort int) {
 		Height: 900,
 		AssetServer: &assetserver.Options{
 			Handler: assetHandler,
+		},
+		Mac: &mac.Options{
+			TitleBar:   mac.TitleBarHiddenInset(),
+			Appearance: mac.NSAppearanceNameDarkAqua,
 		},
 		OnStartup: func(ctx context.Context) {
 			// Start HTTP server after Wails is initialized (not during binding generation)

@@ -1309,7 +1309,7 @@
 
 .site-new-dialog button:first-of-type {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
 }
 
 .site-new-dialog button:first-of-type:hover {
@@ -1515,6 +1515,25 @@
     gap: var(--spacing-xs);
     font-size: var(--font-size-sm);
     color: var(--text-muted);
+}
+
+.fuse-indicator.clickable {
+    cursor: pointer;
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin: -2px -6px;
+    transition: background-color 0.15s ease;
+}
+
+.fuse-indicator.clickable:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.fuse-profile-label {
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    opacity: 0.7;
+    margin-left: 2px;
 }
 
 .fuse-marker-icon {
@@ -1795,7 +1814,7 @@
 .modal-footer .btn-primary {
     background: var(--color-primary);
     border: none;
-    color: white;
+    color: var(--color-primary-text);
 }
 
 .modal-footer .btn-primary:hover:not(:disabled) {
@@ -1875,7 +1894,7 @@
 
 .p1-mode-btn.active {
     background: var(--color-primary);
-    color: white;
+    color: var(--color-primary-text);
     font-weight: 600;
 }
 
@@ -2321,7 +2340,7 @@
 .sim-warning-actions .btn-primary {
     background: var(--color-primary);
     border: none;
-    color: white;
+    color: var(--color-primary-text);
 }
 
 .sim-warning-actions .btn-primary:hover {
@@ -2452,7 +2471,7 @@
 .sim-play-btn {
     background: var(--color-primary);
     border: none;
-    color: white;
+    color: var(--color-primary-text);
     width: 32px;
     height: 32px;
     border-radius: 50%;

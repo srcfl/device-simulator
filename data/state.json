@@ -50,7 +50,7 @@
       "category": "energy_meter",
       "slave_id": 1,
       "port": 5100,
-      "running": true,
+      "running": false,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 10,
@@ -230,7 +230,7 @@
       "category": "inverter",
       "slave_id": 1,
       "port": 5101,
-      "running": true,
+      "running": false,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 11,
@@ -250,7 +250,7 @@
       "category": "ocpp_charger",
       "slave_id": 0,
       "port": 9000,
-      "running": true,
+      "running": false,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 10,
@@ -270,7 +270,7 @@
       "category": "v2x_charger",
       "slave_id": 0,
       "port": 1883,
-      "running": true,
+      "running": false,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 10,
@@ -310,7 +310,7 @@
       "category": "ocpp_charger",
       "slave_id": 0,
       "port": 9001,
-      "running": true,
+      "running": false,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 10,
@@ -338,10 +338,10 @@
         14,
         17
       ],
-      "base_load_w": 8350,
+      "base_load_w": 12600,
       "enabled": true,
       "fuse_size": 16,
-      "fuse_profile": "manual",
+      "fuse_profile": "iec_gg",
       "phase_factors": {
         "l1": 0.333,
         "l2": 0.333,
@@ -349,21 +349,21 @@
       },
       "fuse_blown": {
         "l1": false,
-        "l2": false,
-        "l3": false
+        "l2": true,
+        "l3": true
       },
       "bound_meter": true,
-      "simulated_time": "2026-02-07T18:40:58Z",
-      "time_multiplier": 1,
+      "simulated_time": "2026-02-10T13:08:27Z",
+      "time_multiplier": 60,
       "sim_running": false,
       "scenario": "sunny",
       "phase_loads": {
-        "l1": 2950,
-        "l2": 2750,
-        "l3": 2650
+        "l1": 2700,
+        "l2": 5000,
+        "l3": 4900
       },
       "load_scenario": "work_from_home",
-      "load_linked": true,
+      "load_linked": false,
       "p1_mode": "direct"
     }
   ]

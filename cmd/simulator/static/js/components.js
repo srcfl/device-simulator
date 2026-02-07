@@ -2286,6 +2286,18 @@ document.addEventListener('alpine:init', () => {
             }
         },
 
+        getFuseProfileLabel() {
+            const profile = this.$store.site.data?.fuse_profile;
+            const labels = {
+                'iec_gg': 'gG/gL curve',
+                'iec_gm': 'gM curve',
+                'iec_am': 'aM curve',
+                'iec_gr': 'gR curve',
+                'iec_gs': 'gS curve',
+            };
+            return labels[profile] || 'no auto tripping';
+        },
+
         openSettingsModal() {
             this.syncSettingsFromStore(true);
             this.showSettingsModal = true;
