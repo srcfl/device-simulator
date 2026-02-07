@@ -104,7 +104,7 @@
     padding: var(--spacing-md);
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    color: #7ee787;
+    color: var(--color-success);
 }
 
 .debug-expected .debug-row {
@@ -114,11 +114,11 @@
 }
 
 .debug-expected .debug-row .key {
-    color: #58a6ff;
+    color: var(--color-info);
 }
 
 .debug-expected .debug-row .value {
-    color: #7ee787;
+    color: var(--color-success);
 }
 
 .debug-expected .debug-row .note {

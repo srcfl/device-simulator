@@ -318,7 +318,7 @@
 .sim-serial { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sim-address {
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--text-primary);
     margin-top: 2px;

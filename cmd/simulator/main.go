@@ -399,6 +399,8 @@ func (h *templateAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			w.Header().Set("Content-Type", "image/png")
 		case strings.HasSuffix(path, ".ico"):
 			w.Header().Set("Content-Type", "image/x-icon")
+		case strings.HasSuffix(path, ".woff2"):
+			w.Header().Set("Content-Type", "font/woff2")
 		}
 		w.Write(content)
 		return

@@ -1840,9 +1840,9 @@ document.addEventListener('alpine:init', () => {
             const soc = Math.max(0, Math.min(100, this.batterySoc));
             let color;
             if (soc <= 20) {
-                color = 'rgba(239, 68, 68, 0.8)';
+                color = 'rgba(255, 13, 13, 0.8)';
             } else if (soc <= 40) {
-                color = 'rgba(245, 158, 11, 0.8)';
+                color = 'rgba(255, 213, 0, 0.8)';
             } else {
                 color = 'rgba(139, 92, 246, 0.8)'; // purple for virtual battery
             }
@@ -2082,11 +2082,11 @@ document.addEventListener('alpine:init', () => {
             const soc = Math.max(0, Math.min(100, this.batterySoc));
             let color;
             if (soc <= 20) {
-                color = 'rgba(239, 68, 68, 0.8)'; // red
+                color = 'rgba(255, 13, 13, 0.8)';
             } else if (soc <= 40) {
-                color = 'rgba(245, 158, 11, 0.8)'; // yellow/orange
+                color = 'rgba(255, 213, 0, 0.8)';
             } else {
-                color = 'rgba(0, 200, 100, 0.8)'; // green
+                color = 'rgba(0, 255, 132, 0.8)';
             }
             return `height: ${soc}%; background: ${color};`;
         },
@@ -2406,16 +2406,16 @@ document.addEventListener('alpine:init', () => {
                 if (overloadRatio < 0.5) {
                     // Yellow to orange
                     const t = overloadRatio * 2;
-                    const r = 245;
-                    const g = Math.round(158 - (t * 58)); // 158 -> 100
-                    const b = Math.round(11 + (t * 19)); // 11 -> 30
+                    const r = 255;
+                    const g = Math.round(213 - (t * 106)); // 213 -> 107
+                    const b = Math.round(0 + (t * 0)); // 0 -> 0
                     color = `rgb(${r}, ${g}, ${b})`;
                 } else {
                     // Orange to red
                     const t = (overloadRatio - 0.5) * 2;
-                    const r = Math.round(245 - (t * 6)); // 245 -> 239
-                    const g = Math.round(100 - (t * 32)); // 100 -> 68
-                    const b = Math.round(30 + (t * 38)); // 30 -> 68
+                    const r = 255;
+                    const g = Math.round(107 - (t * 94)); // 107 -> 13
+                    const b = Math.round(0 + (t * 13)); // 0 -> 13
                     color = `rgb(${r}, ${g}, ${b})`;
                 }
             }
@@ -2497,8 +2497,8 @@ document.addEventListener('alpine:init', () => {
                 barWidth = 35 + (overloadRatio * 15);
 
                 // Blend base color towards red as overload increases
-                const base = isExport ? [59, 130, 246] : [245, 158, 11];  // blue : orange
-                const red = [239, 68, 68];
+                const base = isExport ? [33, 150, 243] : [255, 107, 0];  // blue : orange
+                const red = [255, 13, 13];
                 const r = Math.round(base[0] + (red[0] - base[0]) * overloadRatio);
                 const g = Math.round(base[1] + (red[1] - base[1]) * overloadRatio);
                 const b = Math.round(base[2] + (red[2] - base[2]) * overloadRatio);

@@ -82,10 +82,10 @@
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
-    background: rgba(15, 52, 96, 0.3);
+    background: rgba(38, 38, 38, 0.3);
     padding: 0.5rem 0.75rem;
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(15, 52, 96, 0.5);
+    border: 1px solid rgba(38, 38, 38, 0.5);
 }
 
 .control-group.vertical {
@@ -136,7 +136,7 @@
     font-size: 0.75rem;
     color: var(--text-secondary);
     padding: 0.3rem 0.6rem;
-    background: rgba(15, 52, 96, 0.3);
+    background: rgba(38, 38, 38, 0.3);
     border-radius: var(--radius-md);
     margin-left: auto;
 }
@@ -216,7 +216,7 @@
         rgba(var(--color-success-rgb), 0.3) 50%,
         rgba(var(--color-success-rgb), 0.3) 100%);
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(15, 52, 96, 0.5);
+    border: 1px solid rgba(38, 38, 38, 0.5);
 }
 
 .power-slider-center {
@@ -277,7 +277,7 @@
 }
 
 .power-slider-value.charging { color: var(--color-warning); }
-.power-slider-value.discharging { color: var(--color-primary); }
+.power-slider-value.discharging { color: var(--color-export); }
 .power-slider-value.stopped { color: var(--text-secondary); }
 .power-slider-value.disabled { color: #555; font-style: italic; }
 
@@ -310,7 +310,7 @@
         rgba(var(--color-success-rgb), 0.3) 50%,
         rgba(var(--color-success-rgb), 0.3) 100%);
     border-radius: var(--radius-lg);
-    border: 1px solid rgba(15, 52, 96, 0.5);
+    border: 1px solid rgba(38, 38, 38, 0.5);
 }
 
 .soc-slider-input {
@@ -421,12 +421,12 @@
 
 .log-time { color: var(--text-muted); min-width: 60px; }
 .log-op { min-width: 80px; }
-.log-op.read { color: #58a6ff; }
-.log-op.write { color: #f0883e; }
+.log-op.read { color: var(--color-info); }
+.log-op.write { color: var(--color-import); }
 .log-op.message { color: var(--color-mqtt); }
 .log-op.connect { color: var(--color-success); }
-.log-addr { color: #8b949e; min-width: 45px; }
-.log-values { color: #7ee787; word-break: break-all; }
+.log-addr { color: var(--text-secondary); min-width: 45px; }
+.log-values { color: var(--color-success); word-break: break-all; }
 .log-empty { color: var(--text-muted); text-align: center; padding: var(--spacing-lg); }
 
 /* MQTT Clients */
@@ -448,7 +448,7 @@
 
 .client-box .client-id {
     font-weight: 600;
-    color: #58a6ff;
+    color: var(--color-info);
     font-size: var(--font-size-lg);
     margin-bottom: var(--spacing-sm);
     word-break: break-all;
@@ -456,7 +456,7 @@
 
 .client-box .client-detail {
     font-size: 0.75rem;
-    color: #8b949e;
+    color: var(--text-secondary);
     display: flex;
     justify-content: space-between;
     padding: 0.15rem 0;
@@ -485,8 +485,8 @@
 .member-card.modbus { border-left: 3px solid var(--color-modbus); }
 .member-card.mqtt { border-left: 3px solid var(--color-mqtt); }
 .member-card.ocpp { border-left: 3px solid var(--color-ocpp); }
-.member-card.load { border-left: 3px solid var(--color-warning); background: rgba(245, 158, 11, 0.05); }
-.member-card.pv { border-left: 3px solid var(--color-primary); background: rgba(0, 200, 100, 0.05); }
+.member-card.load { border-left: 3px solid var(--color-warning); background: rgba(255, 213, 0, 0.05); }
+.member-card.pv { border-left: 3px solid var(--color-primary); background: rgba(0, 255, 132, 0.05); }
 .member-card.battery { border-left: 3px solid #8b5cf6; background: rgba(139, 92, 246, 0.05); }
 
 /* Offline/disabled state for member cards - header stays active */
@@ -520,7 +520,7 @@
     height: 22px;
     border-radius: var(--radius-md);
     border: none;
-    background: rgba(200, 100, 100, 0.15);
+    background: rgba(var(--color-error-rgb), 0.15);
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
@@ -530,21 +530,21 @@
 }
 .member-delete-btn:hover {
     color: var(--color-error);
-    background: rgba(200, 100, 100, 0.3);
+    background: rgba(var(--color-error-rgb), 0.3);
 }
 
-.protocol-badge.pv { background: rgba(0, 200, 100, 0.2); color: var(--color-primary); }
+.protocol-badge.pv { background: rgba(0, 255, 132, 0.2); color: var(--color-primary); }
 .protocol-badge.battery { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
 
 /* Virtual device power states */
 .member-card.battery .power-value.charging { color: var(--color-warning); }
-.member-card.battery .power-value.discharging { color: var(--color-primary); }
+.member-card.battery .power-value.discharging { color: var(--color-export); }
 .member-card.battery .control-value.charging { color: var(--color-warning); }
-.member-card.battery .control-value.discharging { color: var(--color-primary); }
+.member-card.battery .control-value.discharging { color: var(--color-export); }
 
 /* Virtual device slider styles */
 .mini-slider.pv-power {
-    background: linear-gradient(to right, rgba(0, 200, 100, 0.3), rgba(0, 200, 100, 0.6));
+    background: linear-gradient(to right, rgba(0, 255, 132, 0.3), rgba(0, 255, 132, 0.6));
 }
 .mini-slider.pv-power::-webkit-slider-thumb {
     background: var(--color-primary);
@@ -557,7 +557,7 @@
     background: #8b5cf6;
 }
 .mini-progress-fill.battery {
-    background: linear-gradient(90deg, rgba(239, 68, 68, 0.8), rgba(245, 158, 11, 0.8), rgba(139, 92, 246, 0.8));
+    background: linear-gradient(90deg, rgba(255, 13, 13, 0.8), rgba(255, 213, 0, 0.8), rgba(139, 92, 246, 0.8));
 }
 
 .member-header {
@@ -592,7 +592,7 @@
 .meter-badge {
     font-size: 0.6rem;
     color: var(--color-primary);
-    background: rgba(0, 200, 100, 0.15);
+    background: rgba(0, 255, 132, 0.15);
     padding: 0.1rem 0.35rem;
     border-radius: var(--radius-sm);
     text-transform: uppercase;
@@ -619,21 +619,21 @@
 }
 
 .member-open-btn {
-    background: rgba(0, 200, 100, 0.15);
+    background: rgba(0, 255, 132, 0.15);
     color: var(--color-primary);
 }
 
 .member-open-btn:hover {
-    background: rgba(0, 200, 100, 0.3);
+    background: rgba(0, 255, 132, 0.3);
 }
 
 .member-remove-btn {
-    background: rgba(200, 100, 100, 0.15);
+    background: rgba(var(--color-error-rgb), 0.15);
     color: var(--color-error);
 }
 
 .member-remove-btn:hover {
-    background: rgba(200, 100, 100, 0.3);
+    background: rgba(var(--color-error-rgb), 0.3);
 }
 
 .member-power {
@@ -876,10 +876,10 @@
 
 /* Energy Meter Display */
 .meter-display {
-    background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+    background: linear-gradient(145deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-tertiary) 100%);
     border-radius: var(--radius-xl);
     padding: var(--spacing-lg);
-    border: 2px solid #2a3f5f;
+    border: 2px solid var(--border-color-light);
     box-shadow:
         0 4px 20px rgba(0, 0, 0, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -913,7 +913,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #555;
+    background: var(--text-muted);
 }
 
 .meter-status.online .status-dot {
@@ -961,13 +961,13 @@
     font-weight: 700;
     font-family: var(--font-mono);
     color: var(--color-warning);
-    text-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+    text-shadow: 0 0 20px rgba(255, 213, 0, 0.3);
     line-height: 1;
 }
 
 .meter-power-value.exporting .meter-power-number {
     color: var(--color-success);
-    text-shadow: 0 0 20px rgba(0, 200, 100, 0.3);
+    text-shadow: 0 0 20px rgba(0, 255, 132, 0.3);
 }
 
 .meter-power-unit {
@@ -1011,12 +1011,12 @@
 }
 
 .meter-energy-icon.import {
-    background: rgba(245, 158, 11, 0.2);
+    background: rgba(255, 213, 0, 0.2);
     color: var(--color-warning);
 }
 
 .meter-energy-icon.export {
-    background: rgba(0, 200, 100, 0.2);
+    background: rgba(0, 255, 132, 0.2);
     color: var(--color-success);
 }
 
@@ -1111,12 +1111,12 @@
 
 .formula-result.importing {
     color: var(--color-warning);
-    background: rgba(245, 158, 11, 0.1);
+    background: rgba(255, 213, 0, 0.1);
 }
 
 .formula-result.exporting {
     color: var(--color-success);
-    background: rgba(0, 200, 100, 0.1);
+    background: rgba(0, 255, 132, 0.1);
 }
 
 .formula-breakdown {
@@ -1246,7 +1246,7 @@
 }
 
 .site-tab-close:hover {
-    background: rgba(255, 100, 100, 0.2);
+    background: rgba(var(--color-error-rgb), 0.2);
     color: var(--color-error);
 }
 
@@ -1271,7 +1271,7 @@
 .site-tab-add:hover {
     border-color: var(--color-primary);
     color: var(--color-primary);
-    background: rgba(0, 200, 100, 0.1);
+    background: rgba(0, 255, 132, 0.1);
 }
 
 .site-new-dialog {
@@ -1530,7 +1530,7 @@
     width: 24px;
     height: 24px;
     border-radius: var(--radius-sm);
-    background: rgba(0, 200, 100, 0.2);
+    background: rgba(0, 255, 132, 0.2);
     border: 2px solid var(--color-success);
     cursor: pointer;
     display: flex;
@@ -1541,7 +1541,7 @@
 }
 
 .fuse-toggle:hover {
-    background: rgba(0, 200, 100, 0.3);
+    background: rgba(0, 255, 132, 0.3);
     transform: scale(1.05);
 }
 
@@ -1554,12 +1554,12 @@
 }
 
 .fuse-toggle.blown {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgba(255, 13, 13, 0.2);
     border-color: var(--color-error);
 }
 
 .fuse-toggle.blown:hover {
-    background: rgba(239, 68, 68, 0.3);
+    background: rgba(255, 13, 13, 0.3);
 }
 
 .fuse-toggle.blown .fuse-toggle-indicator {
@@ -1591,7 +1591,7 @@
 }
 
 .meter-total.exporting {
-    color: var(--color-primary);
+    color: var(--color-export);
 }
 
 /* ============================
@@ -1665,7 +1665,7 @@
 
 .modal-info {
     padding: var(--spacing-sm) var(--spacing-lg);
-    background: rgba(0, 200, 100, 0.1);
+    background: rgba(0, 255, 132, 0.1);
     font-size: var(--font-size-sm);
     color: var(--text-muted);
     border-bottom: 1px solid var(--border-color);
@@ -1767,7 +1767,7 @@
 
 .phase-sum.invalid {
     color: var(--color-error);
-    background: rgba(239, 68, 68, 0.1);
+    background: rgba(255, 13, 13, 0.1);
 }
 
 .phase-sum .error-hint {
@@ -1825,7 +1825,7 @@
 .sim-item.bound-meter {
     opacity: 0.8;
     border-left: 2px solid var(--color-primary);
-    background: rgba(0, 200, 100, 0.05);
+    background: rgba(0, 255, 132, 0.05);
 }
 
 .bound-meter-icon {
@@ -1836,7 +1836,7 @@
 .bound-meter-badge {
     font-size: 0.55rem;
     color: var(--color-primary);
-    background: rgba(0, 200, 100, 0.2);
+    background: rgba(0, 255, 132, 0.2);
     padding: 0.1rem 0.3rem;
     border-radius: var(--radius-sm);
     text-transform: uppercase;
@@ -2156,7 +2156,7 @@
 }
 
 .control-value.discharging {
-    color: var(--color-primary);
+    color: var(--color-export);
 }
 
 .control-value.idle {
@@ -2341,7 +2341,7 @@
 
 /* Site Simulation Controls */
 .site-simulation-controls {
-    background: rgba(15, 52, 96, 0.5);
+    background: rgba(38, 38, 38, 0.5);
     border-bottom: 1px solid var(--border-color);
     padding: 8px 12px;
     display: flex;
@@ -2473,7 +2473,7 @@
 }
 
 .sim-play-btn.running:hover {
-    background: #cc8a00;
+    background: #ccaa00;
 }
 
 .sim-reset-btn {
@@ -2680,8 +2680,8 @@
 /* ========== Warning Banner ========== */
 
 .warning-banner {
-    background: rgba(245, 158, 11, 0.12);
-    border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+    background: rgba(255, 213, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 213, 0, 0.35);
     color: var(--text-primary);
     padding: 0.5rem 1rem;
 }

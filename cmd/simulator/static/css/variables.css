@@ -1,41 +1,85 @@
-/* CSS Custom Properties - Design System */
+/* CSS Custom Properties - Sourceful Design System */
+
+/* Font Faces */
+@font-face {
+    font-family: 'Satoshi';
+    src: url('/static/fonts/satoshi-regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Satoshi';
+    src: url('/static/fonts/satoshi-medium.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Satoshi';
+    src: url('/static/fonts/satoshi-bold.woff2') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/static/fonts/jetbrains-mono-regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/static/fonts/jetbrains-mono-bold.woff2') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     /* Colors - Primary */
-    --color-primary: #00d9ff;
-    --color-primary-rgb: 0, 217, 255;
-    --color-primary-hover: rgba(0, 217, 255, 0.1);
-    --color-primary-active: rgba(0, 217, 255, 0.2);
+    --color-primary: #00FF84;
+    --color-primary-rgb: 0, 255, 132;
+    --color-primary-hover: rgba(0, 255, 132, 0.1);
+    --color-primary-active: rgba(0, 255, 132, 0.2);
 
     /* Colors - Status */
-    --color-success: #00c864;
-    --color-success-rgb: 0, 200, 100;
-    --color-warning: #f59e0b;
-    --color-warning-rgb: 245, 158, 11;
-    --color-error: #ff4444;
-    --color-error-rgb: 239, 68, 68;
+    --color-success: #00FF84;
+    --color-success-rgb: 0, 255, 132;
+    --color-warning: #FFD500;
+    --color-warning-rgb: 255, 213, 0;
+    --color-error: #FF0D0D;
+    --color-error-rgb: 255, 13, 13;
+    --color-info: #2196F3;
 
     /* Colors - Background */
-    --bg-primary: #1a1a2e;
-    --bg-secondary: #16213e;
-    --bg-tertiary: #0d1117;
-    --border-color: #0f3460;
-    --border-color-light: #30363d;
-    --border-color-dark: #21262d;
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #171717;
+    --bg-tertiary: #0f0f0f;
+    --bg-elevated: #262626;
+    --border-color: #262626;
+    --border-color-light: #404040;
+    --border-color-dark: #1a1a1a;
 
     /* Colors - Text */
-    --text-primary: #eee;
-    --text-secondary: #888;
+    --text-primary: #fafafa;
+    --text-secondary: #a3a3a3;
     --text-muted: #666;
     --text-code: #c9d1d9;
 
     /* Colors - Protocol Badges */
-    --color-modbus: #3b82f6;
+    --color-modbus: #2196F3;
     --color-mqtt: #8b5cf6;
-    --color-ocpp: #f59e0b;
+    --color-ocpp: #FFD500;
 
     /* Colors - Energy Direction */
-    --color-import: #f59e0b;
-    --color-export: #3b82f6;
+    --color-import: #FF6B00;
+    --color-export: #2196F3;
 
     /* Spacing */
     --spacing-xs: 0.25rem;
@@ -45,22 +89,23 @@
     --spacing-xl: 1.5rem;
 
     /* Border Radius */
-    --radius-sm: 3px;
-    --radius-md: 4px;
-    --radius-lg: 6px;
-    --radius-xl: 8px;
-    --radius-round: 12px;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --radius-round: 16px;
+    --radius-full: 9999px;
 
     /* Typography */
-    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-mono: 'Monaco', 'Menlo', 'Consolas', monospace;
-    --font-size-xs: 0.55rem;
-    --font-size-sm: 0.7rem;
-    --font-size-md: 0.8rem;
-    --font-size-lg: 0.85rem;
-    --font-size-xl: 1rem;
-    --font-size-2xl: 1.1rem;
-    --font-size-3xl: 1.2rem;
+    --font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+    --font-size-xs: 0.625rem;
+    --font-size-sm: 0.75rem;
+    --font-size-md: 0.85rem;
+    --font-size-lg: 0.95rem;
+    --font-size-xl: 1.1rem;
+    --font-size-2xl: 1.3rem;
+    --font-size-3xl: 1.6rem;
 
     /* Transitions */
     --transition-fast: 0.2s ease;

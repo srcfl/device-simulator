@@ -106,7 +106,7 @@ body {
     box-shadow: var(--shadow-md);
 }
 
-.toggle-btn.on { background: linear-gradient(135deg, var(--color-success), #00a050); color: #000; }
+.toggle-btn.on { background: linear-gradient(135deg, var(--color-success), #00cc6a); color: #000; }
 .toggle-btn.off { background: linear-gradient(135deg, #555, #444); color: #fff; }
 
 .quick-btn {
@@ -124,10 +124,10 @@ body {
     box-shadow: var(--shadow-md);
 }
 
-.quick-btn.charge { background: linear-gradient(135deg, var(--color-success), #00a050); color: #000; }
-.quick-btn.discharge { background: linear-gradient(135deg, var(--color-warning), #d97706); color: #000; }
+.quick-btn.charge { background: linear-gradient(135deg, var(--color-success), #00cc6a); color: #000; }
+.quick-btn.discharge { background: linear-gradient(135deg, var(--color-warning), #ccaa00); color: #000; }
 .quick-btn.stop { background: linear-gradient(135deg, #666, #555); color: #fff; }
-.quick-btn.set { background: linear-gradient(135deg, var(--color-modbus), #2563eb); color: #fff; }
+.quick-btn.set { background: linear-gradient(135deg, var(--color-modbus), #1976D2); color: #fff; }
 
 /* Status Badges */
 .status-badge {
@@ -190,7 +190,7 @@ body {
 }
 
 .copy-btn.copied {
-    color: #4ade80;
+    color: var(--color-success);
 }
 
 /* Simulated Time Display */
