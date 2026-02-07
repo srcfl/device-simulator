@@ -489,31 +489,48 @@
 .member-card.pv { border-left: 3px solid var(--color-primary); background: rgba(0, 200, 100, 0.05); }
 .member-card.battery { border-left: 3px solid #8b5cf6; background: rgba(139, 92, 246, 0.05); }
 
-/* Offline/disabled state for member cards */
+/* Offline/disabled state for member cards - header stays active */
 .member-card.offline {
+    border-left-color: #555 !important;
+}
+.member-card.offline .member-power,
+.member-card.offline .member-controls {
     opacity: 0.5;
     filter: grayscale(0.7);
 }
-.member-card.offline .mini-slider,
-.member-card.offline .member-control-row input {
+.member-card.offline .member-controls .mini-slider,
+.member-card.offline .member-controls input {
     pointer-events: none;
-    opacity: 0.5;
 }
-.member-card.offline .member-control-row select {
+.member-card.offline .member-controls select {
     pointer-events: none;
-    opacity: 0.5;
 }
-.member-card.offline .mini-toggle {
+.member-card.offline .member-controls .mini-toggle {
     pointer-events: none;
-    opacity: 0.5;
-}
-.member-card.offline .mini-toggle.emu-toggle {
-    pointer-events: auto;
-    opacity: 1;
 }
 .member-card.offline .power-value,
 .member-card.offline .control-value {
     color: var(--text-secondary) !important;
+}
+
+/* Delete button in card footer */
+.member-delete-btn {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-md);
+    border: none;
+    background: rgba(200, 100, 100, 0.15);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+.member-delete-btn:hover {
+    color: var(--color-error);
+    background: rgba(200, 100, 100, 0.3);
 }
 
 .protocol-badge.pv { background: rgba(0, 200, 100, 0.2); color: var(--color-primary); }
@@ -584,6 +601,7 @@
 
 .member-actions {
     display: flex;
+    align-items: center;
     gap: var(--spacing-xs);
 }
 
@@ -2571,8 +2589,38 @@
     opacity: 0.5;
 }
 
-.sim-item.device-off .sim-stats {
+/* Add Device skeleton card */
+.add-device-card {
+    border: 2px dashed var(--border-color) !important;
+    background: transparent !important;
+    cursor: pointer;
+    min-height: 120px;
+    align-items: center;
+    justify-content: center;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.add-device-card:hover {
+    border-color: var(--color-primary) !important;
+    background: rgba(var(--color-primary-rgb), 0.05) !important;
+}
+
+.add-device-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-sm);
     color: var(--text-muted);
+    font-size: var(--font-size-md);
+    font-weight: 600;
+}
+
+.add-device-card:hover .add-device-content {
+    color: var(--color-primary);
+}
+
+.add-device-card .add-menu {
+    width: 100%;
 }
 
 /* ========== Site Dashboard Items ========== */
@@ -3133,4 +3181,81 @@
     color: var(--text-muted);
     font-size: var(--font-size-xs);
     margin-left: auto;
+}
+
+/* ========== Add Device Modal ========== */
+
+.add-device-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.add-device-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    width: 520px;
+    max-width: 90vw;
+    box-shadow: var(--shadow-lg);
+}
+
+.add-device-modal-body {
+    padding: var(--spacing-lg);
+}
+
+.add-device-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+}
+
+.add-device-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-lg) var(--spacing-md);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: center;
+    color: var(--text-primary);
+}
+
+.add-device-option:hover {
+    border-color: var(--color-primary);
+    background: rgba(var(--color-primary-rgb), 0.08);
+}
+
+.add-device-option-icon {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-lg);
+    background: rgba(var(--color-primary-rgb), 0.1);
+    color: var(--color-primary);
+}
+
+.add-device-option:hover .add-device-option-icon {
+    background: rgba(var(--color-primary-rgb), 0.2);
+}
+
+.add-device-option-name {
+    font-size: var(--font-size-md);
+    font-weight: 600;
+}
+
+.add-device-option-desc {
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    line-height: 1.4;
 }

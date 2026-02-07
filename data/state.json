@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "next_simulator_id": 16,
+  "next_simulator_id": 18,
   "next_site_id": 2,
   "simulators": [
     {
@@ -230,7 +230,7 @@
       "category": "inverter",
       "slave_id": 1,
       "port": 5101,
-      "running": true,
+      "running": false,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 11,
@@ -302,6 +302,26 @@
         "scenario": "sunny",
         "simulated_time": "2026-02-07T12:51:42Z"
       }
+    },
+    {
+      "id": 17,
+      "serial": "OCPPSIM17",
+      "protocol": "ocpp",
+      "category": "ocpp_charger",
+      "slave_id": 0,
+      "port": 0,
+      "running": false,
+      "site_id": 1,
+      "device_on": true,
+      "battery_capacity_kwh": 10,
+      "profile": "chargeamps-dawn",
+      "ocpp_url": "",
+      "automation": {
+        "enabled": false,
+        "time_multiplier": 1,
+        "scenario": "idle",
+        "simulated_time": "2026-02-07T18:02:31Z"
+      }
     }
   ],
   "sites": [
@@ -315,7 +335,8 @@
       "simulator_ids": [
         12,
         13,
-        14
+        14,
+        17
       ],
       "base_load_w": 1800,
       "enabled": true,
@@ -332,7 +353,7 @@
         "l3": false
       },
       "bound_meter": true,
-      "simulated_time": "2026-02-07T16:43:07Z",
+      "simulated_time": "2026-02-07T17:45:48Z",
       "time_multiplier": 1,
       "sim_running": false,
       "scenario": "sunny",

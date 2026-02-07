@@ -1113,6 +1113,17 @@ document.addEventListener('alpine:init', () => {
             return grouped;
         },
 
+        // Get simulators for selected site, sorted flat by category priority then port
+        getSiteSortedSimulators() {
+            const priority = { energy_meter: 1, inverter: 2, v2x_charger: 3, ocpp_charger: 4 };
+            return this.getSiteSimulators().slice().sort((a, b) => {
+                const pa = priority[a.category] || 99;
+                const pb = priority[b.category] || 99;
+                if (pa !== pb) return pa - pb;
+                return (a.port || 0) - (b.port || 0);
+            });
+        },
+
         // Add new simulator to current site
         async addSimulatorToSite(type) {
             this.addMenuOpen = false;
@@ -1139,6 +1150,8 @@ document.addEventListener('alpine:init', () => {
                 });
                 await this.loadSimulators();
                 await siteStore.loadSiteData();
+                // Auto-navigate to the new device's dashboard
+                this.selectSimulator(newSim.id, newSim.protocol);
             } catch (e) {
                 console.error('Add to site error:', e);
                 await Alpine.store('confirm').alert('Error', 'Failed: ' + e.message);
@@ -1149,8 +1162,12 @@ document.addEventListener('alpine:init', () => {
             categories[cat].collapsed = !categories[cat].collapsed;
         },
 
-        toggleAddMenu() {
-            this.addMenuOpen = !this.addMenuOpen;
+        openAddDeviceModal() {
+            this.addMenuOpen = true;
+        },
+
+        closeAddDeviceModal() {
+            this.addMenuOpen = false;
         },
 
         async addSimulator(type) {

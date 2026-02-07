@@ -304,14 +304,60 @@
 .sim-item:hover { background: var(--color-primary-hover); }
 .sim-item.active { background: var(--color-primary-active); border-color: var(--color-primary); }
 
-.sim-header { display: flex; justify-content: space-between; align-items: center; }
-.sim-profile { font-weight: 600; font-size: var(--font-size-md); color: var(--color-success); }
-.sim-profile.inactive { color: var(--text-muted); font-style: italic; }
-.sim-serial { font-size: 0.65rem; color: var(--text-secondary); }
-.sim-ports { font-size: 0.65rem; color: var(--text-muted); margin-top: 3px; }
-.sim-port-unassigned { color: var(--text-muted); font-style: italic; }
-.sim-port-last { color: var(--text-muted); font-style: italic; }
-.sim-stats { font-size: var(--font-size-sm); color: var(--text-secondary); margin-top: 3px; display: flex; gap: var(--spacing-sm); align-items: center; }
+.sim-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.sim-category-icon {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.sim-serial { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sim-address {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.7rem;
+    color: var(--text-primary);
+    margin-top: 2px;
+    padding-left: calc(14px + 0.35rem); /* align with serial (icon width + gap) */
+}
+
+.sim-item.device-off .sim-address {
+    color: var(--text-muted);
+}
+
+.sim-port-unassigned { color: var(--text-muted); font-style: italic; font-family: inherit; }
+
+/* Sidebar Add Device */
+.sidebar-add-device {
+    padding: 0.35rem 0.5rem;
+}
+
+.sidebar-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.45rem;
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-lg);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.sidebar-add-btn:hover {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    background: rgba(var(--color-primary-rgb), 0.05);
+}
 
 .sim-mode {
     display: inline-block;
@@ -323,50 +369,7 @@
 .sim-mode.auto { background: rgba(var(--color-success-rgb), 0.2); color: var(--color-success); }
 .sim-mode.static { background: rgba(100, 100, 100, 0.2); color: var(--text-muted); }
 
-/* Sidebar Toggle */
-.sim-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    margin-top: 4px;
-}
-
-.sim-toggle-track {
-    position: relative;
-    width: 32px;
-    height: 16px;
-    background: #444;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background var(--transition-fast);
-}
-
-.sim-toggle-track.on {
-    background: var(--color-success);
-}
-
-.sim-toggle-track .sim-toggle-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    background: #fff;
-    border-radius: 50%;
-    transition: transform var(--transition-fast);
-    pointer-events: none;
-}
-
-.sim-toggle-track.on .sim-toggle-thumb {
-    transform: translateX(16px);
-}
-
-.sim-toggle-label {
-    font-size: 0.6rem;
-    color: var(--text-secondary);
-}
-
-.sim-toggle-label.on { color: var(--color-success); }
+/* Sidebar Toggle (kept for potential reuse) */
 
 /* Delete Button */
 .sim-delete {

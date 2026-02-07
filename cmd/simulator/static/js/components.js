@@ -1085,17 +1085,16 @@ document.addEventListener('alpine:init', () => {
                 .filter(s => s && s.category === 'inverter');
         },
 
-        // Get non-inverter simulator ids (for the generic device loop)
-        getNonInverterSimulatorIds() {
+        // Get non-inverter simulators (for the generic device loop)
+        getNonInverterSimulators() {
             // Access simulatorsVersion to trigger Alpine reactivity when simulators change
             void this.simulatorsVersion;
             const siteData = Alpine.store('site').data;
             if (!siteData?.simulator_ids) return [];
             const app = Alpine.store('app');
-            return siteData.simulator_ids.filter(id => {
-                const sim = app.simulators.find(s => s.id === id);
-                return sim && sim.category !== 'inverter';
-            });
+            return siteData.simulator_ids
+                .map(id => app.simulators.find(s => s.id === id))
+                .filter(s => s && s.category !== 'inverter');
         },
 
         // Inverter PV/Battery helpers

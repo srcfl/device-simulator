@@ -400,150 +400,87 @@
             </template>
 
             <template x-if="$store.site.selectedId && $store.app.getSiteSimulators().length === 0">
-                <div class="no-simulators">No devices in this site.<br>Click "+ Add Device" below.</div>
+                <div class="no-simulators">No devices in this site.<br>Use the "+" card in the site overview to add one.</div>
             </template>
 
-            <template x-for="[cat, sims] in Object.entries($store.app.getSiteGroupedSimulators())" :key="cat">
-                <template x-if="sims.length > 0">
-                    <div class="category-section">
-                        <div class="category-header" @click="$store.app.toggleCategory(cat)">
-                            <template x-if="cat === 'inverter'">
-                                <svg class="category-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
-                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                     stroke-linecap="round" stroke-linejoin="round">
-                                    <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
-                                    <path d="M12.667 8 10 12h4l-2.667 4" />
-                                </svg>
-                            </template>
-                            <template x-if="cat === 'energy_meter'">
-                                <svg class="category-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
-                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                     stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="m12 14 4-4" />
-                                    <path d="M3.34 19a10 10 0 1 1 17.32 0" />
-                                </svg>
-                            </template>
-                            <template x-if="cat === 'v2x_charger' || cat === 'ocpp_charger'">
-                                <svg class="category-icon lucide-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
-                                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                     stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 4 0v-6.998a2 2 0 0 0-.59-1.42L18 5" />
-                                    <path d="M14 21V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v16" />
-                                    <path d="M2 21h13" />
-                                    <path d="M3 7h11" />
-                                    <path d="m9 11-2 3h3l-2 3" />
-                                </svg>
-                            </template>
-                            <span class="category-name" x-text="$store.app.categories[cat].name"></span>
-                            <span class="category-count" x-text="sims.length"></span>
-                        </div>
-                        <div class="category-items" :class="{ 'collapsed': $store.app.categories[cat].collapsed }">
-                            <template x-for="sim in sims" :key="sim.id">
-                                <div class="sim-item"
-                                     :class="{ 'active': $store.app.selectedId === sim.id, 'bound-meter': $store.site.isBoundMeter(sim.id), 'device-off': !sim.running }"
-                                     @click="$store.app.selectSimulator(sim.id, sim.protocol)">
+            <template x-for="sim in $store.app.getSiteSortedSimulators()" :key="sim.id">
+                <div class="sim-item"
+                     :class="{ 'active': $store.app.selectedId === sim.id, 'bound-meter': $store.site.isBoundMeter(sim.id), 'device-off': !sim.running }"
+                     @click="$store.app.selectSimulator(sim.id, sim.protocol)">
 
-                                    <button class="sim-delete"
-                                            x-show="!$store.site.isBoundMeter(sim.id)"
-                                            @click.stop="$store.app.deleteSimulator(sim.id, sim.serial)"
-                                            title="Delete">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                                        </svg>
-                                    </button>
+                    <button class="sim-delete"
+                            x-show="!$store.site.isBoundMeter(sim.id)"
+                            @click.stop="$store.app.deleteSimulator(sim.id, sim.serial)"
+                            title="Delete">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                        </svg>
+                    </button>
 
-                                    <div class="sim-header">
-                                        <template x-if="$store.site.isBoundMeter(sim.id)">
-                                            <span class="bound-meter-badge">SITE METER</span>
-                                        </template>
-                                        <template x-if="!$store.site.isBoundMeter(sim.id)">
-                                            <span class="sim-profile" :class="{ 'inactive': !sim.profile }"
-                                                  x-text="sim.profile || 'no profile'"></span>
-                                        </template>
-                                        <span class="protocol-badge" :class="sim.protocol" x-text="sim.protocol"></span>
-                                    </div>
-                                    <div class="sim-serial" x-text="sim.serial"></div>
-                                    <div class="sim-ports">
-                                        <template x-if="sim.protocol === 'modbus'">
-                                            <template x-if="sim.running && sim.port">
-                                                <span x-text="`Modbus :${sim.port + $store.app.modbusDisplayOffset} | Unit ${sim.slave_id}`"></span>
-                                            </template>
-                                            <template x-if="!sim.running && sim.port">
-                                                <span class="sim-port-last" x-text="`Last Modbus :${sim.port + $store.app.modbusDisplayOffset} | Unit ${sim.slave_id}`"></span>
-                                            </template>
-                                            <template x-if="!sim.port">
-                                                <span class="sim-port-unassigned">Port not allocated</span>
-                                            </template>
-                                        </template>
-                                        <template x-if="sim.protocol === 'mqtt'">
-                                            <template x-if="sim.running && sim.port">
-                                                <span x-text="`MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
-                                            </template>
-                                            <template x-if="!sim.running && sim.port">
-                                                <span class="sim-port-last" x-text="`Last MQTT :${sim.port + $store.app.mqttDisplayOffset}`"></span>
-                                            </template>
-                                            <template x-if="!sim.port">
-                                                <span class="sim-port-unassigned">Port not allocated</span>
-                                            </template>
-                                        </template>
-                                        <template x-if="sim.protocol === 'ocpp'">
-                                            <template x-if="sim.running && sim.port">
-                                                <span x-text="`WS :${sim.port + $store.app.ocppDisplayOffset}`"></span>
-                                            </template>
-                                            <template x-if="!sim.running && sim.port">
-                                                <span class="sim-port-last" x-text="`Last WS :${sim.port + $store.app.ocppDisplayOffset}`"></span>
-                                            </template>
-                                            <template x-if="!sim.port">
-                                                <span class="sim-port-unassigned">Port not allocated</span>
-                                            </template>
-                                        </template>
-                                    </div>
-                                    <div class="sim-stats">
-                                        <template x-if="sim.running">
-                                            <template x-if="sim.protocol === 'modbus' && sim.category === 'energy_meter'">
-                                                <span :style="(sim.meter || 0) >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
-                                                      x-text="`${(sim.meter || 0) >= 0 ? '↓' : '↑'} ${Math.abs(sim.meter || 0).toFixed(0)}W`"></span>
-                                            </template>
-                                            <template x-if="sim.protocol === 'modbus' && sim.category !== 'energy_meter'">
-                                                <span x-text="`PV ${sim.pv_power?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`"></span>
-                                            </template>
-                                            <template x-if="sim.protocol === 'mqtt'">
-                                                <span x-text="`${sim.session_state || 'IDLE'} | ${sim.power_ac?.toFixed(0) || 0}W | SoC ${sim.soc?.toFixed(0) || 0}%`"></span>
-                                            </template>
-                                            <template x-if="sim.protocol === 'ocpp'">
-                                                <span x-text="`${sim.connected ? 'Connected' : 'Disconnected'} | [${sim.connectors?.slice(1).map(c => c.status[0]).join('') || '?'}]`"></span>
-                                            </template>
-                                        </template>
-                                        <template x-if="!sim.running">
-                                            <span>Offline</span>
-                                        </template>
-                                    </div>
-                                    <div class="sim-toggle" @click.stop>
-                                        <div class="sim-toggle-track"
-                                             :class="{ 'on': sim.running }"
-                                             @click="$store.app.toggleEmulatorRunning(sim.id, sim.running)">
-                                            <div class="sim-toggle-thumb"></div>
-                                        </div>
-                                        <span class="sim-toggle-label" :class="{ 'on': sim.running }"
-                                              x-text="sim.running ? 'Online' : 'Offline'"></span>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
+                    <div class="sim-title-row">
+                        <template x-if="sim.category === 'inverter'">
+                            <svg class="sim-category-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+                                <path d="M12.667 8 10 12h4l-2.667 4" />
+                            </svg>
+                        </template>
+                        <template x-if="sim.category === 'energy_meter'">
+                            <svg class="sim-category-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m12 14 4-4" />
+                                <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+                            </svg>
+                        </template>
+                        <template x-if="sim.category === 'v2x_charger' || sim.category === 'ocpp_charger'">
+                            <svg class="sim-category-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 4 0v-6.998a2 2 0 0 0-.59-1.42L18 5" />
+                                <path d="M14 21V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v16" />
+                                <path d="M2 21h13" />
+                                <path d="M3 7h11" />
+                                <path d="m9 11-2 3h3l-2 3" />
+                            </svg>
+                        </template>
+                        <span class="sim-serial" x-text="sim.serial"></span>
+                        <span class="protocol-badge" :class="sim.protocol" x-text="sim.protocol"></span>
                     </div>
-                </template>
+                    <div class="sim-address">
+                        <template x-if="sim.protocol === 'modbus'">
+                            <template x-if="sim.port">
+                                <span x-text="`${$store.app.localIP}:${sim.port + $store.app.modbusDisplayOffset}`"></span>
+                            </template>
+                        </template>
+                        <template x-if="sim.protocol === 'mqtt'">
+                            <template x-if="sim.port">
+                                <span x-text="`${$store.app.localIP}:${sim.port + $store.app.mqttDisplayOffset}`"></span>
+                            </template>
+                        </template>
+                        <template x-if="sim.protocol === 'ocpp'">
+                            <template x-if="sim.port">
+                                <span x-text="`${$store.app.localIP}:${sim.port + $store.app.ocppDisplayOffset}`"></span>
+                            </template>
+                        </template>
+                        <template x-if="!sim.port">
+                            <span class="sim-port-unassigned">Not allocated</span>
+                        </template>
+                    </div>
+                </div>
             </template>
-        </div>
 
-        <!-- Add Device (creates in current site) -->
-        <div style="padding: 0.5rem;" x-show="$store.site.selectedId">
-            <button class="add-simulator-btn" @click="$store.app.toggleAddMenu()">+ Add Device</button>
-            <div class="add-menu" :class="{ 'show': $store.app.addMenuOpen }">
-                <div class="add-menu-title">Add to <span x-text="$store.site.data?.name || 'Site'"></span></div>
-                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('inverter')">⚡ Inverter (Modbus)</button>
-                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('energy_meter')">📊 Energy Meter (Modbus)</button>
-                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('v2x_charger')">🔋 V2X Charger (MQTT)</button>
-                <button class="add-menu-btn" @click="$store.app.addSimulatorToSite('ocpp_charger')">🔌 OCPP Charger</button>
+            <!-- Sidebar Add Device -->
+            <div class="sidebar-add-device" x-show="$store.site.selectedId">
+                <button class="sidebar-add-btn" @click="$store.app.openAddDeviceModal()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    Add Device
+                </button>
             </div>
         </div>
         </aside>
@@ -804,6 +741,10 @@
                                         <span class="protocol-badge pv">modbus</span>
                                     </div>
                                     <div class="member-actions">
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
+                                             @click="toggleEmulator(inv.id)" title="Toggle emulation">
+                                            <div class="mini-toggle-thumb"></div>
+                                        </div>
                                         <button class="member-open-btn" @click="openSimulator(inv.id)" title="Open full view">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
@@ -819,17 +760,10 @@
                                           x-text="formatInverterPvPower(inv)"></span>
                                 </div>
                                 <div class="member-controls">
-                                    <div class="member-control-row">
-                                        <span class="control-label">Emu</span>
-                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
-                                             @click="toggleEmulator(inv.id)">
-                                            <div class="mini-toggle-thumb"></div>
-                                        </div>
-                                        <span class="control-status" x-text="inv.running ? 'Running' : 'Stopped'"></span>
-                                    </div>
                                     <div class="member-control-row load-profile-row">
                                         <span class="control-label">Profile</span>
                                         <select class="site-load-select member-load-select"
+                                                :disabled="!inv.running"
                                                 @change="setInverterScenario(inv.id, $event.target.value)"
                                                 :value="getInverterScenario(inv)">
                                             <template x-for="s in pvScenarios" :key="s.value">
@@ -859,6 +793,13 @@
                                         <span class="status-indicator" :class="inv.running ? 'running' : ''"></span>
                                     </template>
                                     <span class="status-text" x-text="isSiteSimulating() ? 'Simulating' : (inv.running ? 'Online' : 'Offline')"></span>
+                                    <button x-show="!inv.running" class="member-delete-btn"
+                                            @click="$store.app.deleteSimulator(inv.id, inv.serial)"
+                                            title="Delete simulator">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
                         </template>
@@ -872,6 +813,10 @@
                                         <span class="protocol-badge battery">modbus</span>
                                     </div>
                                     <div class="member-actions">
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
+                                             @click="toggleEmulator(inv.id)" title="Toggle emulation">
+                                            <div class="mini-toggle-thumb"></div>
+                                        </div>
                                         <button class="member-open-btn" @click="openSimulator(inv.id)" title="Open full view">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
@@ -888,14 +833,6 @@
                                 </div>
                                 <div class="member-controls">
                                     <div class="member-control-row">
-                                        <span class="control-label">Emu</span>
-                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
-                                             @click="toggleEmulator(inv.id)">
-                                            <div class="mini-toggle-thumb"></div>
-                                        </div>
-                                        <span class="control-status" x-text="inv.running ? 'Running' : 'Stopped'"></span>
-                                    </div>
-                                    <div class="member-control-row">
                                         <span class="control-label">SoC</span>
                                         <div class="mini-progress">
                                             <div class="mini-progress-fill battery" :style="`width: ${inv.soc || 0}%`"></div>
@@ -908,8 +845,8 @@
                                             <input type="range" class="mini-slider battery-power"
                                                    min="-5000" max="5000" step="100"
                                                    :value="getInverterBatterySliderValue(inv)"
-                                                   :disabled="!inv.running"
-                                                   :class="{ 'disabled': !inv.running }"
+                                                   :disabled="isSiteSimulating() || !inv.running"
+                                                   :class="{ 'disabled': isSiteSimulating() || !inv.running }"
                                                    @change="setInverterBatteryPower(inv.id, parseInt($event.target.value))">
                                         </div>
                                         <span class="control-value" :class="getInverterBatteryPowerClass(inv)"
@@ -919,25 +856,36 @@
                                 <div class="member-footer">
                                     <span class="status-indicator" :class="inv.running ? 'running' : ''"></span>
                                     <span class="status-text" x-text="inv.running ? 'Online' : 'Offline'"></span>
+                                    <button x-show="!inv.running" class="member-delete-btn"
+                                            @click="$store.app.deleteSimulator(inv.id, inv.serial)"
+                                            title="Delete simulator">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
                         </template>
 
                         <!-- Non-inverter devices (inverters shown as PV/Battery cards above) -->
-                        <template x-for="simId in getNonInverterSimulatorIds()" :key="simId">
-                            <div class="member-card" :class="[getSimInfo(simId).protocol, { 'offline': !getSimInfo(simId).running }]">
+                        <template x-for="sim in getNonInverterSimulators()" :key="sim.id">
+                            <div class="member-card" :class="sim.protocol + (!sim.running ? ' offline' : '')">
                                 <!-- Header with serial, protocol badge, and actions -->
                                 <div class="member-header">
-                                    <div class="member-info" @click="openSimulator(simId)" style="cursor: pointer;" title="Open full simulator view">
-                                        <span class="member-serial" x-text="getSimInfo(simId).serial"></span>
-                                        <span class="protocol-badge" :class="getSimInfo(simId).protocol"
-                                              x-text="getSimInfo(simId).protocol"></span>
-                                        <template x-if="simId === $store.site.data?.meter_id">
+                                    <div class="member-info" @click="openSimulator(sim.id)" style="cursor: pointer;" title="Open full simulator view">
+                                        <span class="member-serial" x-text="sim.serial"></span>
+                                        <span class="protocol-badge" :class="sim.protocol"
+                                              x-text="sim.protocol"></span>
+                                        <template x-if="sim.id === $store.site.data?.meter_id">
                                             <span class="meter-badge">meter</span>
                                         </template>
                                     </div>
                                     <div class="member-actions">
-                                        <button class="member-open-btn" @click="openSimulator(simId)" title="Open full view">
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': sim.running }"
+                                             @click="toggleEmulator(sim.id)" title="Toggle emulation">
+                                            <div class="mini-toggle-thumb"></div>
+                                        </div>
+                                        <button class="member-open-btn" @click="openSimulator(sim.id)" title="Open full view">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                                                 <polyline points="15 3 21 3 21 9"/>
@@ -951,122 +899,117 @@
                                 <div class="member-power">
                                     <span class="power-label">Contribution</span>
                                     <span class="power-value"
-                                          :style="getPowerContribution(simId) >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
-                                          x-text="formatPowerContribution(simId)"></span>
+                                          :style="getPowerContribution(sim.id) >= 0 ? 'color: var(--color-warning);' : 'color: var(--color-primary);'"
+                                          x-text="formatPowerContribution(sim.id)"></span>
                                 </div>
 
                                 <!-- Protocol-specific controls -->
 
                                 <!-- MQTT Controls -->
-                                <template x-if="getSimInfo(simId).protocol === 'mqtt'">
+                                <template x-if="sim.protocol === 'mqtt'">
                                     <div class="member-controls">
                                         <div class="member-control-row">
-                                            <span class="control-label">Emu</span>
-                                            <div class="mini-toggle emu-toggle" :class="{ 'on': getSimInfo(simId).running }"
-                                                 @click="toggleEmulator(simId)">
-                                                <div class="mini-toggle-thumb"></div>
-                                            </div>
-                                            <span class="control-status" x-text="getSimInfo(simId).running ? 'Running' : 'Stopped'"></span>
-                                        </div>
-                                        <div class="member-control-row">
                                             <span class="control-label">EV</span>
-                                            <div class="mini-toggle" :class="{ 'on': getMqttEvConnected(simId), 'disabled': !getSimInfo(simId).running }"
-                                                 @click="if (!getSimInfo(simId).running) return; toggleMqttEvConnected(simId)">
+                                            <div class="mini-toggle" :class="{ 'on': getMqttEvConnected(sim.id), 'disabled': !sim.running }"
+                                                 @click="if (!sim.running) return; toggleMqttEvConnected(sim.id)">
                                                 <div class="mini-toggle-thumb"></div>
                                             </div>
-                                            <span class="control-status" x-text="getMqttEvConnected(simId) ? 'Connected' : 'Disconnected'"></span>
+                                            <span class="control-status" x-text="getMqttEvConnected(sim.id) ? 'Connected' : 'Disconnected'"></span>
                                         </div>
                                         <div class="member-control-row">
                                             <span class="control-label">Power</span>
                                             <div class="mini-slider-container">
                                                 <input type="range" class="mini-slider mqtt-power"
-                                                       :min="-getMqttMaxDischarge(simId)" :max="getMqttMaxCharge(simId)"
-                                                       :value="getMqttPower(simId)" step="500"
-                                                       :disabled="!getSimInfo(simId).running"
-                                                       :class="{ 'disabled': !getSimInfo(simId).running }"
-                                                       @change="setMqttPower(simId, parseInt($event.target.value))">
+                                                       :min="-getMqttMaxDischarge(sim.id)" :max="getMqttMaxCharge(sim.id)"
+                                                       :value="getMqttPower(sim.id)" step="500"
+                                                       :disabled="!sim.running"
+                                                       :class="{ 'disabled': !sim.running }"
+                                                       @change="setMqttPower(sim.id, parseInt($event.target.value))">
                                             </div>
-                                            <span class="control-value" :style="getPowerColorStyle(getMqttPower(simId), 'mqtt')"
-                                                  x-text="formatMqttPower(getMqttPower(simId))"></span>
+                                            <span class="control-value" :style="getPowerColorStyle(getMqttPower(sim.id), 'mqtt')"
+                                                  x-text="formatMqttPower(getMqttPower(sim.id))"></span>
                                         </div>
                                         <div class="member-control-row">
                                             <span class="control-label">SoC</span>
                                             <div class="mini-progress">
-                                                <div class="mini-progress-fill" :style="`width: ${getMqttSoc(simId)}%`"></div>
+                                                <div class="mini-progress-fill" :style="`width: ${getMqttSoc(sim.id)}%`"></div>
                                             </div>
-                                            <span class="control-value" x-text="`${getMqttSoc(simId).toFixed(0)}%`"></span>
+                                            <span class="control-value" x-text="`${getMqttSoc(sim.id).toFixed(0)}%`"></span>
                                         </div>
                                     </div>
                                 </template>
 
                                 <!-- OCPP Controls -->
-                                <template x-if="getSimInfo(simId).protocol === 'ocpp'">
+                                <template x-if="sim.protocol === 'ocpp'">
                                     <div class="member-controls">
                                         <div class="member-control-row">
-                                            <span class="control-label">Emu</span>
-                                            <div class="mini-toggle emu-toggle" :class="{ 'on': getSimInfo(simId).running }"
-                                                 @click="toggleEmulator(simId)">
-                                                <div class="mini-toggle-thumb"></div>
-                                            </div>
-                                            <span class="control-status" x-text="getSimInfo(simId).running ? 'Running' : 'Stopped'"></span>
-                                        </div>
-                                        <div class="member-control-row">
                                             <span class="control-label">EV</span>
-                                            <div class="mini-toggle" :class="{ 'on': getOcppEvConnected(simId), 'disabled': !getSimInfo(simId).running }"
-                                                 @click="if (!getSimInfo(simId).running) return; toggleOcppEvConnected(simId)">
+                                            <div class="mini-toggle" :class="{ 'on': getOcppEvConnected(sim.id), 'disabled': !sim.running }"
+                                                 @click="if (!sim.running) return; toggleOcppEvConnected(sim.id)">
                                                 <div class="mini-toggle-thumb"></div>
                                             </div>
-                                            <span class="control-status" x-text="getOcppEvConnected(simId) ? 'Connected' : 'Disconnected'"></span>
+                                            <span class="control-status" x-text="getOcppEvConnected(sim.id) ? 'Connected' : 'Disconnected'"></span>
                                         </div>
                                         <div class="member-control-row">
                                             <span class="control-label">Charge</span>
                                             <div class="mini-slider-container">
                                                 <input type="range" class="mini-slider ocpp-power"
-                                                       min="0" :max="getOcppMaxPower(simId)"
-                                                       :value="getOcppPower(simId)" step="500"
-                                                       :disabled="!getSimInfo(simId).running || !getOcppEvConnected(simId)"
-                                                       :class="{ 'disabled': !getSimInfo(simId).running }"
-                                                       @change="setOcppPower(simId, parseInt($event.target.value))">
+                                                       min="0" :max="getOcppMaxPower(sim.id)"
+                                                       :value="getOcppPower(sim.id)" step="500"
+                                                       :disabled="!sim.running || !getOcppEvConnected(sim.id)"
+                                                       :class="{ 'disabled': !sim.running }"
+                                                       @change="setOcppPower(sim.id, parseInt($event.target.value))">
                                             </div>
-                                            <span class="control-value" :style="getPowerColorStyle(getOcppPower(simId), 'ocpp')"
-                                                  x-text="formatOcppPower(getOcppPower(simId))"></span>
+                                            <span class="control-value" :style="getPowerColorStyle(getOcppPower(sim.id), 'ocpp')"
+                                                  x-text="formatOcppPower(getOcppPower(sim.id))"></span>
                                         </div>
                                     </div>
                                 </template>
 
                                 <!-- Modbus Controls -->
-                                <template x-if="getSimInfo(simId).protocol === 'modbus'">
+                                <template x-if="sim.protocol === 'modbus'">
                                     <div class="member-controls">
-                                        <div class="member-control-row">
-                                            <span class="control-label">Emu</span>
-                                            <div class="mini-toggle emu-toggle" :class="{ 'on': getModbusRunning(simId) }"
-                                                 @click="toggleEmulator(simId)">
-                                                <div class="mini-toggle-thumb"></div>
-                                            </div>
-                                            <span class="control-status" x-text="getModbusRunning(simId) ? 'Running' : 'Stopped'"></span>
-                                        </div>
                                         <div class="member-control-row">
                                             <span class="control-label">PV</span>
                                             <span class="control-value" style="color: var(--color-primary);"
-                                                  x-text="`${(getSimInfo(simId).pv_power || 0).toFixed(0)} W`"></span>
+                                                  x-text="`${(sim.pv_power || 0).toFixed(0)} W`"></span>
                                         </div>
                                         <div class="member-control-row">
                                             <span class="control-label">SoC</span>
                                             <div class="mini-progress">
-                                                <div class="mini-progress-fill" :style="`width: ${getSimInfo(simId).soc || 0}%`"></div>
+                                                <div class="mini-progress-fill" :style="`width: ${sim.soc || 0}%`"></div>
                                             </div>
-                                            <span class="control-value" x-text="`${(getSimInfo(simId).soc || 0).toFixed(0)}%`"></span>
+                                            <span class="control-value" x-text="`${(sim.soc || 0).toFixed(0)}%`"></span>
                                         </div>
                                     </div>
                                 </template>
 
                                 <!-- Status footer -->
                                 <div class="member-footer">
-                                    <span class="status-indicator" :class="{ 'running': getSimInfo(simId).running }"></span>
-                                    <span class="status-text" x-text="getSimInfo(simId).running ? 'Running' : 'Stopped'"></span>
+                                    <span class="status-indicator" :class="{ 'running': sim.running }"></span>
+                                    <span class="status-text" x-text="sim.running ? 'Running' : 'Stopped'"></span>
+                                    <button x-show="!sim.running" class="member-delete-btn"
+                                            @click="$store.app.deleteSimulator(sim.id, sim.serial)"
+                                            title="Delete simulator">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
                         </template>
+
+                        <!-- Add Device skeleton card -->
+                        <div class="member-card add-device-card" @click="$store.app.openAddDeviceModal()">
+                            <div class="add-device-content">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19"/>
+                                    <line x1="5" y1="12" x2="19" y2="12"/>
+                                </svg>
+                                <span>Add Device</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -2288,6 +2231,76 @@
                         <span x-show="!saving">Save Settings</span>
                         <span x-show="saving">Saving...</span>
                     </button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Add Device Modal -->
+    <template x-if="$store.app.addMenuOpen">
+        <div class="add-device-modal-backdrop" @click.self="$store.app.closeAddDeviceModal()">
+            <div class="add-device-modal">
+                <div class="modal-header">
+                    <h3>Add Device</h3>
+                    <button class="modal-close" @click="$store.app.closeAddDeviceModal()">&times;</button>
+                </div>
+                <div class="add-device-modal-body">
+                    <div class="add-device-options">
+                        <button class="add-device-option" @click="$store.app.addSimulatorToSite('inverter')">
+                            <div class="add-device-option-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+                                     fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+                                    <path d="M12.667 8 10 12h4l-2.667 4" />
+                                </svg>
+                            </div>
+                            <div class="add-device-option-name">Inverter</div>
+                            <span class="protocol-badge modbus">modbus</span>
+                            <div class="add-device-option-desc">Solar/hybrid inverter with PV, battery, and grid registers</div>
+                        </button>
+                        <button class="add-device-option" @click="$store.app.addSimulatorToSite('energy_meter')">
+                            <div class="add-device-option-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+                                     fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m12 14 4-4" />
+                                    <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+                                </svg>
+                            </div>
+                            <div class="add-device-option-name">Energy Meter</div>
+                            <span class="protocol-badge modbus">modbus</span>
+                            <div class="add-device-option-desc">3-phase energy meter with per-phase power and totals</div>
+                        </button>
+                        <button class="add-device-option" @click="$store.app.addSimulatorToSite('v2x_charger')">
+                            <div class="add-device-option-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+                                     fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 4 0v-6.998a2 2 0 0 0-.59-1.42L18 5" />
+                                    <path d="M14 21V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v16" />
+                                    <path d="M2 21h13" />
+                                    <path d="M3 7h11" />
+                                    <path d="m9 11-2 3h3l-2 3" />
+                                </svg>
+                            </div>
+                            <div class="add-device-option-name">V2X Charger</div>
+                            <span class="protocol-badge mqtt">mqtt</span>
+                            <div class="add-device-option-desc">Bi-directional EV charger with MQTT control interface</div>
+                        </button>
+                        <button class="add-device-option" @click="$store.app.addSimulatorToSite('ocpp_charger')">
+                            <div class="add-device-option-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+                                     fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 4 0v-6.998a2 2 0 0 0-.59-1.42L18 5" />
+                                    <path d="M14 21V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v16" />
+                                    <path d="M2 21h13" />
+                                    <path d="M3 7h11" />
+                                    <path d="m9 11-2 3h3l-2 3" />
+                                </svg>
+                            </div>
+                            <div class="add-device-option-name">OCPP Charger</div>
+                            <span class="protocol-badge ocpp">ocpp</span>
+                            <div class="add-device-option-desc">OCPP 1.6J charge point with remote start/stop</div>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
