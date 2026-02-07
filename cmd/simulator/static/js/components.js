@@ -1142,8 +1142,9 @@ document.addEventListener('alpine:init', () => {
 
         async setInverterPvPower(simId, value) {
             try {
-                // Write to PV power register (5017 for Sungrow)
-                await api.writeRegister(simId, 5017, value);
+                // Write to PV power register - uses Sungrow address as default
+                // Backend resolves via RegisterSet for non-Sungrow devices
+                await api.writeRegister(simId, 5016, value);
                 await Alpine.store('app').loadSimulators();
             } catch (e) {
                 console.error('Set inverter PV power error:', e);
@@ -1152,10 +1153,11 @@ document.addEventListener('alpine:init', () => {
 
         async setInverterBatteryPower(simId, value) {
             try {
-                // Write absolute power value to register 13022
-                await api.writeRegister(simId, 13022, Math.abs(value));
+                // Write battery power - uses Sungrow addresses as default
+                // Backend resolves via RegisterSet for non-Sungrow devices
+                await api.writeRegister(simId, 13021, Math.abs(value));
 
-                // Write command register 13050: 170=charge, 187=discharge, 204=stop
+                // Write command register: 170=charge, 187=discharge, 204=stop
                 let cmd = 204; // stop/idle
                 if (value < 0) cmd = 170; // charge (negative = consuming)
                 else if (value > 0) cmd = 187; // discharge (positive = generating)
@@ -1606,19 +1608,22 @@ document.addEventListener('alpine:init', () => {
 
         get meterPower() {
             const regs = Alpine.store('simulator').registers || [];
-            const reg = regs.find(r => r.address === 5599);
+            const reg = regs.find(r => r.semantic_name === 'meter_power') ||
+                        regs.find(r => r.address === 5600);
             return reg?.value || 0;
         },
 
         get importEnergy() {
             const regs = Alpine.store('simulator').registers || [];
-            const reg = regs.find(r => r.address === 13037);
+            const reg = regs.find(r => r.semantic_name === 'total_import') ||
+                        regs.find(r => r.address === 13036);
             return reg?.value || 0;
         },
 
         get exportEnergy() {
             const regs = Alpine.store('simulator').registers || [];
-            const reg = regs.find(r => r.address === 13046);
+            const reg = regs.find(r => r.semantic_name === 'total_export') ||
+                        regs.find(r => r.address === 13045);
             return reg?.value || 0;
         },
 
@@ -1908,27 +1913,33 @@ document.addEventListener('alpine:init', () => {
         syncFromRegisters() {
             const regs = Alpine.store('simulator').registers || [];
 
-            // PV Power (address 5017, U32 Little Endian)
-            const pvReg = regs.find(r => r.address === 5017);
+            // Find registers by semantic name (device-agnostic), fallback to address
+            const findReg = (semanticName, fallbackAddr) => {
+                return regs.find(r => r.semantic_name === semanticName) ||
+                       regs.find(r => r.address === fallbackAddr);
+            };
+
+            // PV Power
+            const pvReg = findReg('pv_power', 5016);
             if (pvReg) this.pvPower = pvReg.value || 0;
 
-            // Battery Power (address 13022, U16)
-            const batPowerReg = regs.find(r => r.address === 13022);
+            // Battery Power
+            const batPowerReg = findReg('battery_power', 13021);
             if (batPowerReg) {
-                // Determine sign from command register (13050)
-                const cmdReg = regs.find(r => r.address === 13050);
+                // Determine sign from command register
+                const cmdReg = findReg('battery_cmd', 13050);
                 const cmd = cmdReg?.value || 0;
                 const absVal = Math.abs(batPowerReg.value || 0);
                 // 170 = charge (negative, importing), 187 = discharge (positive, exporting)
                 this.batteryPower = cmd === 170 ? -absVal : absVal;
             }
 
-            // Battery SoC (address 13023, scale 0.1)
-            const socReg = regs.find(r => r.address === 13023);
+            // Battery SoC
+            const socReg = findReg('battery_soc', 13022);
             if (socReg) this.batterySoc = socReg.value || 0;
 
-            // Meter Power (address 5599, I32 Little Endian)
-            const meterReg = regs.find(r => r.address === 5599);
+            // Meter Power
+            const meterReg = findReg('meter_power', 5600);
             if (meterReg) this.meterPower = meterReg.value || 0;
         },
 
@@ -1939,6 +1950,13 @@ document.addEventListener('alpine:init', () => {
             if (typeof capacity === 'number' && capacity > 0) {
                 this.batteryCapacityKWh = capacity;
             }
+        },
+
+        // Get register address by semantic name, with fallback to a default address
+        getRegAddr(semanticName, fallbackAddr) {
+            const regs = Alpine.store('simulator').registers || [];
+            const reg = regs.find(r => r.semantic_name === semanticName);
+            return reg ? reg.address : fallbackAddr;
         },
 
         get isSimulationRunning() {
@@ -1965,7 +1983,8 @@ document.addEventListener('alpine:init', () => {
             if (!this.dragging) return;
             this.dragging = null;
             this.pvPower = parseFloat(value);
-            await api.writeRegister(Alpine.store('simulator').id, 5017, this.pvPower);
+            const addr = this.getRegAddr('pv_power', 5016);
+            await api.writeRegister(Alpine.store('simulator').id, addr, this.pvPower);
             await Alpine.store('simulator').loadRegisters();
         },
 
@@ -1979,7 +1998,8 @@ document.addEventListener('alpine:init', () => {
             if (!this.dragging) return;
             this.dragging = null;
             this.batterySoc = parseFloat(value);
-            await api.writeRegister(Alpine.store('simulator').id, 13023, this.batterySoc);
+            const addr = this.getRegAddr('battery_soc', 13022);
+            await api.writeRegister(Alpine.store('simulator').id, addr, this.batterySoc);
             await Alpine.store('simulator').loadRegisters();
         },
 
@@ -1996,13 +2016,15 @@ document.addEventListener('alpine:init', () => {
             const simId = Alpine.store('simulator').id;
 
             // Write absolute power value
-            await api.writeRegister(simId, 13022, Math.abs(this.batteryPower));
+            const powerAddr = this.getRegAddr('battery_power', 13021);
+            await api.writeRegister(simId, powerAddr, Math.abs(this.batteryPower));
 
             // Write command register: 170=charge, 187=discharge, 204=stop
             let cmd = 204; // stop
             if (this.batteryPower < 0) cmd = 170; // charge
             else if (this.batteryPower > 0) cmd = 187; // discharge
-            await api.writeRegister(simId, 13050, cmd);
+            const cmdAddr = this.getRegAddr('battery_cmd', 13050);
+            await api.writeRegister(simId, cmdAddr, cmd);
 
             await Alpine.store('simulator').loadRegisters();
         },

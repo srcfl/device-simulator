@@ -46,6 +46,7 @@ type Server struct {
 	clients       map[string]*ClientInfo
 	clientsMu     sync.RWMutex
 	nextClientID  int
+	RegisterSet   *RegisterSet // Device-specific register definitions (nil = uses global Sungrow defs)
 }
 
 // NewServer creates a new Modbus server with the specified register count
@@ -62,11 +63,14 @@ func NewServer(regCount int) *Server {
 	return s
 }
 
-// SetSerialNumber sets the device serial number
+// SetSerialNumber sets the device serial number.
+// Writes to both holding and input registers so the serial is readable
+// regardless of which function code (FC 0x03 or FC 0x04) the client uses.
 func (s *Server) SetSerialNumber(serial string) {
 	s.serialNumber = serial
 	SetSerialNumber(serial, func(addr uint16, values []uint16) {
 		s.SetHoldingRegisters(addr, values)
+		s.SetInputRegisters(addr, values)
 	})
 }
 
@@ -80,12 +84,25 @@ func (s *Server) InitDefaults() {
 	for addr, value := range DefaultValues {
 		def := RegisterLookup[addr]
 		if def != nil {
-			regs, err := EncodeValue(float64(value), def)
-			if err != nil {
-				log.Printf("Warning: failed to encode default for %d: %v", addr, err)
-				continue
+			if err := s.WriteRegisterValue(def, float64(value)); err != nil {
+				log.Printf("Warning: failed to write default for %d: %v", addr, err)
 			}
-			s.SetHoldingRegisters(addr, regs)
+		} else {
+			// Simple single register — write to both holding and input for safety
+			s.SetHoldingRegisters(addr, []uint16{uint16(value)})
+		}
+	}
+}
+
+// InitDefaultsFromSet initializes registers with defaults from a RegisterSet.
+func (s *Server) InitDefaultsFromSet(rs *RegisterSet) {
+	s.RegisterSet = rs
+	for addr, value := range rs.Defaults {
+		def := rs.Lookup[addr]
+		if def != nil {
+			if err := s.WriteRegisterValue(def, float64(value)); err != nil {
+				log.Printf("Warning: failed to write default for %d: %v", addr, err)
+			}
 		} else {
 			// Simple single register
 			s.SetHoldingRegisters(addr, []uint16{uint16(value)})

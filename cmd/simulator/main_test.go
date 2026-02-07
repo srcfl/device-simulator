@@ -8,9 +8,14 @@ import (
 
 func TestGetBatterySignedPower(t *testing.T) {
 	server := modbus.NewServer(65536)
+	sim := &Simulator{
+		Server:      server,
+		RegisterSet: modbus.SungrowRegisterSet,
+	}
+	server.RegisterSet = modbus.SungrowRegisterSet
 
-	powerDef := modbus.RegisterLookup[13022]
-	flagsDef := modbus.RegisterLookup[13000]
+	powerDef := sim.RegisterSet.Semantic["battery_power"]
+	flagsDef := sim.RegisterSet.Semantic["battery_flags"]
 	if powerDef == nil || flagsDef == nil {
 		t.Fatalf("missing register defs: power=%v flags=%v", powerDef != nil, flagsDef != nil)
 	}
@@ -23,7 +28,7 @@ func TestGetBatterySignedPower(t *testing.T) {
 	if err := server.WriteRegisterValue(flagsDef, 0); err != nil {
 		t.Fatalf("WriteRegisterValue flags error: %v", err)
 	}
-	if got := getBatterySignedPower(server); got != 500 {
+	if got := getBatterySignedPower(sim); got != 500 {
 		t.Fatalf("signed power = %v, want 500", got)
 	}
 
@@ -31,7 +36,7 @@ func TestGetBatterySignedPower(t *testing.T) {
 	if err := server.WriteRegisterValue(flagsDef, 4); err != nil {
 		t.Fatalf("WriteRegisterValue flags error: %v", err)
 	}
-	if got := getBatterySignedPower(server); got != -500 {
+	if got := getBatterySignedPower(sim); got != -500 {
 		t.Fatalf("signed power = %v, want -500", got)
 	}
 
@@ -39,7 +44,7 @@ func TestGetBatterySignedPower(t *testing.T) {
 	if err := server.WriteRegisterValue(flagsDef, 2); err != nil {
 		t.Fatalf("WriteRegisterValue flags error: %v", err)
 	}
-	if got := getBatterySignedPower(server); got != 500 {
+	if got := getBatterySignedPower(sim); got != 500 {
 		t.Fatalf("signed power = %v, want 500", got)
 	}
 }

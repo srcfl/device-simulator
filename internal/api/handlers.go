@@ -110,8 +110,20 @@ func (s *Server) handleRegisters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Use the server's RegisterSet if available, otherwise fall back to global definitions
+	var defs []modbus.RegisterDef
+	if s.modbusServer.RegisterSet != nil {
+		defs = s.modbusServer.RegisterSet.Definitions
+	} else {
+		defs = modbus.RegisterDefinitions
+	}
+
 	var payloads []*modbus.RegisterPayload
-	for _, def := range modbus.RegisterDefinitions {
+	for i := range defs {
+		def := &defs[i]
+		if def.DataType == modbus.STR {
+			continue // Skip string registers in numeric list
+		}
 		var regs []uint16
 		if def.UseHolding {
 			regs = s.modbusServer.GetHoldingRegisters(def.Address, def.Words)
@@ -141,7 +153,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	def := modbus.RegisterLookup[uint16(addr)]
+	// Look up register in server's RegisterSet first, then global
+	var def *modbus.RegisterDef
+	if s.modbusServer.RegisterSet != nil {
+		def = s.modbusServer.RegisterSet.Lookup[uint16(addr)]
+	}
+	if def == nil {
+		def = modbus.RegisterLookup[uint16(addr)]
+	}
 	if def == nil {
 		http.Error(w, "Register not found", http.StatusNotFound)
 		return
@@ -176,7 +195,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if def.Address == 13050 {
+		// Update battery flags when battery_cmd is written (semantic or Sungrow address)
+		if def.SemanticName == "battery_cmd" || def.Address == 13050 {
 			flags := 0.0
 			switch int(req.Value) {
 			case 170:
@@ -186,7 +206,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			default:
 				flags = 0
 			}
-			if flagsDef := modbus.RegisterLookup[13000]; flagsDef != nil {
+			// Look for battery_flags register
+			var flagsDef *modbus.RegisterDef
+			if s.modbusServer.RegisterSet != nil {
+				flagsDef = s.modbusServer.RegisterSet.Semantic["battery_flags"]
+			}
+			if flagsDef == nil {
+				flagsDef = modbus.RegisterLookup[13000]
+			}
+			if flagsDef != nil {
 				_ = s.modbusServer.WriteRegisterValue(flagsDef, flags)
 			}
 		}
@@ -338,10 +366,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// Quick status for landing page
 	status := make(map[string]interface{})
 
-	// Read key registers
-	keyRegisters := []uint16{5017, 13022, 13023, 5599, 13052}
-	for _, addr := range keyRegisters {
-		def := modbus.RegisterLookup[addr]
+	// Read key registers using semantic names if available
+	keySemanticNames := []string{"pv_power", "battery_power", "battery_soc", "meter_power", "load_power"}
+	rs := s.modbusServer.RegisterSet
+	for _, name := range keySemanticNames {
+		var def *modbus.RegisterDef
+		if rs != nil {
+			def = rs.Semantic[name]
+		}
 		if def == nil {
 			continue
 		}
@@ -448,7 +480,13 @@ func (s *Server) handleProfileApply(w http.ResponseWriter, r *http.Request, name
 
 	// Apply defaults from profile
 	for addr, value := range profile.Defaults {
-		def := modbus.RegisterLookup[addr]
+		var def *modbus.RegisterDef
+		if s.modbusServer.RegisterSet != nil {
+			def = s.modbusServer.RegisterSet.Lookup[addr]
+		}
+		if def == nil {
+			def = modbus.RegisterLookup[addr]
+		}
 		if def != nil {
 			s.modbusServer.WriteRegisterValue(def, value)
 		}
@@ -506,14 +544,27 @@ func (s *Server) generateValues(simTime time.Time) {
 		loadPower = 2500
 	}
 
-	// Update PV register (5017)
-	pvDef := modbus.RegisterLookup[5017]
+	// Update PV register using semantic name or fallback
+	rs := s.modbusServer.RegisterSet
+	var pvDef, loadDef, meterDef *modbus.RegisterDef
+	if rs != nil {
+		pvDef = rs.Semantic["pv_power"]
+		loadDef = rs.Semantic["load_power"]
+		meterDef = rs.Semantic["meter_power"]
+	}
+	if pvDef == nil {
+		pvDef = modbus.RegisterLookup[5016]
+	}
+	if loadDef == nil {
+		loadDef = modbus.RegisterLookup[13052]
+	}
+	if meterDef == nil {
+		meterDef = modbus.RegisterLookup[5600]
+	}
+
 	if pvDef != nil {
 		s.modbusServer.WriteRegisterValue(pvDef, solarPower)
 	}
-
-	// Update Load register (13052)
-	loadDef := modbus.RegisterLookup[13052]
 	if loadDef != nil {
 		s.modbusServer.WriteRegisterValue(loadDef, loadPower)
 	}
@@ -523,7 +574,6 @@ func (s *Server) generateValues(simTime time.Time) {
 	batteryPower := 0.0 // TODO: implement battery logic
 	meterPower := loadPower - solarPower + batteryPower
 
-	meterDef := modbus.RegisterLookup[5599]
 	if meterDef != nil {
 		s.modbusServer.WriteRegisterValue(meterDef, meterPower)
 	}

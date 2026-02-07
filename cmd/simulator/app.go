@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/modbus"
+	"github.com/srcfl/device-simulator/internal/modbus/devices"
 	"github.com/srcfl/device-simulator/internal/settings"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -90,13 +91,13 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 		case "modbus":
 			entry["slave_id"] = sim.SlaveID
 			if sim.Category == "energy_meter" {
-				entry["meter"] = getRegisterValue(sim.Server, 5599)
+				entry["meter"] = getSemanticValue(sim, "meter_power")
 			} else {
-				entry["pv_power"] = getRegisterValue(sim.Server, 5017)
-				entry["soc"] = getRegisterValue(sim.Server, 13023)
-				batteryPower, batteryDirection := getBatteryPowerAndDirection(sim.Server)
+				entry["pv_power"] = getSemanticValue(sim, "pv_power")
+				entry["soc"] = getSemanticValue(sim, "battery_soc")
+				batteryPower, batteryDirection := getBatteryPowerAndDirection(sim)
 				entry["load"] = batteryPower
-				entry["meter"] = getRegisterValue(sim.Server, 5599)
+				entry["meter"] = getSemanticValue(sim, "meter_power")
 				entry["battery_direction"] = batteryDirection
 				entry["battery_capacity_kwh"] = sim.BatteryCapacityKWh
 				entry["scenario"] = sim.Automation.Scenario
@@ -297,7 +298,14 @@ func (a *App) WriteRegister(id int, address uint16, value float64) error {
 		return fmt.Errorf("simulator is not a Modbus device")
 	}
 
-	def := modbus.RegisterLookup[address]
+	// Look up in device-specific RegisterSet first, then fall back to global
+	var def *modbus.RegisterDef
+	if sim.RegisterSet != nil {
+		def = sim.RegisterSet.Lookup[address]
+	}
+	if def == nil {
+		def = modbus.RegisterLookup[address]
+	}
 	if def == nil {
 		return fmt.Errorf("register %d not found", address)
 	}
@@ -309,8 +317,8 @@ func (a *App) WriteRegister(id int, address uint16, value float64) error {
 		return err
 	}
 
-	// Keep Sungrow status flags in sync with charge/discharge commands
-	if address == 13050 {
+	// Keep battery status flags in sync with charge/discharge commands
+	if def.SemanticName == "battery_cmd" {
 		flags := 0.0
 		switch int(value) {
 		case 170:
@@ -320,9 +328,7 @@ func (a *App) WriteRegister(id int, address uint16, value float64) error {
 		default:
 			flags = 0
 		}
-		if flagsDef := modbus.RegisterLookup[13000]; flagsDef != nil {
-			_ = sim.Server.WriteRegisterValue(flagsDef, flags)
-		}
+		setSemanticValue(sim, "battery_flags", flags)
 	}
 
 	return nil
@@ -394,8 +400,22 @@ func (a *App) ApplyProfile(id int, name string) error {
 
 	// Apply profile defaults based on protocol
 	if sim.Protocol == "modbus" && sim.Server != nil {
+		// Update RegisterSet if the profile specifies one
+		if profile.RegisterSetName != "" {
+			if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
+				sim.RegisterSet = rs
+				sim.Server.RegisterSet = rs
+				sim.Server.InitDefaultsFromSet(rs)
+			}
+		}
 		for addr, value := range profile.Defaults {
-			def := modbus.RegisterLookup[addr]
+			var def *modbus.RegisterDef
+			if sim.RegisterSet != nil {
+				def = sim.RegisterSet.Lookup[addr]
+			}
+			if def == nil {
+				def = modbus.RegisterLookup[addr]
+			}
 			if def != nil {
 				if err := sim.Server.WriteRegisterValue(def, value); err != nil {
 					log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
@@ -794,23 +814,23 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 	// Add current meter reading if meter is valid
 	meterSim := getSimulator(meterID)
 	if meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
-		result["meter_power"] = getRegisterValue(meterSim.Server, 5599)
+		result["meter_power"] = getSemanticValue(meterSim, "meter_power")
 		result["phase_currents"] = PhaseCurrents{
-			L1: getRegisterValue(meterSim.Server, 6),
-			L2: getRegisterValue(meterSim.Server, 8),
-			L3: getRegisterValue(meterSim.Server, 10),
+			L1: getSemanticValue(meterSim, "meter_l1_current"),
+			L2: getSemanticValue(meterSim, "meter_l2_current"),
+			L3: getSemanticValue(meterSim, "meter_l3_current"),
 		}
 		result["phase_powers"] = PhasePowers{
-			L1: getRegisterValue(meterSim.Server, 12),
-			L2: getRegisterValue(meterSim.Server, 14),
-			L3: getRegisterValue(meterSim.Server, 16),
+			L1: getSemanticValue(meterSim, "meter_l1_power"),
+			L2: getSemanticValue(meterSim, "meter_l2_power"),
+			L3: getSemanticValue(meterSim, "meter_l3_power"),
 		}
 
 		// Include virtual devices if meter is an inverter
 		if meterSim.Category == "inverter" && meterSim.Running {
-			pvPower := getRegisterValue(meterSim.Server, 5017)
-			batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim.Server)
-			batterySoc := getRegisterValue(meterSim.Server, 13023)
+			pvPower := getSemanticValue(meterSim, "pv_power")
+			batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim)
+			batterySoc := getSemanticValue(meterSim, "battery_soc")
 
 			result["virtual_devices"] = []map[string]interface{}{
 				{"type": "pv", "power": pvPower},
@@ -1239,16 +1259,16 @@ func (a *App) GetVirtualDevices(siteId int) (map[string]interface{}, error) {
 	meterSim.mu.RLock()
 	category := meterSim.Category
 	running := meterSim.Running
-	server := meterSim.Server
+	hasServer := meterSim.Server != nil
 	meterSim.mu.RUnlock()
 
-	if category != "inverter" || !running || server == nil {
+	if category != "inverter" || !running || !hasServer {
 		return map[string]interface{}{"virtual_devices": []interface{}{}}, nil
 	}
 
-	pvPower := getRegisterValue(server, 5017)
-	batteryPower, batteryDirection := getBatteryPowerAndDirection(server)
-	batterySoc := getRegisterValue(server, 13023)
+	pvPower := getSemanticValue(meterSim, "pv_power")
+	batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim)
+	batterySoc := getSemanticValue(meterSim, "battery_soc")
 
 	virtualDevices := []map[string]interface{}{
 		{"type": "pv", "power": pvPower},
@@ -1284,15 +1304,11 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 	switch deviceType {
 	case "pv":
 		if power, ok := data["power"].(float64); ok {
-			if def := modbus.RegisterLookup[5017]; def != nil {
-				meterSim.Server.WriteRegisterValue(def, power)
-			}
+			setSemanticValue(meterSim, "pv_power", power)
 		}
 	case "battery":
 		if power, ok := data["power"].(float64); ok {
-			if def := modbus.RegisterLookup[13022]; def != nil {
-				meterSim.Server.WriteRegisterValue(def, math.Abs(power))
-			}
+			setSemanticValue(meterSim, "battery_power", math.Abs(power))
 			// Update direction command based on sign
 			var cmd float64 = 204
 			if power > 0 {
@@ -1300,23 +1316,17 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 			} else if power < 0 {
 				cmd = 187
 			}
-			if def := modbus.RegisterLookup[13050]; def != nil {
-				meterSim.Server.WriteRegisterValue(def, cmd)
+			setSemanticValue(meterSim, "battery_cmd", cmd)
+			flags := 0.0
+			if cmd == 187 {
+				flags = 4 // discharging
+			} else if cmd == 170 {
+				flags = 2 // charging
 			}
-			if def := modbus.RegisterLookup[13000]; def != nil {
-				flags := 0.0
-				if cmd == 187 {
-					flags = 4 // discharging
-				} else if cmd == 170 {
-					flags = 2 // charging
-				}
-				meterSim.Server.WriteRegisterValue(def, flags)
-			}
+			setSemanticValue(meterSim, "battery_flags", flags)
 		}
 		if soc, ok := data["soc"].(float64); ok {
-			if def := modbus.RegisterLookup[13023]; def != nil {
-				meterSim.Server.WriteRegisterValue(def, soc)
-			}
+			setSemanticValue(meterSim, "battery_soc", soc)
 		}
 		if direction, ok := data["direction"].(string); ok {
 			var cmd float64
@@ -1328,18 +1338,14 @@ func (a *App) WriteVirtualDevice(siteId int, deviceType string, data map[string]
 			default:
 				cmd = 204 // idle
 			}
-			if def := modbus.RegisterLookup[13050]; def != nil {
-				meterSim.Server.WriteRegisterValue(def, cmd)
+			setSemanticValue(meterSim, "battery_cmd", cmd)
+			flags := 0.0
+			if cmd == 187 {
+				flags = 4 // discharging
+			} else if cmd == 170 {
+				flags = 2 // charging
 			}
-			if def := modbus.RegisterLookup[13000]; def != nil {
-				flags := 0.0
-				if cmd == 187 {
-					flags = 4 // discharging
-				} else if cmd == 170 {
-					flags = 2 // charging
-				}
-				meterSim.Server.WriteRegisterValue(def, flags)
-			}
+			setSemanticValue(meterSim, "battery_flags", flags)
 		}
 	default:
 		return nil, fmt.Errorf("unknown device type: %s", deviceType)

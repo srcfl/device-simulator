@@ -1,4 +1,4 @@
-.PHONY: up down restart build logs clean test \
+.PHONY: up down restart build logs clean test env \
 	build-macos build-linux build-linux-server build-windows \
 	run-macos package help
 
@@ -6,11 +6,15 @@
 HOST_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
 
 # Docker development commands
-up:
-	HOST_IP=$(HOST_IP) docker compose up -d
+up: env
+	docker compose up -d
 
-build:
-	HOST_IP=$(HOST_IP) docker compose up --build -d
+build: env
+	docker compose up --build -d
+
+# Write .env with detected host IP so docker compose picks it up
+env:
+	@echo "HOST_IP=$(HOST_IP)" > .env
 
 down:
 	docker compose down

@@ -27,7 +27,7 @@ func TestServerInitDefaults(t *testing.T) {
 	server.InitDefaults()
 
 	// Check that Battery SoC default is set (78%)
-	def := RegisterLookup[13023]
+	def := RegisterLookup[13022]
 	if def == nil {
 		t.Fatal("Battery SoC register definition not found")
 	}
@@ -58,7 +58,7 @@ func TestServerInitDefaults(t *testing.T) {
 func TestServerWriteRegisterValue(t *testing.T) {
 	server := NewServer(60001)
 
-	def := RegisterLookup[13023] // Battery SoC
+	def := RegisterLookup[13022] // Battery SoC
 	if def == nil {
 		t.Fatal("Battery SoC register definition not found")
 	}
@@ -149,8 +149,8 @@ func TestServerSetSerialNumber(t *testing.T) {
 	server := NewServer(60001)
 	server.SetSerialNumber("INVSIM00")
 
-	// Read serial number registers (4990-4999)
-	regs := server.GetHoldingRegisters(4990, 10)
+	// Read serial number registers (4989-4998)
+	regs := server.GetHoldingRegisters(4989, 10)
 	if len(regs) != 10 {
 		t.Fatalf("Got %d serial registers, want 10", len(regs))
 	}

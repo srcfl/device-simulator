@@ -1159,7 +1159,7 @@
                             <template x-if="!$store.simulator.data?.running">
                                 <select x-model="localProfile" @change="onProfileChange($event.target.value)">
                                     <template x-for="profile in $store.simulator.profiles" :key="profile.name">
-                                        <option :value="profile.name" x-text="profile.name"></option>
+                                        <option :value="profile.name" x-text="profile.name + (profile.zap_verified ? ' ⚡' : '')"></option>
                                     </template>
                                 </select>
                             </template>
@@ -1433,7 +1433,7 @@
                             <template x-if="!$store.simulator.data?.running">
                                 <select x-model="localProfile" @change="onProfileChange($event.target.value)">
                                     <template x-for="profile in $store.simulator.profiles" :key="profile.name">
-                                        <option :value="profile.name" x-text="profile.name"></option>
+                                        <option :value="profile.name" x-text="profile.name + (profile.zap_verified ? ' ⚡' : '')"></option>
                                     </template>
                                 </select>
                             </template>

@@ -35,12 +35,14 @@ type OCPPConfig struct {
 
 // Profile defines a device simulation profile
 type Profile struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Protocol    string   `json:"protocol"` // modbus, mqtt, ocpp
-	DeviceType  string   `json:"device_type"`
-	Categories  []string `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
-	EVCCRef     string   `json:"evcc_ref,omitempty"`   // Link to EVCC template
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Protocol        string   `json:"protocol"` // modbus, mqtt, ocpp
+	DeviceType      string   `json:"device_type"`
+	Categories      []string `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
+	EVCCRef         string   `json:"evcc_ref,omitempty"`   // Link to EVCC template
+	ZapVerified     bool     `json:"zap_verified,omitempty"`      // True if register map is synced with zap-x firmware
+	RegisterSetName string   `json:"register_set_name,omitempty"` // Maps to devices.GetRegisterSet() for native register addresses
 
 	// Modbus-specific
 	Defaults map[uint16]float64 `json:"defaults,omitempty"`
@@ -125,6 +127,7 @@ func (m *Manager) List() []ProfileInfo {
 			Description: p.Description,
 			Protocol:    p.Protocol,
 			DeviceType:  p.DeviceType,
+			ZapVerified: p.ZapVerified,
 		})
 	}
 
@@ -151,6 +154,7 @@ func (m *Manager) ListByProtocol(protocol string) []ProfileInfo {
 				Description: p.Description,
 				Protocol:    p.Protocol,
 				DeviceType:  p.DeviceType,
+				ZapVerified: p.ZapVerified,
 			})
 		}
 	}
@@ -189,6 +193,7 @@ func (m *Manager) ListByProtocolAndCategory(protocol string, category string) []
 			Description: p.Description,
 			Protocol:    p.Protocol,
 			DeviceType:  p.DeviceType,
+			ZapVerified: p.ZapVerified,
 		})
 	}
 
@@ -205,6 +210,7 @@ type ProfileInfo struct {
 	Description string `json:"description"`
 	Protocol    string `json:"protocol"`
 	DeviceType  string `json:"device_type"`
+	ZapVerified bool   `json:"zap_verified,omitempty"`
 }
 
 // Save saves a profile to disk
@@ -259,23 +265,31 @@ func (m *Manager) GetActiveName() string {
 // EmbeddedProfiles contains built-in profiles for common device types
 var EmbeddedProfiles = map[string]*Profile{
 	"sungrow-hybrid": {
-		Name:        "sungrow-hybrid",
-		Description: "Sungrow SH Series Hybrid Inverter",
-		Protocol:    "modbus",
-		DeviceType:  "sungrow",
-		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
-		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sungrow-hybrid.yaml",
+		Name:            "sungrow-hybrid",
+		Description:     "Sungrow SH Series Hybrid Inverter",
+		Protocol:        "modbus",
+		DeviceType:      "sungrow",
+		Categories:      []string{"pv", "battery", "meter", "grid", "control"},
+		EVCCRef:         "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sungrow-hybrid.yaml",
+		ZapVerified:     true,
+		RegisterSetName: "sungrow",
 		Defaults: map[uint16]float64{
-			5017:  0,     // PV Power
-			13022: 0,     // Battery Power
-			13023: 50,    // Battery SoC
-			5599:  0,     // Meter Power
+			5016:  0,     // PV Power
+			13021: 0,     // Battery Power
+			13022: 50,    // Battery SoC
+			5600:  0,     // Meter Power
 			13052: 500,   // Load Power
 			13049: 0,     // Grid Mode (Self-consumption)
 			13050: 204,   // Stop command
 			13073: 10000, // PV Command
 			33046: 500,   // Max Charge (5kW)
 			33047: 500,   // Max Discharge (5kW)
+			5740:  230,   // Meter L1 Voltage (230V)
+			5741:  230,   // Meter L2 Voltage (230V)
+			5742:  230,   // Meter L3 Voltage (230V)
+			13019: 48,    // Battery Voltage (48V)
+			13024: 25,    // Battery Temperature (25°C)
+			5007:  35,    // Inside Temperature (35°C)
 		},
 		Generators: map[string]GeneratorConfig{
 			"solar_radiance": {
@@ -299,99 +313,126 @@ var EmbeddedProfiles = map[string]*Profile{
 		},
 	},
 	"solis-hybrid": {
-		Name:        "solis-hybrid",
-		Description: "Solis Hybrid Inverter",
-		Protocol:    "modbus",
-		DeviceType:  "solis",
-		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
+		Name:            "solis-hybrid",
+		Description:     "Solis Hybrid Inverter",
+		Protocol:        "modbus",
+		DeviceType:      "solis",
+		Categories:      []string{"pv", "battery", "meter", "grid", "control"},
+		ZapVerified:     true,
+		RegisterSetName: "solis",
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13022: 0,
-			13023: 60,
-			5599:  0,
-			13052: 400,
-			33046: 600,
-			33047: 600,
+			33057: 0,    // PV Power
+			33149: 0,    // Battery Power
+			33139: 60,   // Battery SoC
+			33130: 0,    // Meter Power
+			33147: 400,  // Load Power
+			33282: 50,   // Grid Frequency (50.00 Hz, scale 0.01)
+			33093: 250,  // Inverter Temperature (25.0°C, scale 0.1)
+			33096: 250,  // Battery Temperature (25.0°C, scale 0.1)
+			33251: 2300, // Grid Voltage L1 (230.0V, scale 0.1)
+			33253: 2300, // Grid Voltage L2 (230.0V, scale 0.1)
+			33255: 2300, // Grid Voltage L3 (230.0V, scale 0.1)
 		},
 	},
 	"solaredge": {
-		Name:        "solaredge",
-		Description: "SolarEdge Inverter with StorEdge",
-		Protocol:    "modbus",
-		DeviceType:  "solaredge",
-		Categories:  []string{"pv", "battery", "meter", "grid"},
-		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/solaredge.yaml",
+		Name:            "solaredge",
+		Description:     "SolarEdge Inverter with StorEdge",
+		Protocol:        "modbus",
+		DeviceType:      "solaredge",
+		Categories:      []string{"pv", "battery", "meter", "grid"},
+		EVCCRef:         "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/solaredge.yaml",
+		ZapVerified:     true,
+		RegisterSetName: "solaredge",
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13023: 55,
-			13052: 600,
+			40083: 0,    // AC Power (pv_power)
+			62852: 55,   // Battery SoC
+			62836: 0,    // Battery Power
+			40206: 0,    // Meter Power
+			40085: 5000, // Grid Frequency (50.00 Hz)
 		},
 	},
 	"sma-tripower": {
-		Name:        "sma-tripower",
-		Description: "SMA Sunny Tripower Inverter",
-		Protocol:    "modbus",
-		DeviceType:  "sma",
-		Categories:  []string{"pv", "meter", "grid"},
-		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sma-tripower.yaml",
+		Name:            "sma-tripower",
+		Description:     "SMA Sunny Tripower Inverter",
+		Protocol:        "modbus",
+		DeviceType:      "sma",
+		Categories:      []string{"pv", "battery", "meter", "grid"},
+		EVCCRef:         "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sma-tripower.yaml",
+		ZapVerified:     true,
+		RegisterSetName: "sma",
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13023: 70,
-			13052: 800,
+			30775: 0,    // PV Power
+			30845: 70,   // Battery SoC
+			30847: 0,    // Battery Power
+			30865: 0,    // Meter Power
+			30803: 50, // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
 	"huawei-sun2000": {
-		Name:        "huawei-sun2000",
-		Description: "Huawei SUN2000 Hybrid Inverter",
-		Protocol:    "modbus",
-		DeviceType:  "huawei",
-		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
-		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/huawei-sun2000.yaml",
+		Name:            "huawei-sun2000",
+		Description:     "Huawei SUN2000 Hybrid Inverter",
+		Protocol:        "modbus",
+		DeviceType:      "huawei",
+		Categories:      []string{"pv", "battery", "meter", "grid", "control"},
+		EVCCRef:         "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/huawei-sun2000.yaml",
+		ZapVerified:     true,
+		RegisterSetName: "huawei",
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13022: 0,
-			13023: 65,
-			5599:  0,
-			13052: 700,
+			32064: 0,    // PV Power
+			37001: 0,    // Battery Power
+			37004: 65,  // Battery SoC (65.0%, scale 0.1)
+			37113: 0,   // Meter Power
+			32089: 700, // Load Power
+			32085: 50,  // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
 	"fronius-gen24": {
-		Name:        "fronius-gen24",
-		Description: "Fronius GEN24 Plus Hybrid",
-		Protocol:    "modbus",
-		DeviceType:  "fronius",
-		Categories:  []string{"pv", "battery", "meter", "grid"},
-		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/fronius.yaml",
+		Name:            "fronius-gen24",
+		Description:     "Fronius GEN24 Plus Hybrid",
+		Protocol:        "modbus",
+		DeviceType:      "fronius",
+		Categories:      []string{"pv", "battery", "meter", "grid"},
+		EVCCRef:         "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/fronius.yaml",
+		ZapVerified:     true,
+		RegisterSetName: "fronius",
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13023: 45,
-			13052: 550,
+			40107: 0,    // PV Power (AC Power)
+			40321: 45,   // Battery SoC
+			40323: 0,    // Battery Power
+			40100: 0,    // Meter Power
+			40109: 5000, // Grid Frequency (50.00 Hz)
 		},
 	},
 	"deye-hybrid": {
-		Name:        "deye-hybrid",
-		Description: "Deye Hybrid Inverter",
-		Protocol:    "modbus",
-		DeviceType:  "deye",
-		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
+		Name:            "deye-hybrid",
+		Description:     "Deye Hybrid Inverter",
+		Protocol:        "modbus",
+		DeviceType:      "deye",
+		Categories:      []string{"pv", "battery", "meter", "grid", "control"},
+		ZapVerified:     true,
+		RegisterSetName: "deye",
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13022: 0,
-			13023: 80,
-			5599:  0,
-			13052: 450,
+			672: 0,    // PV Power
+			590: 0,    // Battery Power
+			588: 80,   // Battery SoC
+			619: 0,    // Meter Power
+			653: 450,  // Load Power
+			79:  50, // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
 	"pixii-powershaper": {
-		Name:        "pixii-powershaper",
-		Description: "Pixii PowerShaper 2 (Battery Only)",
-		Protocol:    "modbus",
-		DeviceType:  "pixii",
-		Categories:  []string{"battery", "meter", "control"},
+		Name:            "pixii-powershaper",
+		Description:     "Pixii PowerShaper 2 (Battery Only)",
+		Protocol:        "modbus",
+		DeviceType:      "pixii",
+		Categories:      []string{"battery", "meter", "control"},
+		ZapVerified:     true,
+		RegisterSetName: "pixii",
 		Defaults: map[uint16]float64{
-			13022: 0,
-			13023: 50,
-			5599:  0,
+			40168: 0,    // Battery Power
+			40132: 50,   // Battery SoC
+			40188: 0,    // Meter Power
+			40187: 5000, // Grid Frequency (50.00 Hz)
 		},
 	},
 	"ferroamp-energyhub": {
@@ -401,19 +442,21 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "ferroamp",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13023: 55,
-			5599:  0,
+			5016:  0,
+			13022: 55,
+			5600:  0,
 			13052: 1000,
 		},
 	},
 	"sdm630": {
-		Name:        "sdm630",
-		Description: "Eastron SDM630 Energy Meter (Meter Only)",
-		Protocol:    "modbus",
-		DeviceType:  "sdm630",
-		Categories:  []string{"meter"},
-		EVCCRef:     "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sdm.yaml",
+		Name:            "sdm630",
+		Description:     "Eastron SDM630 Energy Meter (Meter Only)",
+		Protocol:        "modbus",
+		DeviceType:      "sdm630",
+		Categories:      []string{"meter"},
+		EVCCRef:         "https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/sdm.yaml",
+		ZapVerified:     true,
+		RegisterSetName: "sdm630",
 		Defaults: map[uint16]float64{
 			// SDM630 registers (F32, Big Endian, Input Registers FC 0x04)
 			0:  230.0, // L1 Voltage (V)
@@ -441,24 +484,25 @@ var EmbeddedProfiles = map[string]*Profile{
 			},
 		},
 	},
-	// "fronius-meter" - disabled, use sdm630 instead
-	// {
-	// 	Name:        "fronius-meter",
-	// 	Description: "Fronius Smart Meter (SunSpec)",
-	// 	Protocol:    "modbus",
-	// 	DeviceType:  "fronius",
-	// 	Categories:  []string{"meter"},
-	// 	Defaults: map[uint16]float64{
-	// 		40074: 0,   // L1 Current (A)
-	// 		40076: 0,   // L2 Current (A)
-	// 		40078: 0,   // L3 Current (A)
-	// 		40086: 230, // L1 Voltage (V)
-	// 		40088: 230, // L2 Voltage (V)
-	// 		40090: 230, // L3 Voltage (V)
-	// 		40092: 0,   // AC Power (W)
-	// 		40094: 50,  // Frequency (Hz)
-	// 	},
-	// },
+	"fronius-smart-meter": {
+		Name:            "fronius-smart-meter",
+		Description:     "Fronius Smart Meter TS 65A-3 (SunSpec)",
+		Protocol:        "modbus",
+		DeviceType:      "fronius",
+		Categories:      []string{"meter"},
+		ZapVerified:     true,
+		RegisterSetName: "fronius-smart-meter",
+		Defaults: map[uint16]float64{
+			40074: 0.0,   // L1 Current (A)
+			40076: 0.0,   // L2 Current (A)
+			40078: 0.0,   // L3 Current (A)
+			40086: 230.0, // L1 Voltage (V)
+			40088: 230.0, // L2 Voltage (V)
+			40090: 230.0, // L3 Voltage (V)
+			40092: 0.0,   // AC Power (W)
+			40094: 50.0,  // Frequency (Hz)
+		},
+	},
 	"residential-5kw": {
 		Name:        "residential-5kw",
 		Description: "Typical 5kW Residential System",
@@ -466,10 +510,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13022: 0,
-			13023: 50,
-			5599:  0,
+			5016:  0,
+			13021: 0,
+			13022: 50,
+			5600:  0,
 			13052: 500,
 			33046: 500,
 			33047: 500,
@@ -503,10 +547,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		DeviceType:  "generic",
 		Categories:  []string{"pv", "battery", "meter", "grid", "control"},
 		Defaults: map[uint16]float64{
-			5017:  0,
-			13022: 0,
-			13023: 60,
-			5599:  0,
+			5016:  0,
+			13021: 0,
+			13022: 60,
+			5600:  0,
 			13052: 5000,
 			33046: 5000,
 			33047: 5000,
@@ -547,6 +591,7 @@ var EmbeddedProfiles = map[string]*Profile{
 		Protocol:    "mqtt",
 		DeviceType:  "ambibox",
 		Categories:  []string{"ev", "v2x", "bidirectional"},
+		ZapVerified: true,
 		MQTTConfig: &MQTTConfig{
 			BaseTopic:         "device/evCharger/0",
 			PublishIntervalMs: 1000,

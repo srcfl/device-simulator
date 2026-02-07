@@ -22,6 +22,7 @@ import (
 
 	"github.com/srcfl/device-simulator/internal/device"
 	"github.com/srcfl/device-simulator/internal/modbus"
+	"github.com/srcfl/device-simulator/internal/modbus/devices"
 	"github.com/srcfl/device-simulator/internal/mcp"
 	"github.com/srcfl/device-simulator/internal/mqtt"
 	"github.com/srcfl/device-simulator/internal/ocpp"
@@ -39,22 +40,25 @@ var embeddedFS embed.FS
 
 // Simulator represents a single simulator instance
 type Simulator struct {
-	ID                 int                 `json:"id"`
-	Serial             string              `json:"serial"`
-	Protocol           string              `json:"protocol"`
-	Category           string              `json:"category"`
-	SlaveID            uint8               `json:"slave_id,omitempty"`
-	Port               int                 `json:"port"`
-	Running            bool                `json:"running"`
-	SiteID             int                 `json:"site_id"`   // Which site this simulator belongs to (0 = orphan)
-	DeviceOn           bool                `json:"device_on"` // Whether device is contributing power (can be off but still on site)
-	BatteryCapacityKWh float64             `json:"battery_capacity_kwh"`
-	Server             *modbus.Server      `json:"-"`
-	MQTTServer         *mqtt.Server        `json:"-"`
-	OCPPServer         *ocpp.Server        `json:"-"`
-	Device             device.DeviceServer `json:"-"`
-	ProfilesManager    *profiles.Manager   `json:"-"`
-	Automation         *AutomationState    `json:"-"` // Legacy - will be removed once migration complete
+	ID                 int                    `json:"id"`
+	Serial             string                 `json:"serial"`
+	Protocol           string                 `json:"protocol"`
+	Category           string                 `json:"category"`
+	SlaveID            uint8                  `json:"slave_id,omitempty"`
+	Port               int                    `json:"port"`
+	Running            bool                   `json:"running"`
+	SiteID             int                    `json:"site_id"`   // Which site this simulator belongs to (0 = orphan)
+	DeviceOn           bool                   `json:"device_on"` // Whether device is contributing power (can be off but still on site)
+	BatteryCapacityKWh float64                `json:"battery_capacity_kwh"`
+	Server             *modbus.Server         `json:"-"`
+	MQTTServer         *mqtt.Server           `json:"-"`
+	OCPPServer         *ocpp.Server           `json:"-"`
+	Device             device.DeviceServer    `json:"-"`
+	ProfilesManager    *profiles.Manager      `json:"-"`
+	RegisterSet        *modbus.RegisterSet    `json:"-"` // Device-specific register definitions
+	Automation         *AutomationState       `json:"-"` // Legacy - will be removed once migration complete
+	internalSOC        float64                           // High-precision SOC accumulator (avoids register truncation)
+	socInitialized     bool                              // Whether internalSOC has been initialized from register
 	mu                 sync.RWMutex
 }
 
@@ -479,14 +483,34 @@ func createSimulator(simType string) (*Simulator, error) {
 		server.InitDefaults()
 		sim.Server = server
 
-		// Apply profile defaults for energy meters
-		if category == "energy_meter" {
-			if profile := pm.GetActive(); profile != nil {
-				for addr, value := range profile.Defaults {
-					if def := modbus.RegisterLookup[addr]; def != nil {
-						if err := server.WriteRegisterValue(def, value); err != nil {
-							log.Printf("[%d] Failed to write register %d: %v", id, addr, err)
-						}
+		// Set up device-specific RegisterSet from the active profile
+		if profile := pm.GetActive(); profile != nil && profile.RegisterSetName != "" {
+			if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
+				sim.RegisterSet = rs
+				server.RegisterSet = rs
+				server.InitDefaultsFromSet(rs)
+			}
+		}
+		// Fallback: use SungrowRegisterSet if no device-specific set
+		if sim.RegisterSet == nil {
+			sim.RegisterSet = modbus.SungrowRegisterSet
+			server.RegisterSet = modbus.SungrowRegisterSet
+		}
+
+		// Apply profile defaults (overwrites RegisterSet defaults with profile-specific values)
+		if profile := pm.GetActive(); profile != nil {
+			for addr, value := range profile.Defaults {
+				// Look up in the device's RegisterSet first, then fall back to global
+				var def *modbus.RegisterDef
+				if sim.RegisterSet != nil {
+					def = sim.RegisterSet.Lookup[addr]
+				}
+				if def == nil {
+					def = modbus.RegisterLookup[addr]
+				}
+				if def != nil {
+					if err := server.WriteRegisterValue(def, value); err != nil {
+						log.Printf("[%d] Failed to write register %d: %v", id, addr, err)
 					}
 				}
 			}
@@ -686,13 +710,33 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 		server.SetSerialNumber(serial)
 		server.InitDefaults()
 		sim.Server = server
-		if category == "energy_meter" {
-			if profile := pm.GetActive(); profile != nil {
-				for addr, value := range profile.Defaults {
-					if def := modbus.RegisterLookup[addr]; def != nil {
-						if err := server.WriteRegisterValue(def, value); err != nil {
-							log.Printf("[%d] Failed to write register %d: %v", sim.ID, addr, err)
-						}
+
+		// Set up device-specific RegisterSet from profile
+		if profile := pm.GetActive(); profile != nil && profile.RegisterSetName != "" {
+			if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
+				sim.RegisterSet = rs
+				server.RegisterSet = rs
+				server.InitDefaultsFromSet(rs)
+			}
+		}
+		if sim.RegisterSet == nil {
+			sim.RegisterSet = modbus.SungrowRegisterSet
+			server.RegisterSet = modbus.SungrowRegisterSet
+		}
+
+		// Apply profile defaults
+		if profile := pm.GetActive(); profile != nil {
+			for addr, value := range profile.Defaults {
+				var def *modbus.RegisterDef
+				if sim.RegisterSet != nil {
+					def = sim.RegisterSet.Lookup[addr]
+				}
+				if def == nil {
+					def = modbus.RegisterLookup[addr]
+				}
+				if def != nil {
+					if err := server.WriteRegisterValue(def, value); err != nil {
+						log.Printf("[%d] Failed to write register %d: %v", sim.ID, addr, err)
 					}
 				}
 			}
@@ -1416,15 +1460,15 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 		switch sim.Protocol {
 		case "modbus":
 			entry["slave_id"] = sim.SlaveID
-			// Use register 5599 (Meter Power) for energy meters, standard registers for inverters
+			// Use meter_power for energy meters, standard registers for inverters
 			if sim.Category == "energy_meter" {
-				entry["meter"] = getRegisterValue(sim.Server, 5599)
+				entry["meter"] = getSemanticValue(sim, "meter_power")
 			} else {
-				entry["pv_power"] = getRegisterValue(sim.Server, 5017)
-				entry["soc"] = getRegisterValue(sim.Server, 13023)
-				batteryPower, batteryDirection := getBatteryPowerAndDirection(sim.Server)
+				entry["pv_power"] = getSemanticValue(sim, "pv_power")
+				entry["soc"] = getSemanticValue(sim, "battery_soc")
+				batteryPower, batteryDirection := getBatteryPowerAndDirection(sim)
 				entry["load"] = batteryPower
-				entry["meter"] = getRegisterValue(sim.Server, 5599)
+				entry["meter"] = getSemanticValue(sim, "meter_power")
 				entry["battery_direction"] = batteryDirection
 				entry["battery_capacity_kwh"] = sim.BatteryCapacityKWh
 				entry["scenario"] = sim.Automation.Scenario
@@ -1577,11 +1621,11 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 	case "modbus":
 		status["slave_id"] = sim.SlaveID
 		status["battery_capacity_kwh"] = sim.BatteryCapacityKWh
-		status["pv_power"] = getRegisterValue(sim.Server, 5017)
-		status["soc"] = getRegisterValue(sim.Server, 13023)
-		status["load"] = getRegisterValue(sim.Server, 13022)
-		status["meter"] = getRegisterValue(sim.Server, 5599)
-		status["frequency"] = getRegisterValue(sim.Server, 5241)
+		status["pv_power"] = getSemanticValue(sim, "pv_power")
+		status["soc"] = getSemanticValue(sim, "battery_soc")
+		status["load"] = getSemanticValue(sim, "battery_power")
+		status["meter"] = getSemanticValue(sim, "meter_power")
+		status["frequency"] = getSemanticValue(sim, "grid_frequency")
 	case "mqtt":
 		status["state"] = sim.MQTTServer.GetState()
 	case "ocpp":
@@ -1668,8 +1712,15 @@ func handleRegisters(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 		activeCategories = activeProfile.Categories
 	}
 
+	// Use device-specific RegisterSet definitions if available, else global
+	defs := modbus.RegisterDefinitions
+	if sim.RegisterSet != nil {
+		defs = sim.RegisterSet.Definitions
+	}
+
 	var payloads []*modbus.RegisterPayload
-	for _, def := range modbus.RegisterDefinitions {
+	for i := range defs {
+		def := &defs[i]
 		// Filter by profile categories if set
 		if len(activeCategories) > 0 && !containsCategory(activeCategories, def.Category) {
 			continue // Skip registers not matching profile categories
@@ -1710,7 +1761,14 @@ func handleRegister(w http.ResponseWriter, r *http.Request, sim *Simulator, addr
 		return
 	}
 
-	def := modbus.RegisterLookup[uint16(addr)]
+	// Look up in device-specific RegisterSet first, then fall back to global
+	var def *modbus.RegisterDef
+	if sim.RegisterSet != nil {
+		def = sim.RegisterSet.Lookup[uint16(addr)]
+	}
+	if def == nil {
+		def = modbus.RegisterLookup[uint16(addr)]
+	}
 	if def == nil {
 		http.Error(w, "Register not found", http.StatusNotFound)
 		return
@@ -1807,8 +1865,23 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 		// Apply profile based on protocol
 		switch sim.Protocol {
 		case "modbus":
+			// Update RegisterSet if the profile specifies one
+			if profile.RegisterSetName != "" {
+				if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
+					sim.RegisterSet = rs
+					sim.Server.RegisterSet = rs
+					sim.Server.InitDefaultsFromSet(rs)
+				}
+			}
+			// Apply profile-specific defaults
 			for addr, value := range profile.Defaults {
-				def := modbus.RegisterLookup[addr]
+				var def *modbus.RegisterDef
+				if sim.RegisterSet != nil {
+					def = sim.RegisterSet.Lookup[addr]
+				}
+				if def == nil {
+					def = modbus.RegisterLookup[addr]
+				}
 				if def != nil {
 					if err := sim.Server.WriteRegisterValue(def, value); err != nil {
 						log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
@@ -2032,6 +2105,9 @@ func handleReset(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 	}
 
 	sim.Server.InitDefaults()
+	sim.mu.Lock()
+	sim.socInitialized = false
+	sim.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
@@ -2217,7 +2293,7 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 
 		// Add current meter reading if meter is valid
 		if meterSim := getSimulator(site.MeterID); meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
-			entry["meter_power"] = getRegisterValue(meterSim.Server, 5599)
+			entry["meter_power"] = getSemanticValue(meterSim, "meter_power")
 		}
 
 		site.mu.RUnlock()
@@ -2372,27 +2448,27 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 	// Add current meter reading if meter is valid
 	meterSim := getSimulator(site.MeterID)
 	if meterSim != nil && meterSim.Protocol == "modbus" && meterSim.Server != nil {
-		status["meter_power"] = getRegisterValue(meterSim.Server, 5599)
+		status["meter_power"] = getSemanticValue(meterSim, "meter_power")
 
 		// Add per-phase currents from meter registers
 		status["phase_currents"] = PhaseCurrents{
-			L1: getRegisterValue(meterSim.Server, 6),
-			L2: getRegisterValue(meterSim.Server, 8),
-			L3: getRegisterValue(meterSim.Server, 10),
+			L1: getSemanticValue(meterSim, "meter_l1_current"),
+			L2: getSemanticValue(meterSim, "meter_l2_current"),
+			L3: getSemanticValue(meterSim, "meter_l3_current"),
 		}
 
 		// Add per-phase powers from meter registers
 		status["phase_powers"] = PhasePowers{
-			L1: getRegisterValue(meterSim.Server, 12),
-			L2: getRegisterValue(meterSim.Server, 14),
-			L3: getRegisterValue(meterSim.Server, 16),
+			L1: getSemanticValue(meterSim, "meter_l1_power"),
+			L2: getSemanticValue(meterSim, "meter_l2_power"),
+			L3: getSemanticValue(meterSim, "meter_l3_power"),
 		}
 
 		// Include virtual devices if meter is an inverter
 		if meterSim.Category == "inverter" && meterSim.Running {
-			pvPower := getRegisterValue(meterSim.Server, 5017)
-			batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim.Server)
-			batterySoc := getRegisterValue(meterSim.Server, 13023)
+			pvPower := getSemanticValue(meterSim, "pv_power")
+			batteryPower, batteryDirection := getBatteryPowerAndDirection(meterSim)
+			batterySoc := getSemanticValue(meterSim, "battery_soc")
 
 			status["virtual_devices"] = []map[string]interface{}{
 				{"type": "pv", "power": pvPower},
@@ -3001,33 +3077,47 @@ func handleSiteVirtualDevices(w http.ResponseWriter, r *http.Request, site *Site
 		return
 	}
 
+	// Find a running inverter in the site: check meter first, then simulator_ids
 	site.mu.RLock()
 	meterID := site.MeterID
+	simIDs := make([]int, len(site.SimulatorIDs))
+	copy(simIDs, site.SimulatorIDs)
 	site.mu.RUnlock()
 
+	var inverterSim *Simulator
 	meterSim := getSimulator(meterID)
-	if meterSim == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"virtual_devices": []interface{}{}})
-		return
+	if meterSim != nil {
+		meterSim.mu.RLock()
+		if meterSim.Category == "inverter" && meterSim.Running && meterSim.Server != nil {
+			inverterSim = meterSim
+		}
+		meterSim.mu.RUnlock()
 	}
-
-	meterSim.mu.RLock()
-	category := meterSim.Category
-	running := meterSim.Running
-	server := meterSim.Server
-	meterSim.mu.RUnlock()
-
-	if category != "inverter" || !running || server == nil {
+	if inverterSim == nil {
+		for _, simID := range simIDs {
+			sim := getSimulator(simID)
+			if sim == nil {
+				continue
+			}
+			sim.mu.RLock()
+			if sim.Category == "inverter" && sim.Running && sim.Server != nil {
+				inverterSim = sim
+				sim.mu.RUnlock()
+				break
+			}
+			sim.mu.RUnlock()
+		}
+	}
+	if inverterSim == nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"virtual_devices": []interface{}{}})
 		return
 	}
 
 	// Read values from inverter
-	pvPower := getRegisterValue(server, 5017)
-	batteryPower, batteryDirection := getBatteryPowerAndDirection(server)
-	batterySoc := getRegisterValue(server, 13023)
+	pvPower := getSemanticValue(inverterSim, "pv_power")
+	batteryPower, batteryDirection := getBatteryPowerAndDirection(inverterSim)
+	batterySoc := getSemanticValue(inverterSim, "battery_soc")
 
 	virtualDevices := []map[string]interface{}{
 		{
@@ -3053,29 +3143,39 @@ func handleSiteVirtualDevice(w http.ResponseWriter, r *http.Request, site *Site,
 		return
 	}
 
+	// Find a running inverter in the site: check meter first, then simulator_ids
 	site.mu.RLock()
 	meterID := site.MeterID
+	simIDs := make([]int, len(site.SimulatorIDs))
+	copy(simIDs, site.SimulatorIDs)
 	site.mu.RUnlock()
 
+	var inverterSim *Simulator
 	meterSim := getSimulator(meterID)
-	if meterSim == nil {
-		http.Error(w, "Meter not found", http.StatusNotFound)
-		return
+	if meterSim != nil {
+		meterSim.mu.RLock()
+		if meterSim.Category == "inverter" && meterSim.Running && meterSim.Server != nil {
+			inverterSim = meterSim
+		}
+		meterSim.mu.RUnlock()
 	}
-
-	meterSim.mu.RLock()
-	category := meterSim.Category
-	running := meterSim.Running
-	server := meterSim.Server
-	meterSim.mu.RUnlock()
-
-	if category != "inverter" {
-		http.Error(w, "Meter is not an inverter", http.StatusBadRequest)
-		return
+	if inverterSim == nil {
+		for _, simID := range simIDs {
+			sim := getSimulator(simID)
+			if sim == nil {
+				continue
+			}
+			sim.mu.RLock()
+			if sim.Category == "inverter" && sim.Running && sim.Server != nil {
+				inverterSim = sim
+				sim.mu.RUnlock()
+				break
+			}
+			sim.mu.RUnlock()
+		}
 	}
-
-	if !running || server == nil {
-		http.Error(w, "Inverter is not running", http.StatusBadRequest)
+	if inverterSim == nil {
+		http.Error(w, "No running inverter found in site", http.StatusBadRequest)
 		return
 	}
 
@@ -3088,39 +3188,45 @@ func handleSiteVirtualDevice(w http.ResponseWriter, r *http.Request, site *Site,
 	switch deviceType {
 	case "pv":
 		if power, ok := req["power"].(float64); ok {
-			if pvDef := modbus.RegisterLookup[5017]; pvDef != nil {
-				server.WriteRegisterValue(pvDef, power)
-			}
+			setSemanticValue(inverterSim, "pv_power", power)
 		}
 	case "battery":
 		if power, ok := req["power"].(float64); ok {
-			if battDef := modbus.RegisterLookup[13022]; battDef != nil {
-				server.WriteRegisterValue(battDef, math.Abs(power))
+			// UI convention: positive = discharge, negative = charge
+			// Register convention: positive = charge, negative = discharge
+			// Negate the UI value to match register convention.
+			regPower := -power
+			log.Printf("[DEBUG] virtual-devices/battery: UI power=%.0f, regPower=%.0f, inverter=%s (id=%d)",
+				power, regPower, inverterSim.Serial, inverterSim.ID)
+
+			def := getSemanticDef(inverterSim, "battery_power")
+			if def != nil && (def.DataType == modbus.I16 || def.DataType == modbus.I32) {
+				setSemanticValue(inverterSim, "battery_power", regPower)
+			} else {
+				setSemanticValue(inverterSim, "battery_power", math.Abs(regPower))
 			}
 			// Set command register: 170=charge, 187=discharge, 204=stop
 			var cmd float64 = 204
-			if power > 0 {
-				cmd = 170 // charge (positive = consuming)
-			} else if power < 0 {
-				cmd = 187 // discharge (negative = generating)
+			if regPower > 0 {
+				cmd = 170 // charge
+			} else if regPower < 0 {
+				cmd = 187 // discharge
 			}
-			if cmdDef := modbus.RegisterLookup[13050]; cmdDef != nil {
-				server.WriteRegisterValue(cmdDef, cmd)
+			setSemanticValue(inverterSim, "battery_cmd", cmd)
+			flags := 0.0
+			if cmd == 187 {
+				flags = 4 // discharging
+			} else if cmd == 170 {
+				flags = 2 // charging
 			}
-			if flagsDef := modbus.RegisterLookup[13000]; flagsDef != nil {
-				flags := 0.0
-				if cmd == 187 {
-					flags = 4 // discharging
-				} else if cmd == 170 {
-					flags = 2 // charging
-				}
-				server.WriteRegisterValue(flagsDef, flags)
-			}
+			setSemanticValue(inverterSim, "battery_flags", flags)
 		}
 		if soc, ok := req["soc"].(float64); ok {
-			if socDef := modbus.RegisterLookup[13023]; socDef != nil {
-				server.WriteRegisterValue(socDef, soc)
-			}
+			setSemanticValue(inverterSim, "battery_soc", soc)
+			inverterSim.mu.Lock()
+			inverterSim.internalSOC = soc
+			inverterSim.socInitialized = true
+			inverterSim.mu.Unlock()
 		}
 	default:
 		http.Error(w, "Unknown device type", http.StatusBadRequest)
@@ -3357,33 +3463,138 @@ func generateValues(sim *Simulator, simTime time.Time) {
 	}
 
 	// Update registers
-	if pvDef := modbus.RegisterLookup[5017]; pvDef != nil {
-		sim.Server.WriteRegisterValue(pvDef, solarPower)
+	setSemanticValue(sim, "pv_power", solarPower)
+	setSemanticValue(sim, "load_power", loadPower)
+
+	// Grid frequency (50Hz with small variation)
+	freq := 50.0 + 0.05*math.Sin(float64(simTime.Second())*0.1)
+	setSemanticValue(sim, "grid_frequency", freq)
+
+	// Derive PV string voltages and currents from total PV power
+	if solarPower > 0 {
+		stringPower := solarPower / 2.0
+		stringVoltage := 300.0 + 50.0*math.Sin(float64(simTime.Hour())*0.5)
+		stringCurrent := stringPower / stringVoltage
+		setSemanticValue(sim, "pv1_voltage", stringVoltage)
+		setSemanticValue(sim, "pv1_current", stringCurrent)
+		setSemanticValue(sim, "pv2_voltage", stringVoltage)
+		setSemanticValue(sim, "pv2_current", stringCurrent)
+	} else {
+		setSemanticValue(sim, "pv1_voltage", 0)
+		setSemanticValue(sim, "pv1_current", 0)
+		setSemanticValue(sim, "pv2_voltage", 0)
+		setSemanticValue(sim, "pv2_current", 0)
 	}
-	if loadDef := modbus.RegisterLookup[13052]; loadDef != nil {
-		sim.Server.WriteRegisterValue(loadDef, loadPower)
+
+	// Derive battery voltage and current from battery power
+	batteryPower := 0.0
+	if sim.Server != nil {
+		batteryPower = getBatterySignedPower(sim)
 	}
+	batteryVoltage := 48.0
+	if batteryPower != 0 {
+		batteryCurrent := math.Abs(batteryPower) / batteryVoltage
+		setSemanticValue(sim, "battery_voltage", batteryVoltage)
+		setSemanticValue(sim, "battery_current", batteryCurrent)
+	} else {
+		setSemanticValue(sim, "battery_voltage", batteryVoltage)
+		setSemanticValue(sim, "battery_current", 0)
+	}
+
+	// Inverter temperature (scales with load)
+	invTemp := 30.0 + 15.0*(solarPower/5000.0)
+	setSemanticValue(sim, "inverter_temperature", invTemp)
+
+	// Battery temperature (relatively stable)
+	setSemanticValue(sim, "battery_temperature", 25.0+3.0*math.Sin(float64(simTime.Hour())*0.3))
 
 	// Only update meter register if NOT a site meter (site controls it)
 	if !isSimulatorSiteMeter(sim.ID) {
-		batteryPower := 0.0
-		if sim.Server != nil {
-			batteryPower = getBatterySignedPower(sim.Server)
-		}
 		meterPower := loadPower - solarPower + batteryPower
-		if meterDef := modbus.RegisterLookup[5599]; meterDef != nil {
-			sim.Server.WriteRegisterValue(meterDef, meterPower)
-		}
+		setSemanticValue(sim, "meter_power", meterPower)
 	}
 }
 
-func getRegisterValue(server *modbus.Server, address uint16) float64 {
-	def := modbus.RegisterLookup[address]
+// getSemanticValue reads a register by semantic name using the simulator's RegisterSet.
+func getSemanticValue(sim *Simulator, name string) float64 {
+	if sim == nil || sim.RegisterSet == nil || sim.Server == nil {
+		return 0
+	}
+	def := sim.RegisterSet.Semantic[name]
 	if def == nil {
 		return 0
 	}
-	val, _ := server.ReadRegisterValue(def)
+	val, _ := sim.Server.ReadRegisterValue(def)
 	return val
+}
+
+// setSemanticValue writes a register by semantic name using the simulator's RegisterSet.
+func setSemanticValue(sim *Simulator, name string, value float64) {
+	if sim == nil || sim.RegisterSet == nil || sim.Server == nil {
+		return
+	}
+	def := sim.RegisterSet.Semantic[name]
+	if def == nil {
+		return
+	}
+	sim.Server.WriteRegisterValue(def, value)
+}
+
+// getSemanticDef returns the register definition for a semantic name, or nil.
+func getSemanticDef(sim *Simulator, name string) *modbus.RegisterDef {
+	if sim == nil || sim.RegisterSet == nil {
+		return nil
+	}
+	return sim.RegisterSet.Semantic[name]
+}
+
+// accumulateSemanticValue adds delta to the current value of a semantic register.
+func accumulateSemanticValue(sim *Simulator, name string, delta float64) {
+	if sim == nil || sim.RegisterSet == nil || sim.Server == nil {
+		return
+	}
+	def := sim.RegisterSet.Semantic[name]
+	if def == nil {
+		return
+	}
+	current, _ := sim.Server.ReadRegisterValue(def)
+	sim.Server.WriteRegisterValue(def, current+delta)
+}
+
+// accumulateMeterEnergy writes import/export energy deltas to a meter using semantic names.
+// It also writes to global-lookup addresses for backward compatibility (dual register sets).
+func accumulateMeterEnergy(mSim *Simulator, importDelta, exportDelta float64) {
+	if importDelta > 0 {
+		accumulateSemanticValue(mSim, "total_import", importDelta)
+		// Also accumulate on global-lookup addresses for backward compat
+		if importDef := modbus.RegisterLookup[72]; importDef != nil {
+			if mSim.RegisterSet == nil || mSim.RegisterSet.Lookup[72] == nil {
+				current, _ := mSim.Server.ReadRegisterValue(importDef)
+				mSim.Server.WriteRegisterValue(importDef, current+importDelta)
+			}
+		}
+		if importDefWh := modbus.RegisterLookup[13036]; importDefWh != nil {
+			if mSim.RegisterSet == nil || mSim.RegisterSet.Lookup[13036] == nil {
+				current, _ := mSim.Server.ReadRegisterValue(importDefWh)
+				mSim.Server.WriteRegisterValue(importDefWh, current+importDelta*1000)
+			}
+		}
+	}
+	if exportDelta > 0 {
+		accumulateSemanticValue(mSim, "total_export", exportDelta)
+		if exportDef := modbus.RegisterLookup[74]; exportDef != nil {
+			if mSim.RegisterSet == nil || mSim.RegisterSet.Lookup[74] == nil {
+				current, _ := mSim.Server.ReadRegisterValue(exportDef)
+				mSim.Server.WriteRegisterValue(exportDef, current+exportDelta)
+			}
+		}
+		if exportDefWh := modbus.RegisterLookup[13045]; exportDefWh != nil {
+			if mSim.RegisterSet == nil || mSim.RegisterSet.Lookup[13045] == nil {
+				current, _ := mSim.Server.ReadRegisterValue(exportDefWh)
+				mSim.Server.WriteRegisterValue(exportDefWh, current+exportDelta*1000)
+			}
+		}
+	}
 }
 
 func markStateDirty() {
@@ -3527,31 +3738,41 @@ func clearWarnings() {
 	stateWarningsMu.Unlock()
 }
 
-func getBatterySignedPower(server *modbus.Server) float64 {
-	if server == nil {
+func getBatterySignedPower(sim *Simulator) float64 {
+	if sim == nil || sim.Server == nil {
 		return 0
 	}
-	power := getRegisterValue(server, 13022)
-	flags := getRegisterValue(server, 13000)
+	power := getSemanticValue(sim, "battery_power")
+
+	// Check flags/cmd first — these are explicitly set by the UI and always correct.
+	flags := getSemanticValue(sim, "battery_flags")
 	if int(flags)&0x0004 != 0 {
 		return -math.Abs(power)
 	}
 	if int(flags)&0x0002 != 0 {
 		return math.Abs(power)
 	}
-	// Fallback to command register if flags are unset
-	cmd := int(getRegisterValue(server, 13050))
+	cmd := int(getSemanticValue(sim, "battery_cmd"))
 	if cmd == 187 { // discharge
 		return -math.Abs(power)
 	}
 	if cmd == 170 { // charge
 		return math.Abs(power)
 	}
+
+	// Fallback: for signed register types (I16/I32), trust the register sign.
+	// This handles external Modbus writes that set the register directly without cmd.
+	if def := getSemanticDef(sim, "battery_power"); def != nil {
+		if def.DataType == modbus.I16 || def.DataType == modbus.I32 {
+			return power
+		}
+	}
+
 	return math.Abs(power)
 }
 
-func getBatteryPowerAndDirection(server *modbus.Server) (float64, string) {
-	signed := getBatterySignedPower(server)
+func getBatteryPowerAndDirection(sim *Simulator) (float64, string) {
+	signed := getBatterySignedPower(sim)
 	if signed > 0 {
 		return math.Abs(signed), "charging"
 	}
@@ -3577,12 +3798,12 @@ func clampBatterySOC(value, minSOC, maxSOC float64) float64 {
 	return value
 }
 
-func updateBatterySOC(server *modbus.Server, simHours, capacityKWh float64) {
-	if server == nil || simHours <= 0 {
+func updateBatterySOC(sim *Simulator, simHours, capacityKWh float64) {
+	if sim == nil || sim.Server == nil || simHours <= 0 {
 		return
 	}
 
-	power := getBatterySignedPower(server)
+	power := getBatterySignedPower(sim)
 	if power == 0 {
 		return
 	}
@@ -3595,32 +3816,91 @@ func updateBatterySOC(server *modbus.Server, simHours, capacityKWh float64) {
 		return
 	}
 
-	currentSOC := getRegisterValue(server, 13023)
-	maxSOC := getRegisterValue(server, 13058)
-	minSOC := getRegisterValue(server, 13059)
+	// Use high-precision internal accumulator to avoid register truncation.
+	// Many devices use U16 Scale 1.0 for SOC which can only store integers,
+	// causing tiny per-tick deltas to be lost or amplified by truncation.
+	sim.mu.Lock()
+	if !sim.socInitialized {
+		sim.internalSOC = getSemanticValue(sim, "battery_soc")
+		sim.socInitialized = true
+	}
+	currentSOC := sim.internalSOC
+	sim.mu.Unlock()
+
+	maxSOC := getSemanticValue(sim, "battery_max_soc")
+	minSOC := getSemanticValue(sim, "battery_min_soc")
 
 	deltaSOC := (power * simHours / capacityWh) * 100.0
 	nextSOC := clampBatterySOC(currentSOC+deltaSOC, minSOC, maxSOC)
 
-	if socDef := modbus.RegisterLookup[13023]; socDef != nil {
-		server.WriteRegisterValue(socDef, nextSOC)
-	}
+	sim.mu.Lock()
+	sim.internalSOC = nextSOC
+	sim.mu.Unlock()
+	setSemanticValue(sim, "battery_soc", nextSOC)
 
 	energyWh := math.Abs(power) * simHours
 	if energyWh == 0 {
 		return
 	}
 	if power > 0 {
-		if chargeDef := modbus.RegisterLookup[13041]; chargeDef != nil {
-			currentCharge, _ := server.ReadRegisterValue(chargeDef)
-			server.WriteRegisterValue(chargeDef, currentCharge+energyWh)
+		if chargeDef := getSemanticDef(sim, "total_charge"); chargeDef != nil {
+			currentCharge, _ := sim.Server.ReadRegisterValue(chargeDef)
+			sim.Server.WriteRegisterValue(chargeDef, currentCharge+energyWh)
 		}
 	} else if power < 0 {
-		if dischargeDef := modbus.RegisterLookup[13027]; dischargeDef != nil {
-			currentDischarge, _ := server.ReadRegisterValue(dischargeDef)
-			server.WriteRegisterValue(dischargeDef, currentDischarge+energyWh)
+		if dischargeDef := getSemanticDef(sim, "total_discharge"); dischargeDef != nil {
+			currentDischarge, _ := sim.Server.ReadRegisterValue(dischargeDef)
+			sim.Server.WriteRegisterValue(dischargeDef, currentDischarge+energyWh)
 		}
 	}
+}
+
+// accumulatePVEnergy adds PV generation energy over the given time period.
+func accumulatePVEnergy(sim *Simulator, simHours float64) {
+	if sim == nil || sim.Server == nil || simHours <= 0 {
+		return
+	}
+	pvPower := getSemanticValue(sim, "pv_power")
+	if pvPower <= 0 {
+		return
+	}
+	energyWh := pvPower * simHours
+	accumulateSemanticValue(sim, "total_pv_gen", energyWh)
+}
+
+// updateBatteryFlags sets the system state flags register based on current battery power direction.
+// Bit 0x0002 = charging, bit 0x0004 = discharging, 0 = idle.
+func updateBatteryFlags(sim *Simulator) {
+	if sim == nil || sim.Server == nil {
+		return
+	}
+	power := getSemanticValue(sim, "battery_power")
+	if power == 0 {
+		setSemanticValue(sim, "battery_flags", 0)
+		return
+	}
+
+	// Derive direction from battery_cmd (user intent), not from flags (avoids feedback loop).
+	cmd := int(getSemanticValue(sim, "battery_cmd"))
+	var flags float64
+	switch cmd {
+	case 170: // charge
+		flags = 2
+	case 187: // discharge
+		flags = 4
+	default:
+		// No cmd set — use register sign for signed types, else assume charging
+		if def := getSemanticDef(sim, "battery_power"); def != nil {
+			if def.DataType == modbus.I16 || def.DataType == modbus.I32 {
+				if power > 0 {
+					flags = 2
+				} else {
+					flags = 4
+				}
+			}
+		}
+	}
+	setSemanticValue(sim, "battery_flags", flags)
 }
 
 // isSimulatorSiteMeter checks if a simulator is currently acting as a site meter
@@ -3670,11 +3950,18 @@ func getPowerContribution(sim *Simulator) float64 {
 		if sim.Server == nil {
 			return 0
 		}
-		// For inverters: load - pv + battery
-		// battery: positive = charging (consuming), negative = discharging (generating)
-		load := getRegisterValue(sim.Server, 13052)       // Load power
-		pv := getRegisterValue(sim.Server, 5017)          // PV power
-		batteryPower := getBatterySignedPower(sim.Server) // Battery power signed
+		// For inverters: contribution is -pv + battery (generation/consumption only).
+		// The house load comes from the site's phase loads, not the inverter register,
+		// to avoid double-counting.
+		if sim.Category == "inverter" {
+			pv := getSemanticValue(sim, "pv_power")
+			batteryPower := getBatterySignedPower(sim)
+			return -pv + batteryPower
+		}
+		// For other devices (meters, etc.): load - pv + battery
+		load := getSemanticValue(sim, "load_power")
+		pv := getSemanticValue(sim, "pv_power")
+		batteryPower := getBatterySignedPower(sim)
 		return load - pv + batteryPower
 
 	case "mqtt":
@@ -4009,19 +4296,84 @@ func generateValuesForSite(sim *Simulator, simTime time.Time, scenario string) {
 
 	// Update registers
 	if sim.Server != nil {
-		if pvDef := modbus.RegisterLookup[5017]; pvDef != nil {
-			sim.Server.WriteRegisterValue(pvDef, solarPower)
-		}
-		if loadDef := modbus.RegisterLookup[13052]; loadDef != nil {
-			sim.Server.WriteRegisterValue(loadDef, loadPower)
-		}
+		setSemanticValue(sim, "pv_power", solarPower)
+		setSemanticValue(sim, "load_power", loadPower)
 
 		// Grid frequency (50Hz with small variation)
-		if freqDef := modbus.RegisterLookup[5241]; freqDef != nil {
-			freq := 50.0 + 0.05*math.Sin(float64(simTime.Second())*0.1)
-			sim.Server.WriteRegisterValue(freqDef, freq)
+		freq := 50.0 + 0.05*math.Sin(float64(simTime.Second())*0.1)
+		setSemanticValue(sim, "grid_frequency", freq)
+
+		// Derive PV string voltages and currents from total PV power
+		// Assume 2 MPPT strings sharing power equally, typical string voltage ~350V
+		if solarPower > 0 {
+			stringPower := solarPower / 2.0
+			stringVoltage := 300.0 + 50.0*math.Sin(float64(simTime.Hour())*0.5) // 300-350V range
+			stringCurrent := stringPower / stringVoltage
+			setSemanticValue(sim, "pv1_voltage", stringVoltage)
+			setSemanticValue(sim, "pv1_current", stringCurrent)
+			setSemanticValue(sim, "pv2_voltage", stringVoltage)
+			setSemanticValue(sim, "pv2_current", stringCurrent)
+		} else {
+			setSemanticValue(sim, "pv1_voltage", 0)
+			setSemanticValue(sim, "pv1_current", 0)
+			setSemanticValue(sim, "pv2_voltage", 0)
+			setSemanticValue(sim, "pv2_current", 0)
 		}
+
+		// Derive battery voltage and current from battery power
+		batteryPower := getSemanticValue(sim, "battery_power")
+		batteryVoltage := 48.0 // Nominal battery voltage
+		if batteryPower != 0 {
+			batteryCurrent := math.Abs(batteryPower) / batteryVoltage
+			setSemanticValue(sim, "battery_voltage", batteryVoltage)
+			setSemanticValue(sim, "battery_current", batteryCurrent)
+		} else {
+			setSemanticValue(sim, "battery_voltage", batteryVoltage)
+			setSemanticValue(sim, "battery_current", 0)
+		}
+
+		// Inverter temperature (scales with load)
+		invTemp := 30.0 + 15.0*(solarPower/5000.0)
+		setSemanticValue(sim, "inverter_temperature", invTemp)
+
+		// Battery temperature (relatively stable)
+		setSemanticValue(sim, "battery_temperature", 25.0+3.0*math.Sin(float64(simTime.Hour())*0.3))
 	}
+}
+
+// deriveInverterValues computes PV string V/I, battery V/I, and temperatures
+// from the current register values. Called from the aggregation loop so derived
+// values are always populated when power is flowing.
+func deriveInverterValues(sim *Simulator, simTime time.Time) {
+	pvPower := getSemanticValue(sim, "pv_power")
+	if pvPower > 0 {
+		stringPower := pvPower / 2.0
+		stringVoltage := 300.0 + 50.0*math.Sin(float64(simTime.Hour())*0.5)
+		stringCurrent := stringPower / stringVoltage
+		setSemanticValue(sim, "pv1_voltage", stringVoltage)
+		setSemanticValue(sim, "pv1_current", stringCurrent)
+		setSemanticValue(sim, "pv2_voltage", stringVoltage)
+		setSemanticValue(sim, "pv2_current", stringCurrent)
+	} else {
+		setSemanticValue(sim, "pv1_voltage", 0)
+		setSemanticValue(sim, "pv1_current", 0)
+		setSemanticValue(sim, "pv2_voltage", 0)
+		setSemanticValue(sim, "pv2_current", 0)
+	}
+
+	batteryPower := getBatterySignedPower(sim)
+	batteryVoltage := 48.0
+	if batteryPower != 0 {
+		setSemanticValue(sim, "battery_voltage", batteryVoltage)
+		setSemanticValue(sim, "battery_current", math.Abs(batteryPower)/batteryVoltage)
+	} else {
+		setSemanticValue(sim, "battery_voltage", batteryVoltage)
+		setSemanticValue(sim, "battery_current", 0)
+	}
+
+	invTemp := 30.0 + 15.0*(pvPower/5000.0)
+	setSemanticValue(sim, "inverter_temperature", invTemp)
+	setSemanticValue(sim, "battery_temperature", 25.0+3.0*math.Sin(float64(simTime.Hour())*0.3))
 }
 
 // calculateAndUpdateMeter calculates total power and updates the meter
@@ -4070,8 +4422,8 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	// If meter is an inverter, read its PV/Battery values and include them in the calculation
 	// Distribute PV/battery contributions using phase factors
 	if meterCategory == "inverter" {
-		pvPower := getRegisterValue(meterSim.Server, 5017)     // PV power
-		batteryPower := getBatterySignedPower(meterSim.Server) // Signed battery power
+		pvPower := getSemanticValue(meterSim, "pv_power")     // PV power
+		batteryPower := getBatterySignedPower(meterSim) // Signed battery power
 
 		// Distribute PV generation (reduces load) and battery across phases
 		pvBatteryNet := -pvPower + batteryPower
@@ -4129,9 +4481,11 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	energyDeltaWh := math.Abs(totalPower) * simHours
 
 	if simHours > 0 {
-		// Update battery SOC for all inverters using the central clock
+		// Update battery SOC and PV energy for all inverters using the central clock
 		if meterCategory == "inverter" && meterSim.Server != nil {
-			updateBatterySOC(meterSim.Server, simHours, meterCapacityKWh)
+			updateBatterySOC(meterSim, simHours, meterCapacityKWh)
+			accumulatePVEnergy(meterSim, simHours)
+			updateBatteryFlags(meterSim)
 		}
 		for _, simID := range simIDs {
 			if simID == meterID {
@@ -4153,7 +4507,66 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 			if !running || !deviceOn || category != "inverter" || protocol != "modbus" || server == nil {
 				continue
 			}
-			updateBatterySOC(server, simHours, capacityKWh)
+			updateBatterySOC(sim, simHours, capacityKWh)
+			accumulatePVEnergy(sim, simHours)
+			updateBatteryFlags(sim)
+		}
+	}
+
+	// Sync site load to inverter load_power registers so the inverter dashboard
+	// reflects the site-defined load (the site is the source of truth for load).
+	siteLoad := sitePhaseLoads.Total()
+	if siteLoad == 0 {
+		siteLoad = baseLoad
+	}
+	if meterCategory == "inverter" && meterSim.Server != nil {
+		setSemanticValue(meterSim, "load_power", siteLoad)
+	}
+	for _, simID := range simIDs {
+		if simID == meterID {
+			continue
+		}
+		sim := getSimulator(simID)
+		if sim == nil {
+			continue
+		}
+		sim.mu.RLock()
+		isInverter := sim.Running && sim.Category == "inverter" && sim.Protocol == "modbus" && sim.Server != nil
+		sim.mu.RUnlock()
+		if isInverter {
+			setSemanticValue(sim, "load_power", siteLoad)
+		}
+	}
+
+	// Derive PV string, battery, and temperature values for all inverters in the site.
+	// This runs in the aggregation loop (always-on) so derived values are populated
+	// even when site simulation is not explicitly started.
+	site.mu.RLock()
+	simTime := site.SimulatedTime
+	site.mu.RUnlock()
+	if simTime.IsZero() {
+		simTime = time.Now()
+	}
+
+	if meterCategory == "inverter" && meterSim.Server != nil {
+		deriveInverterValues(meterSim, simTime)
+	}
+	for _, simID := range simIDs {
+		if simID == meterID {
+			continue
+		}
+		sim := getSimulator(simID)
+		if sim == nil {
+			continue
+		}
+		sim.mu.RLock()
+		running := sim.Running
+		category := sim.Category
+		protocol := sim.Protocol
+		server := sim.Server
+		sim.mu.RUnlock()
+		if running && category == "inverter" && protocol == "modbus" && server != nil {
+			deriveInverterValues(sim, simTime)
 		}
 	}
 
@@ -4171,6 +4584,16 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		if len(meterIDs) == 0 {
 			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown)
 			updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
+		}
+		// Propagate meter values to inverter sims that have built-in meter registers
+		for _, simID := range simIDs {
+			sim := getSimulator(simID)
+			if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !sim.Running {
+				continue
+			}
+			if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {
+				writeMeterRegisters(sim, totalPower, phasePowers, fuseBlown)
+			}
 		}
 	} else {
 		// Interval mode: accumulate energy internally, write only when interval elapses
@@ -4208,51 +4631,21 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 					continue
 				}
 				writeMeterRegisters(mSim, instantPower, instantPhasePowers, fuseBlown)
-
-				// Write accumulated energy
-				if importDelta > 0 {
-					if importDef := modbus.RegisterLookup[72]; importDef != nil {
-						currentImport, _ := mSim.Server.ReadRegisterValue(importDef)
-						mSim.Server.WriteRegisterValue(importDef, currentImport+importDelta)
-					}
-					if importDefWh := modbus.RegisterLookup[13037]; importDefWh != nil {
-						currentImport, _ := mSim.Server.ReadRegisterValue(importDefWh)
-						mSim.Server.WriteRegisterValue(importDefWh, currentImport+importDelta*1000)
-					}
-				}
-				if exportDelta > 0 {
-					if exportDef := modbus.RegisterLookup[74]; exportDef != nil {
-						currentExport, _ := mSim.Server.ReadRegisterValue(exportDef)
-						mSim.Server.WriteRegisterValue(exportDef, currentExport+exportDelta)
-					}
-					if exportDefWh := modbus.RegisterLookup[13046]; exportDefWh != nil {
-						currentExport, _ := mSim.Server.ReadRegisterValue(exportDefWh)
-						mSim.Server.WriteRegisterValue(exportDefWh, currentExport+exportDelta*1000)
-					}
-				}
+				accumulateMeterEnergy(mSim, importDelta, exportDelta)
 			}
 			// Also write to primary meter if not in meterIDs (backward compat)
 			if len(meterIDs) == 0 {
 				writeMeterRegisters(meterSim, instantPower, instantPhasePowers, fuseBlown)
-				if importDelta > 0 {
-					if importDef := modbus.RegisterLookup[72]; importDef != nil {
-						currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
-						meterSim.Server.WriteRegisterValue(importDef, currentImport+importDelta)
-					}
-					if importDefWh := modbus.RegisterLookup[13037]; importDefWh != nil {
-						currentImport, _ := meterSim.Server.ReadRegisterValue(importDefWh)
-						meterSim.Server.WriteRegisterValue(importDefWh, currentImport+importDelta*1000)
-					}
+				accumulateMeterEnergy(meterSim, importDelta, exportDelta)
+			}
+			// Propagate meter values to inverter sims that have built-in meter registers
+			for _, simID := range simIDs {
+				sim := getSimulator(simID)
+				if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !sim.Running {
+					continue
 				}
-				if exportDelta > 0 {
-					if exportDef := modbus.RegisterLookup[74]; exportDef != nil {
-						currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
-						meterSim.Server.WriteRegisterValue(exportDef, currentExport+exportDelta)
-					}
-					if exportDefWh := modbus.RegisterLookup[13046]; exportDefWh != nil {
-						currentExport, _ := meterSim.Server.ReadRegisterValue(exportDefWh)
-						meterSim.Server.WriteRegisterValue(exportDefWh, currentExport+exportDelta*1000)
-					}
+				if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {
+					writeMeterRegisters(sim, instantPower, instantPhasePowers, fuseBlown)
 				}
 			}
 		} else {
@@ -4261,7 +4654,9 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	}
 }
 
-// writeMeterRegisters writes power values to meter registers
+// writeMeterRegisters writes power values to meter registers.
+// Writes to semantic names on the meter's RegisterSet, and also to global-lookup
+// addresses for dual-format support (SDM630 + Sungrow on same meter).
 func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, fuseBlown PhaseFuses) {
 	if fuseBlown.L1 {
 		phasePowers.L1 = 0
@@ -4274,66 +4669,24 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 	}
 	totalPower = phasePowers.L1 + phasePowers.L2 + phasePowers.L3
 
-	// Write to meter register 5599 (positive=import, negative=export)
-	if meterDef := modbus.RegisterLookup[5599]; meterDef != nil {
-		meterSim.Server.WriteRegisterValue(meterDef, totalPower)
-	}
+	// Write total power via semantic name (hits the correct address for any device)
+	setSemanticValue(meterSim, "meter_power", totalPower)
 
-	// Also write to SDM630 registers (for gateways that read SDM630 format)
-	// Register 52: Total System Power (W)
-	if sdm630PowerDef := modbus.RegisterLookup[52]; sdm630PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(sdm630PowerDef, totalPower)
-	}
-
-	// Write per-phase powers
-	if l1PowerDef := modbus.RegisterLookup[12]; l1PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l1PowerDef, phasePowers.L1)
-	}
-	if l2PowerDef := modbus.RegisterLookup[14]; l2PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l2PowerDef, phasePowers.L2)
-	}
-	if l3PowerDef := modbus.RegisterLookup[16]; l3PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l3PowerDef, phasePowers.L3)
-	}
-
-	// Sungrow meter per-phase active power
-	if l1PowerDef := modbus.RegisterLookup[5601]; l1PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l1PowerDef, phasePowers.L1)
-	}
-	if l2PowerDef := modbus.RegisterLookup[5603]; l2PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l2PowerDef, phasePowers.L2)
-	}
-	if l3PowerDef := modbus.RegisterLookup[5605]; l3PowerDef != nil {
-		meterSim.Server.WriteRegisterValue(l3PowerDef, phasePowers.L3)
-	}
+	// Write per-phase powers via semantic names
+	setSemanticValue(meterSim, "meter_l1_power", phasePowers.L1)
+	setSemanticValue(meterSim, "meter_l2_power", phasePowers.L2)
+	setSemanticValue(meterSim, "meter_l3_power", phasePowers.L3)
 
 	// Calculate per-phase currents from power (I = P / V, assuming 230V)
 	l1Current := math.Abs(phasePowers.L1) / 230.0
 	l2Current := math.Abs(phasePowers.L2) / 230.0
 	l3Current := math.Abs(phasePowers.L3) / 230.0
 
-	if l1CurrentDef := modbus.RegisterLookup[6]; l1CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l1CurrentDef, l1Current)
-	}
-	if l2CurrentDef := modbus.RegisterLookup[8]; l2CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l2CurrentDef, l2Current)
-	}
-	if l3CurrentDef := modbus.RegisterLookup[10]; l3CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l3CurrentDef, l3Current)
-	}
+	setSemanticValue(meterSim, "meter_l1_current", l1Current)
+	setSemanticValue(meterSim, "meter_l2_current", l2Current)
+	setSemanticValue(meterSim, "meter_l3_current", l3Current)
 
-	// Sungrow meter currents (0.01A scale)
-	if l1CurrentDef := modbus.RegisterLookup[5743]; l1CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l1CurrentDef, l1Current)
-	}
-	if l2CurrentDef := modbus.RegisterLookup[5744]; l2CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l2CurrentDef, l2Current)
-	}
-	if l3CurrentDef := modbus.RegisterLookup[5745]; l3CurrentDef != nil {
-		meterSim.Server.WriteRegisterValue(l3CurrentDef, l3Current)
-	}
-
-	// Ensure voltage and frequency are always set (SDM630 registers)
+	// Voltages
 	l1Voltage := 230.0
 	l2Voltage := 230.0
 	l3Voltage := 230.0
@@ -4347,51 +4700,65 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 		l3Voltage = 0
 	}
 
-	if l1VoltageDef := modbus.RegisterLookup[0]; l1VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l1VoltageDef, l1Voltage)
+	setSemanticValue(meterSim, "meter_l1_voltage", l1Voltage)
+	setSemanticValue(meterSim, "meter_l2_voltage", l2Voltage)
+	setSemanticValue(meterSim, "meter_l3_voltage", l3Voltage)
+	setSemanticValue(meterSim, "grid_frequency", 50.0)
+
+	// Dual-format: also write to global-lookup addresses not covered by the meter's RegisterSet.
+	// This ensures both SDM630 and Sungrow addresses are populated on the server.
+	writeMeterGlobalFallback(meterSim, totalPower, phasePowers, l1Current, l2Current, l3Current, l1Voltage, l2Voltage, l3Voltage)
+}
+
+// writeMeterGlobalFallback writes meter values to global-lookup addresses not in the meter's RegisterSet.
+func writeMeterGlobalFallback(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, l1Current, l2Current, l3Current, l1Voltage, l2Voltage, l3Voltage float64) {
+	writeIfNotInSet := func(addr uint16, val float64) {
+		if meterSim.RegisterSet != nil && meterSim.RegisterSet.Lookup[addr] != nil {
+			return // Already written via semantic
+		}
+		if def := modbus.RegisterLookup[addr]; def != nil {
+			meterSim.Server.WriteRegisterValue(def, val)
+		}
 	}
-	if l2VoltageDef := modbus.RegisterLookup[2]; l2VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l2VoltageDef, l2Voltage)
-	}
-	if l3VoltageDef := modbus.RegisterLookup[4]; l3VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l3VoltageDef, l3Voltage)
-	}
-	if l1VoltageDef := modbus.RegisterLookup[5740]; l1VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l1VoltageDef, l1Voltage)
-	}
-	if l2VoltageDef := modbus.RegisterLookup[5741]; l2VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l2VoltageDef, l2Voltage)
-	}
-	if l3VoltageDef := modbus.RegisterLookup[5742]; l3VoltageDef != nil {
-		meterSim.Server.WriteRegisterValue(l3VoltageDef, l3Voltage)
-	}
-	if freqDef := modbus.RegisterLookup[70]; freqDef != nil {
-		meterSim.Server.WriteRegisterValue(freqDef, 50.0)
-	}
+
+	// Total power: SDM630 addr 52, Sungrow addr 5600
+	writeIfNotInSet(52, totalPower)
+	writeIfNotInSet(5600, totalPower)
+
+	// Per-phase powers: SDM630 addrs 12/14/16, Sungrow addrs 5602/5604/5606
+	writeIfNotInSet(12, phasePowers.L1)
+	writeIfNotInSet(14, phasePowers.L2)
+	writeIfNotInSet(16, phasePowers.L3)
+	writeIfNotInSet(5602, phasePowers.L1)
+	writeIfNotInSet(5604, phasePowers.L2)
+	writeIfNotInSet(5606, phasePowers.L3)
+
+	// Per-phase currents: SDM630 addrs 6/8/10, Sungrow addrs 5743/5744/5745
+	writeIfNotInSet(6, l1Current)
+	writeIfNotInSet(8, l2Current)
+	writeIfNotInSet(10, l3Current)
+	writeIfNotInSet(5743, l1Current)
+	writeIfNotInSet(5744, l2Current)
+	writeIfNotInSet(5745, l3Current)
+
+	// Per-phase voltages: SDM630 addrs 0/2/4, Sungrow addrs 5740/5741/5742
+	writeIfNotInSet(0, l1Voltage)
+	writeIfNotInSet(2, l2Voltage)
+	writeIfNotInSet(4, l3Voltage)
+	writeIfNotInSet(5740, l1Voltage)
+	writeIfNotInSet(5741, l2Voltage)
+	writeIfNotInSet(5742, l3Voltage)
+
+	// Frequency: SDM630 addr 70
+	writeIfNotInSet(70, 50.0)
 }
 
 // updateMeterEnergy updates energy registers for direct mode
 func updateMeterEnergy(meterSim *Simulator, totalPower, energyDeltaKWh, energyDeltaWh float64) {
 	if totalPower > 0 {
-		// Importing - add to import energy (register 72)
-		if importDef := modbus.RegisterLookup[72]; importDef != nil {
-			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
-			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaKWh)
-		}
-		if importDef := modbus.RegisterLookup[13037]; importDef != nil {
-			currentImport, _ := meterSim.Server.ReadRegisterValue(importDef)
-			meterSim.Server.WriteRegisterValue(importDef, currentImport+energyDeltaWh)
-		}
+		accumulateMeterEnergy(meterSim, energyDeltaKWh, 0)
 	} else if totalPower < 0 {
-		// Exporting - add to export energy (register 74)
-		if exportDef := modbus.RegisterLookup[74]; exportDef != nil {
-			currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
-			meterSim.Server.WriteRegisterValue(exportDef, currentExport+energyDeltaKWh)
-		}
-		if exportDef := modbus.RegisterLookup[13046]; exportDef != nil {
-			currentExport, _ := meterSim.Server.ReadRegisterValue(exportDef)
-			meterSim.Server.WriteRegisterValue(exportDef, currentExport+energyDeltaWh)
-		}
+		accumulateMeterEnergy(meterSim, 0, energyDeltaKWh)
 	}
 }
 

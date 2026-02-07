@@ -37,35 +37,35 @@ func getModbusRuntimeSerial(sim *Simulator) string {
 		return sim.Serial
 	}
 
-	if sim.Category == "energy_meter" {
-		if def := modbus.RegisterLookup[64512]; def != nil {
-			if val, err := sim.Server.ReadRegisterValue(def); err == nil {
-				return strconv.FormatUint(uint64(math.Round(val)), 10)
+	// Use semantic lookup for serial number
+	if def := getSemanticDef(sim, "serial_number"); def != nil {
+		if def.DataType == modbus.STR {
+			// String serial: read N registers and decode as ASCII
+			regs := sim.Server.GetHoldingRegisters(def.Address, def.Words)
+			if len(regs) == 0 {
+				return sim.Serial
 			}
+			s := modbus.DecodeString(regs)
+			if s == "" {
+				return sim.Serial
+			}
+			return s
+		}
+		// Numeric serial (e.g. SDM630 U32)
+		if val, err := sim.Server.ReadRegisterValue(def); err == nil {
+			return strconv.FormatUint(uint64(math.Round(val)), 10)
 		}
 		return sim.Serial
 	}
 
-	regs := sim.Server.GetHoldingRegisters(4990, 10)
+	// Fallback: try Sungrow-style address 4989 (STR, 10 regs)
+	regs := sim.Server.GetHoldingRegisters(4989, 10)
 	if len(regs) == 0 {
 		return sim.Serial
 	}
-
-	bytes := make([]byte, 0, len(regs)*2)
-	for _, reg := range regs {
-		bytes = append(bytes, byte(reg>>8), byte(reg&0xFF))
-	}
-
-	for i, b := range bytes {
-		if b == 0 {
-			bytes = bytes[:i]
-			break
-		}
-	}
-
-	if len(bytes) == 0 {
+	s := modbus.DecodeString(regs)
+	if s == "" {
 		return sim.Serial
 	}
-
-	return string(bytes)
+	return s
 }
