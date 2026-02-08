@@ -1507,7 +1507,8 @@ func (a *App) SetSiteLoadScenario(id int, scenario string) (map[string]interface
 	site.LoadScenario = scenario
 
 	// If switching to a scenario, initialize phase loads to current time slot
-	if scenario != "" {
+	// For "static", keep current phase load values
+	if scenario != "" && scenario != "static" {
 		if ls, ok := LoadScenarios[scenario]; ok {
 			hour := site.SimulatedTime.Hour()
 			if site.SimulatedTime.IsZero() {

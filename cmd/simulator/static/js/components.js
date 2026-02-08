@@ -1538,17 +1538,30 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('energyMeterView', () => ({
         selectedSiteId: null,
         changingSite: false,
+        p1Mode: 'direct',
 
         init() {
             // Initialize selected site from current meter assignment
             this.updateSelectedSite();
+            this.updateP1Mode();
 
             // Watch for site changes
             this.$watch('$store.site.sites', () => {
                 if (!this.changingSite) {
                     this.updateSelectedSite();
                 }
+                this.updateP1Mode();
             });
+        },
+
+        updateP1Mode() {
+            if (!this.selectedSiteId) {
+                this.p1Mode = 'direct';
+                return;
+            }
+            const sites = Alpine.store('site').sites || [];
+            const site = sites.find(s => s.id === this.selectedSiteId);
+            this.p1Mode = site?.p1_mode || 'direct';
         },
 
         updateSelectedSite() {
@@ -1651,6 +1664,7 @@ document.addEventListener('alpine:init', () => {
             try {
                 await siteApi.setP1Mode(this.selectedSiteId, mode);
                 await Alpine.store('site').loadSites();
+                this.updateP1Mode();
             } catch (e) {
                 console.error('Set P1 mode error:', e);
                 await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);
@@ -2714,6 +2728,10 @@ document.addEventListener('alpine:init', () => {
             return Alpine.store('site').data?.sim_running || false;
         },
 
+        shouldDisableSliders() {
+            return this.isSimulationRunning() && this.activeScenario !== 'static';
+        },
+
         getScenarioName() {
             if (!this.activeScenario) return 'Profile';
             const s = this.scenarios.find(s => s.key === this.activeScenario);
@@ -2728,6 +2746,7 @@ document.addEventListener('alpine:init', () => {
 
         getScenarioIcon(key) {
             const icons = {
+                static: '📌',
                 gaming_family: '🎮',
                 old_couple: '👴',
                 weed_factory: '🌿',
@@ -2772,13 +2791,13 @@ document.addEventListener('alpine:init', () => {
         },
 
         toggleLinked() {
-            if (this.isSimulationRunning()) return;
+            if (this.shouldDisableSliders()) return;
             this.loadLinked = !this.loadLinked;
             this.sendPhaseLoads();
         },
 
         onPhaseSliderInput(phase, value) {
-            if (this.isSimulationRunning()) return;
+            if (this.shouldDisableSliders()) return;
             const newValue = parseFloat(value);
 
             if (this.loadLinked) {

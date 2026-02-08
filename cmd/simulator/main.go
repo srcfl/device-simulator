@@ -3330,7 +3330,8 @@ func handleSiteLoadScenario(w http.ResponseWriter, r *http.Request, site *Site) 
 	site.LoadScenario = req.Scenario
 
 	// If switching to a scenario, initialize phase loads to current time slot
-	if req.Scenario != "" {
+	// For "static", keep current phase load values
+	if req.Scenario != "" && req.Scenario != "static" {
 		if ls, ok := LoadScenarios[req.Scenario]; ok {
 			hour := site.SimulatedTime.Hour()
 			if site.SimulatedTime.IsZero() {
@@ -4159,8 +4160,8 @@ func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
 			copy(simIDs, site.SimulatorIDs)
 			meterID := site.MeterID
 
-			// Update load based on scenario if one is active
-			if loadScenario != "" {
+			// Update load based on scenario if one is active (skip for static)
+			if loadScenario != "" && loadScenario != "static" {
 				if ls, ok := LoadScenarios[loadScenario]; ok {
 					loads := ls.GetLoadForTime(simTime.Hour())
 					site.SitePhaseLoads = loads

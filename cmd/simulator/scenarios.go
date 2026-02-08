@@ -32,6 +32,13 @@ func (p PhaseLoads) Total() float64 {
 
 // LoadScenarios contains predefined load scenarios
 var LoadScenarios = map[string]*LoadScenario{
+	"static": {
+		Key:         "static",
+		Name:        "Static",
+		Description: "Fixed load - stays constant during simulation",
+		PeakLoad:    0,
+		TimeSlots:   []LoadScenarioSlot{},
+	},
 	"gaming_family": {
 		Key:         "gaming_family",
 		Name:        "Gaming Family",
@@ -128,7 +135,7 @@ var LoadScenarios = map[string]*LoadScenario{
 func GetLoadScenariosSlice() []*LoadScenario {
 	scenarios := make([]*LoadScenario, 0, len(LoadScenarios))
 	// Ordered list
-	order := []string{"gaming_family", "old_couple", "weed_factory", "work_from_home", "night_owl"}
+	order := []string{"static", "gaming_family", "old_couple", "weed_factory", "work_from_home", "night_owl"}
 	for _, key := range order {
 		if s, ok := LoadScenarios[key]; ok {
 			scenarios = append(scenarios, s)
