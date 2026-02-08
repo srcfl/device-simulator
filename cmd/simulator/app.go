@@ -747,6 +747,13 @@ func (a *App) GetSites() []map[string]interface{} {
 
 // CreateSite creates a new site
 func (a *App) CreateSite(name string, meterId int, simulatorIds []int, baseLoadW float64) (map[string]interface{}, error) {
+	sitesMu.RLock()
+	siteCount := len(sites)
+	sitesMu.RUnlock()
+	if siteCount >= 5 {
+		return nil, fmt.Errorf("maximum of 5 sites allowed")
+	}
+
 	site, err := createSite(name, meterId, simulatorIds, baseLoadW)
 	if err != nil {
 		return nil, err

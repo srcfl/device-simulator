@@ -969,6 +969,7 @@ document.addEventListener('alpine:init', () => {
 
         getLoadScenarioIcon(key) {
             const icons = {
+                static: '📌',
                 gaming_family: '🎮',
                 old_couple: '👴',
                 weed_factory: '🌿',
@@ -1441,8 +1442,12 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('siteTabs', () => ({
         async createNewSite() {
             try {
-                // Generate name: "Site 2", "Site 3", etc.
                 const sites = Alpine.store('site').sites;
+                if (sites.length >= 5) {
+                    await Alpine.store('confirm').alert('Limit Reached', 'Maximum of 5 sites allowed.');
+                    return;
+                }
+                // Generate name: "Site 2", "Site 3", etc.
                 const name = `Site ${sites.length + 1}`;
 
                 // Create an empty site (no meter, no simulators)

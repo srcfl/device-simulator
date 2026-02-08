@@ -64,9 +64,10 @@
                             title="Delete site">×</button>
                 </div>
             </template>
-            <button class="site-header-tab-add" @click="createNewSite()" title="Add new site">+</button>
+            <button class="site-header-tab-add" x-show="$store.site.sites.length < 5" @click="createNewSite()" title="Add new site">+</button>
         </div>
         <div class="site-header-actions">
+            <img src="/static/icons/Sourceful-Simulator-Green.svg" alt="Sourceful" class="site-header-logo" style="height: 18px; margin-right: 4px;" />
             <button class="update-check-btn"
                     @click="$store.app.showUpdateModal = true; $store.app.checkForUpdate()"
                     :class="{ 'checking': $store.app.updateChecking, 'has-update': $store.app.updateAvailable }"
@@ -619,7 +620,7 @@
                                 <div class="member-control-row load-profile-row">
                                     <span class="control-label">Profile</span>
                                     <select class="site-load-select member-load-select"
-                                            x-model="homeLoadScenario"
+                                            x-effect="let v = homeLoadScenario, n = loadScenarios.length; $nextTick(() => $el.value = v)"
                                             @change="setHomeLoadScenario($event.target.value)">
                                         <template x-for="s in loadScenarios" :key="s.key">
                                             <option :value="s.key" x-text="`${getLoadScenarioIcon(s.key)} ${s.name}`"></option>

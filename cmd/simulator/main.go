@@ -2325,6 +2325,14 @@ func handleSitesCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sitesMu.RLock()
+	siteCount := len(sites)
+	sitesMu.RUnlock()
+	if siteCount >= 5 {
+		http.Error(w, "Maximum of 5 sites allowed", http.StatusBadRequest)
+		return
+	}
+
 	if req.Name == "" {
 		req.Name = fmt.Sprintf("Site %d", nextSiteID)
 	}
