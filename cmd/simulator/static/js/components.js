@@ -1664,7 +1664,8 @@ document.addEventListener('alpine:init', () => {
             if (!this.selectedSiteId) return;
             try {
                 await siteApi.setP1Mode(this.selectedSiteId, mode);
-                await Alpine.store('site').loadSites();
+                const siteStore = Alpine.store('site');
+                await Promise.all([siteStore.loadSites(), siteStore.loadSiteData()]);
                 this.updateP1Mode();
             } catch (e) {
                 console.error('Set P1 mode error:', e);

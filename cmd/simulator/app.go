@@ -730,6 +730,11 @@ func (a *App) GetSites() []map[string]interface{} {
 			"sim_running":     site.SimRunning,
 			"scenario":        site.Scenario,
 		}
+		p1Mode := P1ModeDirect
+		if site.P1Buffer != nil {
+			p1Mode = site.P1Buffer.Mode
+		}
+		entry["p1_mode"] = string(p1Mode)
 		site.mu.RUnlock()
 		list = append(list, entry)
 	}

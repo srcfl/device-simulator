@@ -1983,7 +1983,7 @@ document.addEventListener('alpine:init', () => {
             if (!this.selectedId) return;
             try {
                 await siteApi.setP1Mode(this.selectedId, mode);
-                await this.loadSiteData();
+                await Promise.all([this.loadSiteData(), this.loadSites()]);
             } catch (e) {
                 console.error('Set P1 mode error:', e);
                 await Alpine.store('confirm').alert('Error', 'Error: ' + e.message);

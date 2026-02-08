@@ -57,7 +57,7 @@ body {
 
 .btn-primary {
     background: var(--color-primary);
-    color: #fff;
+    color: var(--color-primary-text);
     border: none;
 }
 
