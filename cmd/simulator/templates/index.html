@@ -1115,20 +1115,6 @@
                             <label>Site</label>
                             <div class="value" x-text="getSiteName() || 'Not assigned'"></div>
                         </div>
-                        <div class="config-item" x-show="selectedSiteId">
-                            <label>P1 Update</label>
-                            <div class="p1-mode-toggle">
-                                <button class="p1-mode-btn"
-                                        :class="{ 'active': p1Mode === 'direct' }"
-                                        @click="setP1Mode('direct')">Direct</button>
-                                <button class="p1-mode-btn"
-                                        :class="{ 'active': p1Mode === '1s' }"
-                                        @click="setP1Mode('1s')">1s</button>
-                                <button class="p1-mode-btn"
-                                        :class="{ 'active': p1Mode === '10s' }"
-                                        @click="setP1Mode('10s')">10s</button>
-                            </div>
-                        </div>
                         <div class="config-item" style="margin-left: auto;">
                             <label>Host IP</label>
                             <div style="display: flex; align-items: center; gap: 6px;">
@@ -1152,6 +1138,22 @@
                                 <span class="toggle-switch-status"
                                       :class="$store.simulator.data?.running ? 'running' : 'stopped'"
                                       x-text="$store.simulator.data?.running ? 'Online' : 'Offline'"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="config-row" x-show="selectedSiteId" style="margin-top: 4px;">
+                        <div class="config-item">
+                            <label>P1 Update</label>
+                            <div class="p1-mode-toggle">
+                                <button class="p1-mode-btn"
+                                        :class="{ 'active': p1Mode === 'direct' }"
+                                        @click="setP1Mode('direct')">Direct</button>
+                                <button class="p1-mode-btn"
+                                        :class="{ 'active': p1Mode === '1s' }"
+                                        @click="setP1Mode('1s')">1s</button>
+                                <button class="p1-mode-btn"
+                                        :class="{ 'active': p1Mode === '10s' }"
+                                        @click="setP1Mode('10s')">10s</button>
                             </div>
                         </div>
                     </div>

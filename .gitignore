@@ -172,5 +172,8 @@ cython_debug/
 .DS_Store
 
 .git1
+# Runtime state
+data/state.json
+
 # Go binaries
 /simulator

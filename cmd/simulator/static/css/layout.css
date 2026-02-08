@@ -207,16 +207,6 @@
     color: var(--color-success);
 }
 
-.update-check-btn.has-update::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    width: 6px;
-    height: 6px;
-    background: var(--color-success);
-    border-radius: 50%;
-}
 
 .update-check-btn .spin {
     animation: spin 1s linear infinite;
