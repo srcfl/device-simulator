@@ -134,6 +134,7 @@ export function ocppState() {
 export function ocppDebug() {
     return {
         copySuccess: false,
+        debugOpen: false,
 
         get debug() {
             return Alpine.store('simulator').debugMeterValues || {};

@@ -706,6 +706,7 @@ document.addEventListener('alpine:init', () => {
     // OCPP Debug
     Alpine.data('ocppDebug', () => ({
         copySuccess: false,
+        debugOpen: false,
 
         get debug() {
             return Alpine.store('simulator').debugMeterValues || {};

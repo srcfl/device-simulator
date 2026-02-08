@@ -1631,11 +1631,12 @@
                 <!-- Debug Section (OCPP) -->
                 <template x-if="$store.app.selectedProtocol === 'ocpp'">
                     <div class="section" x-data="ocppDebug()">
-                        <div class="section-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="section-title" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;" @click="debugOpen = !debugOpen; if (debugOpen) refresh()">
+                            <svg :style="{ transform: debugOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l10 7-10 7z"/></svg>
                             <span>MeterValues Debug</span>
-                            <button class="btn btn-action" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;" @click="refresh()">Refresh</button>
+                            <button x-show="debugOpen" class="btn btn-action" style="padding: 0.2rem 0.5rem; font-size: 0.7rem;" @click.stop="refresh()">Refresh</button>
                         </div>
-                        <div class="debug-panel">
+                        <div class="debug-panel" x-show="debugOpen">
                             <div class="debug-grid">
                                 <div class="debug-card">
                                     <div class="debug-card-title">3-Phase Voltages</div>

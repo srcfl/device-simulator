@@ -50,7 +50,7 @@
       "category": "energy_meter",
       "slave_id": 1,
       "port": 5100,
-      "running": false,
+      "running": true,
       "site_id": 1,
       "device_on": true,
       "battery_capacity_kwh": 10,
@@ -332,7 +332,7 @@
         "l3": false
       },
       "bound_meter": true,
-      "simulated_time": "2026-02-08T10:33:07Z",
+      "simulated_time": "2026-02-08T10:41:47Z",
       "time_multiplier": 1,
       "sim_running": false,
       "scenario": "sunny",

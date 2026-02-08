@@ -129,10 +129,12 @@ func NewServer(id int, port int, vendor, model string, numConnectors int, maxPow
 		transactions:     make(map[int]*Transaction),
 		chargingProfiles: make(map[string]*storedProfile),
 		configuration: map[string]string{
-			"HeartbeatInterval":          "60",
-			"MeterValueSampleInterval":   "30",
-			"NumberOfConnectors":         fmt.Sprintf("%d", numConnectors),
-			"SupportedFeatureProfiles":   "Core,SmartCharging,RemoteTrigger,LocalAuthListManagement",
+			"HeartbeatInterval":                        "60",
+			"MeterValueSampleInterval":                 "30",
+			"NumberOfConnectors":                       fmt.Sprintf("%d", numConnectors),
+			"SupportedFeatureProfiles":                 "Core,SmartCharging,RemoteTrigger,LocalAuthListManagement",
+			"ConnectorSwitch3to1PhaseSupported":        "false",
+			"ChargingScheduleAllowedChargingRateUnit":  "Current,Power",
 		},
 		logs:            make([]device.LogEntry, 0),
 		maxLogs:         500,
@@ -1753,6 +1755,13 @@ func (s *Server) GetState() map[string]interface{} {
 
 // SetValue sets a charger state value
 func (s *Server) SetValue(key string, value interface{}) error {
+	s.mu.RLock()
+	running := s.running
+	s.mu.RUnlock()
+	if !running {
+		return fmt.Errorf("emulator not started")
+	}
+
 	switch key {
 	case "evConnected":
 		// Simulate EV connection on connector 1
