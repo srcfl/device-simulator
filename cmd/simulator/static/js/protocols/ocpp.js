@@ -16,7 +16,7 @@ export function ocppControls() {
                     if (!this.wasCharging) {
                         this.powerSliderValue = 0;
                     } else {
-                        this.powerSliderValue = state.targetPowerW || this.maxPower;
+                        this.powerSliderValue = state.targetPowerW ?? this.maxPower;
                     }
                 }
             });

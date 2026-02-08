@@ -27,6 +27,8 @@ const (
 	ActionReset                  = "Reset"
 	ActionSetChargingProfile     = "SetChargingProfile"
 	ActionClearChargingProfile   = "ClearChargingProfile"
+	ActionGetLocalListVersion    = "GetLocalListVersion"
+	ActionSendLocalList          = "SendLocalList"
 )
 
 // Connector Status values (OCPP 1.6)
@@ -260,6 +262,32 @@ type ClearChargingProfileRequest struct {
 
 // ClearChargingProfileResponse represents a ClearChargingProfile.conf
 type ClearChargingProfileResponse struct {
+	Status string `json:"status"`
+}
+
+// GetLocalListVersionRequest represents a GetLocalListVersion.req from central system
+type GetLocalListVersionRequest struct{}
+
+// GetLocalListVersionResponse represents a GetLocalListVersion.conf
+type GetLocalListVersionResponse struct {
+	ListVersion int `json:"listVersion"`
+}
+
+// SendLocalListRequest represents a SendLocalList.req from central system
+type SendLocalListRequest struct {
+	ListVersion            int                 `json:"listVersion"`
+	LocalAuthorizationList []AuthorizationData `json:"localAuthorizationList,omitempty"`
+	UpdateType             string              `json:"updateType"`
+}
+
+// AuthorizationData represents an authorization entry in the local list
+type AuthorizationData struct {
+	IdTag     string    `json:"idTag"`
+	IdTagInfo IdTagInfo `json:"idTagInfo,omitempty"`
+}
+
+// SendLocalListResponse represents a SendLocalList.conf
+type SendLocalListResponse struct {
 	Status string `json:"status"`
 }
 

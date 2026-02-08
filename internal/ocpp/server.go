@@ -65,6 +65,7 @@ type Server struct {
 	wsConn           *websocket.Conn
 	messageIdSeq     int64
 	pendingRequests  map[string]chan json.RawMessage
+	pendingActions   map[string]string // messageId -> action name for logging
 	stopChan         chan struct{}
 
 	// Client mode fields
@@ -81,7 +82,8 @@ type Server struct {
 	currentL3 float64
 
 	// Simulation control
-	targetPowerW float64 // Target charging power in watts
+	targetPowerW       float64 // Target charging power in watts
+	hasChargingProfile bool    // Whether a charging profile is active
 	evConnected  bool    // Whether an EV is plugged in
 	nextTxId     int     // Counter for local transaction IDs
 }
@@ -111,13 +113,15 @@ func NewServer(id int, port int, vendor, model string, numConnectors int, maxPow
 		transactions:     make(map[int]*Transaction),
 		chargingProfiles: make(map[int]*ChargingProfile),
 		configuration: map[string]string{
-			"HeartbeatInterval":        "60",
-			"MeterValueSampleInterval": "30",
-			"NumberOfConnectors":       fmt.Sprintf("%d", numConnectors),
+			"HeartbeatInterval":          "60",
+			"MeterValueSampleInterval":   "30",
+			"NumberOfConnectors":         fmt.Sprintf("%d", numConnectors),
+			"SupportedFeatureProfiles":   "Core,SmartCharging",
 		},
 		logs:            make([]device.LogEntry, 0),
 		maxLogs:         500,
 		pendingRequests: make(map[string]chan json.RawMessage),
+		pendingActions:  make(map[string]string),
 		stopChan:        make(chan struct{}),
 		reconnectDelay:  5 * time.Second,
 		voltageL1:       230.0,
@@ -473,10 +477,20 @@ func (s *Server) handleMessage(data []byte) {
 		return
 	}
 
+	// For responses (CallResult/CallError), look up the original action
+	logAction := action
+	if messageType == MessageTypeCallResult || messageType == MessageTypeCallError {
+		s.mu.RLock()
+		if a, ok := s.pendingActions[messageId]; ok {
+			logAction = a
+		}
+		s.mu.RUnlock()
+	}
+
 	s.addLog("receive", map[string]interface{}{
 		"type":    messageType,
 		"id":      messageId,
-		"action":  action,
+		"action":  logAction,
 		"payload": string(payload),
 	})
 
@@ -537,6 +551,15 @@ func (s *Server) handleCall(messageId, action string, payload json.RawMessage) {
 			response = s.handleReset(req)
 		}
 
+	case ActionGetLocalListVersion:
+		response = s.handleGetLocalListVersion()
+
+	case ActionSendLocalList:
+		var req SendLocalListRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleSendLocalList(req)
+		}
+
 	default:
 		log.Printf("[%s] Unknown action: %s", s.serialNumber, action)
 		s.sendError(messageId, "NotImplemented", "Action not implemented", nil)
@@ -555,6 +578,7 @@ func (s *Server) handleCallResult(messageId string, payload json.RawMessage) {
 	s.mu.Lock()
 	ch, ok := s.pendingRequests[messageId]
 	delete(s.pendingRequests, messageId)
+	delete(s.pendingActions, messageId)
 	s.mu.Unlock()
 
 	if ok {
@@ -568,6 +592,7 @@ func (s *Server) handleCallError(messageId string, payload json.RawMessage) {
 	s.mu.Lock()
 	ch, ok := s.pendingRequests[messageId]
 	delete(s.pendingRequests, messageId)
+	delete(s.pendingActions, messageId)
 	s.mu.Unlock()
 
 	if ok {
@@ -753,6 +778,17 @@ func (s *Server) handleReset(req ResetRequest) *ResetResponse {
 	return &ResetResponse{Status: "Accepted"}
 }
 
+func (s *Server) handleGetLocalListVersion() *GetLocalListVersionResponse {
+	log.Printf("[%s] GetLocalListVersion requested", s.serialNumber)
+	return &GetLocalListVersionResponse{ListVersion: 0}
+}
+
+func (s *Server) handleSendLocalList(req SendLocalListRequest) *SendLocalListResponse {
+	log.Printf("[%s] SendLocalList received: version=%d, updateType=%s, entries=%d",
+		s.serialNumber, req.ListVersion, req.UpdateType, len(req.LocalAuthorizationList))
+	return &SendLocalListResponse{Status: "Accepted"}
+}
+
 func (s *Server) applyChargingProfile(connectorId int, profile *ChargingProfile) {
 	if profile == nil {
 		return
@@ -771,6 +807,7 @@ func (s *Server) applyChargingProfile(connectorId int, profile *ChargingProfile)
 		powerW = 0
 	}
 	s.targetPowerW = powerW
+	s.hasChargingProfile = true
 }
 
 func (s *Server) clearChargingProfiles(req ClearChargingProfileRequest) bool {
@@ -800,6 +837,7 @@ func (s *Server) clearChargingProfiles(req ClearChargingProfileRequest) bool {
 
 	if cleared {
 		s.targetPowerW = 0
+		s.hasChargingProfile = false
 	}
 
 	return cleared
@@ -878,13 +916,59 @@ func (s *Server) sendBootNotification() {
 	}
 
 	var bootResp BootNotificationResponse
-	if err := json.Unmarshal(resp, &bootResp); err == nil {
-		log.Printf("[%s] BootNotification accepted: %s", s.serialNumber, bootResp.Status)
+	if err := json.Unmarshal(resp, &bootResp); err != nil {
+		log.Printf("[%s] Failed to parse BootNotification response: %v", s.serialNumber, err)
+		return
+	}
+
+	log.Printf("[%s] BootNotification status: %s", s.serialNumber, bootResp.Status)
+
+	if bootResp.Status != "Accepted" {
+		return
+	}
+
+	if bootResp.Interval > 0 {
+		s.mu.Lock()
+		s.configuration["HeartbeatInterval"] = fmt.Sprintf("%d", bootResp.Interval)
+		s.mu.Unlock()
+	}
+
+	// Send StatusNotification for connector 0 (charge point itself)
+	s.sendStatusNotification(0, StatusAvailable)
+
+	// Send StatusNotification for each physical connector
+	s.mu.RLock()
+	connectorIds := make([]int, 0)
+	for id := range s.connectors {
+		if id > 0 {
+			connectorIds = append(connectorIds, id)
+		}
+	}
+	s.mu.RUnlock()
+
+	sort.Ints(connectorIds)
+	for _, id := range connectorIds {
+		s.mu.RLock()
+		status := s.connectors[id].Status
+		s.mu.RUnlock()
+		s.sendStatusNotification(id, status)
 	}
 }
 
+func (s *Server) getHeartbeatInterval() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if val, ok := s.configuration["HeartbeatInterval"]; ok {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 60
+}
+
 func (s *Server) heartbeatLoop() {
-	ticker := time.NewTicker(60 * time.Second)
+	interval := s.getHeartbeatInterval()
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -893,6 +977,12 @@ func (s *Server) heartbeatLoop() {
 			return
 		case <-ticker.C:
 			s.sendRequest(ActionHeartbeat, HeartbeatRequest{})
+			// Check if interval changed (e.g. from BootNotification response)
+			newInterval := s.getHeartbeatInterval()
+			if newInterval != interval {
+				interval = newInterval
+				ticker.Reset(time.Duration(interval) * time.Second)
+			}
 		}
 	}
 }
@@ -982,6 +1072,7 @@ func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessag
 	messageId := fmt.Sprintf("%d", atomic.AddInt64(&s.messageIdSeq, 1))
 	responseChan := make(chan json.RawMessage, 1)
 	s.pendingRequests[messageId] = responseChan
+	s.pendingActions[messageId] = action
 	s.mu.Unlock()
 
 	msg, err := CreateCallMessage(messageId, action, payload)
@@ -1003,6 +1094,7 @@ func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessag
 	if err != nil {
 		s.mu.Lock()
 		delete(s.pendingRequests, messageId)
+		delete(s.pendingActions, messageId)
 		s.mu.Unlock()
 		return nil, err
 	}
@@ -1013,6 +1105,7 @@ func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessag
 	case <-time.After(30 * time.Second):
 		s.mu.Lock()
 		delete(s.pendingRequests, messageId)
+		delete(s.pendingActions, messageId)
 		s.mu.Unlock()
 		return nil, fmt.Errorf("timeout waiting for response")
 	}
@@ -1217,7 +1310,31 @@ func (s *Server) SetValue(key string, value interface{}) error {
 					conn.Status = StatusPreparing
 					s.mu.Unlock()
 					log.Printf("[%s] evConnected: changed status to Preparing", s.serialNumber)
-					go s.sendStatusNotification(1, StatusPreparing)
+					go func() {
+						s.sendStatusNotification(1, StatusPreparing)
+						time.Sleep(2 * time.Second)
+						// Auto-start transaction (simulates local authorization)
+						s.mu.Lock()
+						c := s.connectors[1]
+						if c != nil && c.Status == StatusPreparing {
+							s.nextTxId++
+							txId := s.nextTxId
+							s.transactions[txId] = &Transaction{
+								ID:          txId,
+								ConnectorID: 1,
+								IdTag:       "LOCAL",
+								StartTime:   time.Now(),
+								MeterStart:  int(c.EnergyWh),
+								MeterNow:    int(c.EnergyWh),
+							}
+							c.Status = StatusCharging
+							s.mu.Unlock()
+							s.sendStatusNotification(1, StatusCharging)
+							s.sendStartTransaction(1, "LOCAL", int(c.EnergyWh))
+						} else {
+							s.mu.Unlock()
+						}
+					}()
 					return nil
 				}
 				log.Printf("[%s] evConnected: status already %s, not changing", s.serialNumber, conn.Status)
@@ -1547,7 +1664,7 @@ func (s *Server) GenerateValues(simTime time.Time) {
 		if conn.Status == StatusCharging {
 			// Use target power if set, otherwise max power
 			powerW := s.targetPowerW
-			if powerW <= 0 {
+			if powerW <= 0 && !s.hasChargingProfile {
 				powerW = s.maxPowerKW * 1000
 			}
 			// Cap at max power
