@@ -57,15 +57,15 @@ jobs:
             FIRST_LINE=$(echo "$COMMIT_MSG" | head -n 1)
 
             # Check for release prefixes
-            if [[ "$FIRST_LINE" =~ ^patch:\ (.+)$ ]]; then
+            if [[ "$FIRST_LINE" =~ ^patch:\ ?(.+)$ ]]; then
               echo "should_release=true" >> $GITHUB_OUTPUT
               echo "release_type=patch" >> $GITHUB_OUTPUT
               echo "release_title=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-            elif [[ "$FIRST_LINE" =~ ^minor:\ (.+)$ ]]; then
+            elif [[ "$FIRST_LINE" =~ ^minor:\ ?(.+)$ ]]; then
               echo "should_release=true" >> $GITHUB_OUTPUT
               echo "release_type=minor" >> $GITHUB_OUTPUT
               echo "release_title=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-            elif [[ "$FIRST_LINE" =~ ^major:\ (.+)$ ]]; then
+            elif [[ "$FIRST_LINE" =~ ^major:\ ?(.+)$ ]]; then
               echo "should_release=true" >> $GITHUB_OUTPUT
               echo "release_type=major" >> $GITHUB_OUTPUT
               echo "release_title=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
