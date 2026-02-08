@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -16,6 +17,23 @@ import (
 
 	"github.com/srcfl/device-simulator/internal/device"
 )
+
+// storedProfile wraps a ChargingProfile with its assigned connector ID
+type storedProfile struct {
+	ConnectorID int
+	Profile     ChargingProfile
+}
+
+// profileKey builds a composite key for the profile map: "connectorId:purpose:stackLevel"
+func profileKey(connectorId int, purpose string, stackLevel int) string {
+	return fmt.Sprintf("%d:%s:%d", connectorId, purpose, stackLevel)
+}
+
+// readonlyConfigKeys defines OCPP configuration keys that cannot be changed via ChangeConfiguration
+var readonlyConfigKeys = map[string]bool{
+	"SupportedFeatureProfiles": true,
+	"NumberOfConnectors":       true,
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -56,7 +74,7 @@ type Server struct {
 	maxPowerKW       float64
 	connectors       map[int]*Connector
 	transactions     map[int]*Transaction
-	chargingProfiles map[int]*ChargingProfile
+	chargingProfiles map[string]*storedProfile
 	configuration    map[string]string
 	logs             []device.LogEntry
 	maxLogs          int
@@ -82,8 +100,6 @@ type Server struct {
 	currentL3 float64
 
 	// Simulation control
-	targetPowerW       float64 // Target charging power in watts
-	hasChargingProfile bool    // Whether a charging profile is active
 	evConnected  bool    // Whether an EV is plugged in
 	nextTxId     int     // Counter for local transaction IDs
 }
@@ -111,12 +127,12 @@ func NewServer(id int, port int, vendor, model string, numConnectors int, maxPow
 		maxPowerKW:       maxPowerKW,
 		connectors:       connectors,
 		transactions:     make(map[int]*Transaction),
-		chargingProfiles: make(map[int]*ChargingProfile),
+		chargingProfiles: make(map[string]*storedProfile),
 		configuration: map[string]string{
 			"HeartbeatInterval":          "60",
 			"MeterValueSampleInterval":   "30",
 			"NumberOfConnectors":         fmt.Sprintf("%d", numConnectors),
-			"SupportedFeatureProfiles":   "Core,SmartCharging",
+			"SupportedFeatureProfiles":   "Core,SmartCharging,RemoteTrigger,LocalAuthListManagement",
 		},
 		logs:            make([]device.LogEntry, 0),
 		maxLogs:         500,
@@ -560,6 +576,39 @@ func (s *Server) handleCall(messageId, action string, payload json.RawMessage) {
 			response = s.handleSendLocalList(req)
 		}
 
+	case ActionTriggerMessage:
+		var req TriggerMessageRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleTriggerMessage(messageId, req)
+		}
+
+	case ActionUnlockConnector:
+		var req UnlockConnectorRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleUnlockConnector(req)
+		}
+
+	case ActionDataTransfer:
+		var req DataTransferRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleDataTransfer(req)
+		}
+
+	case ActionChangeAvailability:
+		var req ChangeAvailabilityRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleChangeAvailability(req)
+		}
+
+	case ActionClearCache:
+		response = s.handleClearCache()
+
+	case ActionGetCompositeSchedule:
+		var req GetCompositeScheduleRequest
+		if err = json.Unmarshal(payload, &req); err == nil {
+			response = s.handleGetCompositeSchedule(req)
+		}
+
 	default:
 		log.Printf("[%s] Unknown action: %s", s.serialNumber, action)
 		s.sendError(messageId, "NotImplemented", "Action not implemented", nil)
@@ -688,7 +737,11 @@ func (s *Server) handleRemoteStopTransaction(req RemoteStopTransactionRequest) *
 }
 
 func (s *Server) handleSetChargingProfile(req SetChargingProfileRequest) *SetChargingProfileResponse {
-	if req.ConnectorId <= 0 {
+	if req.ConnectorId < 0 {
+		return &SetChargingProfileResponse{Status: "Rejected"}
+	}
+	// Connector 0 is only valid for ChargePointMaxProfile
+	if req.ConnectorId == 0 && req.CsChargingProfiles.ChargingProfilePurpose != "ChargePointMaxProfile" {
 		return &SetChargingProfileResponse{Status: "Rejected"}
 	}
 
@@ -718,7 +771,7 @@ func (s *Server) handleGetConfiguration(req GetConfigurationRequest) *GetConfigu
 		for key, value := range s.configuration {
 			response.ConfigurationKey = append(response.ConfigurationKey, ConfigurationKey{
 				Key:      key,
-				Readonly: false,
+				Readonly: readonlyConfigKeys[key],
 				Value:    value,
 			})
 		}
@@ -730,7 +783,7 @@ func (s *Server) handleGetConfiguration(req GetConfigurationRequest) *GetConfigu
 		if value, ok := s.configuration[key]; ok {
 			response.ConfigurationKey = append(response.ConfigurationKey, ConfigurationKey{
 				Key:      key,
-				Readonly: false,
+				Readonly: readonlyConfigKeys[key],
 				Value:    value,
 			})
 		} else {
@@ -742,19 +795,17 @@ func (s *Server) handleGetConfiguration(req GetConfigurationRequest) *GetConfigu
 }
 
 func (s *Server) handleChangeConfiguration(req ChangeConfigurationRequest) *ChangeConfigurationResponse {
+	// Reject changes to readonly keys
+	if readonlyConfigKeys[req.Key] {
+		log.Printf("[%s] Configuration change rejected (readonly): %s", s.serialNumber, req.Key)
+		return &ChangeConfigurationResponse{Status: "Rejected"}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check if key exists or is allowed
-	if _, ok := s.configuration[req.Key]; ok {
-		s.configuration[req.Key] = req.Value
-		log.Printf("[%s] Configuration changed: %s = %s", s.serialNumber, req.Key, req.Value)
-		return &ChangeConfigurationResponse{Status: "Accepted"}
-	}
-
-	// Allow setting new keys
 	s.configuration[req.Key] = req.Value
-	log.Printf("[%s] Configuration set: %s = %s", s.serialNumber, req.Key, req.Value)
+	log.Printf("[%s] Configuration changed: %s = %s", s.serialNumber, req.Key, req.Value)
 	return &ChangeConfigurationResponse{Status: "Accepted"}
 }
 
@@ -789,6 +840,252 @@ func (s *Server) handleSendLocalList(req SendLocalListRequest) *SendLocalListRes
 	return &SendLocalListResponse{Status: "Accepted"}
 }
 
+func (s *Server) handleTriggerMessage(messageId string, req TriggerMessageRequest) *TriggerMessageResponse {
+	log.Printf("[%s] TriggerMessage: %s", s.serialNumber, req.RequestedMessage)
+
+	switch req.RequestedMessage {
+	case "StatusNotification":
+		go func() {
+			s.mu.RLock()
+			connectorIds := make([]int, 0)
+			if req.ConnectorId != nil {
+				connectorIds = append(connectorIds, *req.ConnectorId)
+			} else {
+				for id := range s.connectors {
+					connectorIds = append(connectorIds, id)
+				}
+			}
+			statuses := make(map[int]string)
+			for _, id := range connectorIds {
+				if c, ok := s.connectors[id]; ok {
+					statuses[id] = c.Status
+				}
+			}
+			s.mu.RUnlock()
+
+			sort.Ints(connectorIds)
+			for _, id := range connectorIds {
+				if status, ok := statuses[id]; ok {
+					s.sendStatusNotification(id, status)
+				}
+			}
+		}()
+		return &TriggerMessageResponse{Status: "Accepted"}
+
+	case "MeterValues":
+		go s.sendMeterValuesForActiveTransactions()
+		return &TriggerMessageResponse{Status: "Accepted"}
+
+	case "Heartbeat":
+		go s.sendRequest(ActionHeartbeat, HeartbeatRequest{})
+		return &TriggerMessageResponse{Status: "Accepted"}
+
+	case "BootNotification":
+		go s.sendBootNotification()
+		return &TriggerMessageResponse{Status: "Accepted"}
+
+	default:
+		return &TriggerMessageResponse{Status: "NotImplemented"}
+	}
+}
+
+func (s *Server) handleUnlockConnector(req UnlockConnectorRequest) *UnlockConnectorResponse {
+	s.mu.Lock()
+	conn, ok := s.connectors[req.ConnectorId]
+	if !ok || req.ConnectorId <= 0 {
+		s.mu.Unlock()
+		return &UnlockConnectorResponse{Status: "NotSupported"}
+	}
+
+	// Stop active transaction on this connector if any
+	for txId, tx := range s.transactions {
+		if tx.ConnectorID == req.ConnectorId {
+			meterStop := int(conn.EnergyWh)
+			idTag := tx.IdTag
+			delete(s.transactions, txId)
+			conn.Status = StatusAvailable
+			conn.CurrentPower = 0
+			s.mu.Unlock()
+			go func() {
+				s.sendStopTransaction(txId, idTag, meterStop)
+				s.sendStatusNotification(req.ConnectorId, StatusAvailable)
+			}()
+			return &UnlockConnectorResponse{Status: "Unlocked"}
+		}
+	}
+
+	conn.Status = StatusAvailable
+	conn.CurrentPower = 0
+	s.mu.Unlock()
+	go s.sendStatusNotification(req.ConnectorId, StatusAvailable)
+	return &UnlockConnectorResponse{Status: "Unlocked"}
+}
+
+func (s *Server) handleDataTransfer(req DataTransferRequest) *DataTransferResponse {
+	log.Printf("[%s] DataTransfer from vendor=%s messageId=%s", s.serialNumber, req.VendorId, req.MessageId)
+	return &DataTransferResponse{Status: "Accepted"}
+}
+
+func (s *Server) handleChangeAvailability(req ChangeAvailabilityRequest) *ChangeAvailabilityResponse {
+	s.mu.Lock()
+
+	// ConnectorId 0 means entire charge point
+	if req.ConnectorId == 0 {
+		// Check if any connector has an active transaction
+		hasActiveTx := false
+		for _, tx := range s.transactions {
+			if tx.ConnectorID > 0 {
+				hasActiveTx = true
+				break
+			}
+		}
+
+		if req.Type == "Inoperative" {
+			// Set all idle connectors to Unavailable
+			for id, conn := range s.connectors {
+				if id == 0 {
+					continue
+				}
+				if conn.Status == StatusAvailable || conn.Status == StatusReserved {
+					conn.Status = StatusUnavailable
+					go s.sendStatusNotification(id, StatusUnavailable)
+				}
+			}
+			s.mu.Unlock()
+			if hasActiveTx {
+				return &ChangeAvailabilityResponse{Status: "Scheduled"}
+			}
+			return &ChangeAvailabilityResponse{Status: "Accepted"}
+		}
+
+		// Operative — set all non-charging connectors to Available
+		for id, conn := range s.connectors {
+			if id == 0 {
+				continue
+			}
+			if conn.Status == StatusUnavailable {
+				conn.Status = StatusAvailable
+				go s.sendStatusNotification(id, StatusAvailable)
+			}
+		}
+		s.mu.Unlock()
+		return &ChangeAvailabilityResponse{Status: "Accepted"}
+	}
+
+	// Specific connector
+	conn, ok := s.connectors[req.ConnectorId]
+	if !ok {
+		s.mu.Unlock()
+		return &ChangeAvailabilityResponse{Status: "Rejected"}
+	}
+
+	// Check if connector has an active transaction
+	hasActiveTx := false
+	for _, tx := range s.transactions {
+		if tx.ConnectorID == req.ConnectorId {
+			hasActiveTx = true
+			break
+		}
+	}
+
+	if req.Type == "Inoperative" {
+		if hasActiveTx {
+			s.mu.Unlock()
+			return &ChangeAvailabilityResponse{Status: "Scheduled"}
+		}
+		conn.Status = StatusUnavailable
+		conn.CurrentPower = 0
+		s.mu.Unlock()
+		go s.sendStatusNotification(req.ConnectorId, StatusUnavailable)
+		return &ChangeAvailabilityResponse{Status: "Accepted"}
+	}
+
+	// Operative
+	if conn.Status == StatusUnavailable {
+		conn.Status = StatusAvailable
+		s.mu.Unlock()
+		go s.sendStatusNotification(req.ConnectorId, StatusAvailable)
+		return &ChangeAvailabilityResponse{Status: "Accepted"}
+	}
+	s.mu.Unlock()
+	return &ChangeAvailabilityResponse{Status: "Accepted"}
+}
+
+func (s *Server) handleClearCache() *ClearCacheResponse {
+	log.Printf("[%s] ClearCache requested", s.serialNumber)
+	return &ClearCacheResponse{Status: "Accepted"}
+}
+
+func (s *Server) handleGetCompositeSchedule(req GetCompositeScheduleRequest) *GetCompositeScheduleResponse {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	connectorId := req.ConnectorId
+	if connectorId < 0 || (connectorId > 0 && s.connectors[connectorId] == nil) {
+		return &GetCompositeScheduleResponse{Status: "Rejected"}
+	}
+
+	now := time.Now()
+	unit := "W"
+	if req.ChargingRateUnit == "A" {
+		unit = "A"
+	}
+
+	// Sample the effective power at 1-second resolution, but emit periods only on changes.
+	// To keep it reasonable, sample at 60-second intervals for schedules > 600s.
+	step := 1
+	if req.Duration > 600 {
+		step = 60
+	}
+
+	var periods []ChargingSchedulePeriod
+	lastLimit := -1.0
+
+	for offset := 0; offset <= req.Duration; offset += step {
+		t := now.Add(time.Duration(offset) * time.Second)
+		powerW := s.computeEffectivePowerLocked(connectorId, t)
+
+		var limit float64
+		if unit == "A" {
+			avgV := s.averagePhaseVoltageLocked()
+			if avgV > 0 {
+				limit = math.Round(powerW/(3.0*avgV)*10) / 10 // round to 0.1A
+			}
+		} else {
+			limit = math.Round(powerW)
+		}
+
+		if limit != lastLimit {
+			phases := 3
+			periods = append(periods, ChargingSchedulePeriod{
+				StartPeriod:  int64(offset),
+				Limit:        limit,
+				NumberPhases: &phases,
+			})
+			lastLimit = limit
+		}
+	}
+
+	if len(periods) == 0 {
+		return &GetCompositeScheduleResponse{Status: "Rejected"}
+	}
+
+	dur := int64(req.Duration)
+	schedule := &ChargingSchedule{
+		Duration:               &dur,
+		StartSchedule:          FormatTimestamp(now),
+		ChargingRateUnit:       unit,
+		ChargingSchedulePeriod: periods,
+	}
+
+	return &GetCompositeScheduleResponse{
+		Status:           "Accepted",
+		ConnectorId:      &connectorId,
+		ScheduleStart:    FormatTimestamp(now),
+		ChargingSchedule: schedule,
+	}
+}
+
 func (s *Server) applyChargingProfile(connectorId int, profile *ChargingProfile) {
 	if profile == nil {
 		return
@@ -798,16 +1095,13 @@ func (s *Server) applyChargingProfile(connectorId int, profile *ChargingProfile)
 	defer s.mu.Unlock()
 
 	if s.chargingProfiles == nil {
-		s.chargingProfiles = make(map[int]*ChargingProfile)
+		s.chargingProfiles = make(map[string]*storedProfile)
 	}
-	s.chargingProfiles[connectorId] = profile
-
-	powerW := s.computePowerFromProfileLocked(profile)
-	if powerW < 0 {
-		powerW = 0
+	key := profileKey(connectorId, profile.ChargingProfilePurpose, profile.StackLevel)
+	s.chargingProfiles[key] = &storedProfile{
+		ConnectorID: connectorId,
+		Profile:     *profile,
 	}
-	s.targetPowerW = powerW
-	s.hasChargingProfile = true
 }
 
 func (s *Server) clearChargingProfiles(req ClearChargingProfileRequest) bool {
@@ -815,64 +1109,231 @@ func (s *Server) clearChargingProfiles(req ClearChargingProfileRequest) bool {
 	defer s.mu.Unlock()
 
 	cleared := false
-	for connectorId, profile := range s.chargingProfiles {
-		if profile == nil {
+	for key, sp := range s.chargingProfiles {
+		if sp == nil {
 			continue
 		}
-		if req.ConnectorId != nil && connectorId != *req.ConnectorId {
+		if req.ConnectorId != nil && sp.ConnectorID != *req.ConnectorId {
 			continue
 		}
-		if req.Id != nil && profile.ChargingProfileId != *req.Id {
+		if req.Id != nil && sp.Profile.ChargingProfileId != *req.Id {
 			continue
 		}
-		if req.ChargingProfilePurpose != "" && profile.ChargingProfilePurpose != req.ChargingProfilePurpose {
+		if req.ChargingProfilePurpose != "" && sp.Profile.ChargingProfilePurpose != req.ChargingProfilePurpose {
 			continue
 		}
-		if req.StackLevel != nil && profile.StackLevel != *req.StackLevel {
+		if req.StackLevel != nil && sp.Profile.StackLevel != *req.StackLevel {
 			continue
 		}
-		delete(s.chargingProfiles, connectorId)
+		delete(s.chargingProfiles, key)
 		cleared = true
-	}
-
-	if cleared {
-		s.targetPowerW = 0
-		s.hasChargingProfile = false
 	}
 
 	return cleared
 }
 
-func (s *Server) computePowerFromProfileLocked(profile *ChargingProfile) float64 {
+// evaluateProfileLimit determines the current power limit (in watts) from a single
+// charging profile evaluated at the given time. txStartTime is used for Relative profiles.
+// Returns (limitW, active) — active=false if the profile has no applicable period at this time.
+func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, txStartTime time.Time) (float64, bool) {
 	if profile == nil {
-		return 0
+		return 0, false
 	}
 
 	schedule := profile.ChargingSchedule
 	if len(schedule.ChargingSchedulePeriod) == 0 {
-		return 0
+		return 0, false
 	}
 
-	period := schedule.ChargingSchedulePeriod[0]
-	limit := period.Limit
-	if limit <= 0 {
-		return 0
+	var elapsed float64 // seconds since schedule reference point
+
+	switch profile.ChargingProfileKind {
+	case "Recurring":
+		startSchedule, err := time.Parse(time.RFC3339, schedule.StartSchedule)
+		if err != nil {
+			return 0, false
+		}
+		if profile.RecurrencyKind == "Daily" {
+			// Compute seconds since today's occurrence of startSchedule
+			todayStart := time.Date(now.Year(), now.Month(), now.Day(),
+				startSchedule.Hour(), startSchedule.Minute(), startSchedule.Second(), 0, now.Location())
+			if now.Before(todayStart) {
+				// Before today's occurrence — wrap to yesterday's
+				todayStart = todayStart.Add(-24 * time.Hour)
+			}
+			elapsed = now.Sub(todayStart).Seconds()
+		} else if profile.RecurrencyKind == "Weekly" {
+			// Compute seconds since this week's occurrence
+			dayDiff := (int(now.Weekday()) - int(startSchedule.Weekday()) + 7) % 7
+			weekStart := time.Date(now.Year(), now.Month(), now.Day()-dayDiff,
+				startSchedule.Hour(), startSchedule.Minute(), startSchedule.Second(), 0, now.Location())
+			if now.Before(weekStart) {
+				weekStart = weekStart.Add(-7 * 24 * time.Hour)
+			}
+			elapsed = now.Sub(weekStart).Seconds()
+		} else {
+			return 0, false
+		}
+
+	case "Relative":
+		elapsed = now.Sub(txStartTime).Seconds()
+		if elapsed < 0 {
+			return 0, false
+		}
+
+	case "Absolute":
+		startSchedule, err := time.Parse(time.RFC3339, schedule.StartSchedule)
+		if err != nil {
+			return 0, false
+		}
+		elapsed = now.Sub(startSchedule).Seconds()
+		if elapsed < 0 {
+			return 0, false
+		}
+
+	default:
+		// Unknown kind — try absolute-style with startSchedule
+		if schedule.StartSchedule != "" {
+			startSchedule, err := time.Parse(time.RFC3339, schedule.StartSchedule)
+			if err != nil {
+				return 0, false
+			}
+			elapsed = now.Sub(startSchedule).Seconds()
+			if elapsed < 0 {
+				return 0, false
+			}
+		} else {
+			elapsed = 0
+		}
 	}
 
+	// Check schedule duration
+	if schedule.Duration != nil && *schedule.Duration > 0 && elapsed >= float64(*schedule.Duration) {
+		return 0, false
+	}
+
+	// Find active period: last period where startPeriod <= elapsed
+	var activePeriod *ChargingSchedulePeriod
+	for i := range schedule.ChargingSchedulePeriod {
+		p := &schedule.ChargingSchedulePeriod[i]
+		if float64(p.StartPeriod) <= elapsed {
+			activePeriod = p
+		} else {
+			break // periods are ordered by startPeriod
+		}
+	}
+
+	if activePeriod == nil {
+		return 0, false
+	}
+
+	limit := activePeriod.Limit
+	// Convert to watts
 	unit := strings.ToUpper(strings.TrimSpace(schedule.ChargingRateUnit))
 	switch unit {
 	case "A", "AMPERE", "CURRENT":
 		phases := 3
-		if period.NumberPhases != nil && *period.NumberPhases > 0 {
-			phases = *period.NumberPhases
+		if activePeriod.NumberPhases != nil && *activePeriod.NumberPhases > 0 {
+			phases = *activePeriod.NumberPhases
 		}
 		avgVoltage := s.averagePhaseVoltageLocked()
-		return limit * float64(phases) * avgVoltage
+		return limit * float64(phases) * avgVoltage, true
 	case "W", "WATT", "POWER":
-		return limit
+		return limit, true
 	default:
-		return 0
+		return limit, true
 	}
+}
+
+// computeEffectivePowerLocked determines the current effective power limit for a connector.
+// Must be called with s.mu held (at least read lock).
+// Priority: TxProfile > TxDefaultProfile, capped by ChargePointMaxProfile on connector 0.
+func (s *Server) computeEffectivePowerLocked(connectorId int, now time.Time) float64 {
+	maxW := s.maxPowerKW * 1000
+
+	// Find the transaction start time for this connector (needed for Relative profiles)
+	var txStartTime time.Time
+	for _, tx := range s.transactions {
+		if tx.ConnectorID == connectorId {
+			txStartTime = tx.StartTime
+			break
+		}
+	}
+
+	// Find highest-stackLevel TxProfile for this connector
+	bestLimit := -1.0
+	bestStack := -1
+	for _, sp := range s.chargingProfiles {
+		if sp.ConnectorID != connectorId {
+			continue
+		}
+		if sp.Profile.ChargingProfilePurpose != "TxProfile" {
+			continue
+		}
+		if sp.Profile.StackLevel <= bestStack {
+			continue
+		}
+		if limitW, active := s.evaluateProfileLimit(&sp.Profile, now, txStartTime); active {
+			bestLimit = limitW
+			bestStack = sp.Profile.StackLevel
+		}
+	}
+
+	// If no active TxProfile, try TxDefaultProfile
+	if bestLimit < 0 {
+		bestStack = -1
+		for _, sp := range s.chargingProfiles {
+			if sp.ConnectorID != connectorId {
+				continue
+			}
+			if sp.Profile.ChargingProfilePurpose != "TxDefaultProfile" {
+				continue
+			}
+			if sp.Profile.StackLevel <= bestStack {
+				continue
+			}
+			if limitW, active := s.evaluateProfileLimit(&sp.Profile, now, txStartTime); active {
+				bestLimit = limitW
+				bestStack = sp.Profile.StackLevel
+			}
+		}
+	}
+
+	// No profiles active → use max power
+	effectiveW := maxW
+	if bestLimit >= 0 {
+		effectiveW = bestLimit
+	}
+
+	// Cap against ChargePointMaxProfile (connector 0)
+	capStack := -1
+	capLimit := -1.0
+	for _, sp := range s.chargingProfiles {
+		if sp.ConnectorID != 0 {
+			continue
+		}
+		if sp.Profile.ChargingProfilePurpose != "ChargePointMaxProfile" {
+			continue
+		}
+		if sp.Profile.StackLevel <= capStack {
+			continue
+		}
+		if limitW, active := s.evaluateProfileLimit(&sp.Profile, now, txStartTime); active {
+			capLimit = limitW
+			capStack = sp.Profile.StackLevel
+		}
+	}
+	if capLimit >= 0 {
+		effectiveW = math.Min(effectiveW, capLimit)
+	}
+
+	// Cap at hardware max
+	effectiveW = math.Min(effectiveW, maxW)
+	if effectiveW < 0 {
+		effectiveW = 0
+	}
+
+	return effectiveW
 }
 
 func (s *Server) averagePhaseVoltageLocked() float64 {
@@ -1280,7 +1741,7 @@ func (s *Server) GetState() map[string]interface{} {
 		"totalPower": totalPower,
 		// Control state
 		"evConnected":              s.evConnected,
-		"targetPowerW":             s.targetPowerW,
+		"effectivePowerW":          s.computeEffectivePowerLocked(1, time.Now()),
 		"hasActiveTransaction":     hasActiveTransaction,
 		"configuration":            configCopy,
 		"phaseMode":                phaseMode,
@@ -1421,17 +1882,22 @@ func (s *Server) SetValue(key string, value interface{}) error {
 		s.mu.Unlock()
 
 	case "chargingPower":
-		// Set target charging power
+		// Set target charging power via a synthetic TxProfile on connector 1
 		if power, ok := value.(float64); ok {
-			s.mu.Lock()
-			s.targetPowerW = power
-			// If charging, update connector power immediately
-			for _, tx := range s.transactions {
-				if conn, ok := s.connectors[tx.ConnectorID]; ok && conn.Status == StatusCharging {
-					conn.CurrentPower = power
-				}
+			syntheticProfile := &ChargingProfile{
+				ChargingProfileId:      -1, // synthetic
+				StackLevel:             99, // high priority
+				ChargingProfilePurpose: "TxProfile",
+				ChargingProfileKind:    "Absolute",
+				ChargingSchedule: ChargingSchedule{
+					ChargingRateUnit: "W",
+					StartSchedule:    FormatTimestamp(time.Now().Add(-1 * time.Minute)),
+					ChargingSchedulePeriod: []ChargingSchedulePeriod{
+						{StartPeriod: 0, Limit: power},
+					},
+				},
 			}
-			s.mu.Unlock()
+			s.applyChargingProfile(1, syntheticProfile)
 		}
 
 	case "suspendEVSE":
@@ -1655,28 +2121,39 @@ func (s *Server) SetSerialNumber(sn string) {
 // GenerateValues generates simulated values based on time
 func (s *Server) GenerateValues(simTime time.Time) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	// Collect status transitions to send after releasing the lock
+	type statusChange struct {
+		connectorId int
+		status      string
+	}
+	var statusChanges []statusChange
 
 	// Simulate power consumption for active transactions
 	var totalPower float64
 	for _, tx := range s.transactions {
 		conn := s.connectors[tx.ConnectorID]
-		if conn.Status == StatusCharging {
-			// Use target power if set, otherwise max power
-			powerW := s.targetPowerW
-			if powerW <= 0 && !s.hasChargingProfile {
-				powerW = s.maxPowerKW * 1000
+		if conn.Status == StatusCharging || conn.Status == StatusSuspendedEVSE {
+			powerW := s.computeEffectivePowerLocked(tx.ConnectorID, simTime)
+
+			if powerW <= 0 && conn.Status == StatusCharging {
+				// Power dropped to 0 — transition to SuspendedEVSE
+				conn.Status = StatusSuspendedEVSE
+				conn.CurrentPower = 0
+				statusChanges = append(statusChanges, statusChange{tx.ConnectorID, StatusSuspendedEVSE})
+			} else if powerW > 0 && conn.Status == StatusSuspendedEVSE {
+				// Power restored — transition back to Charging
+				conn.Status = StatusCharging
+				conn.CurrentPower = powerW
+				statusChanges = append(statusChanges, statusChange{tx.ConnectorID, StatusCharging})
+			} else {
+				conn.CurrentPower = powerW
 			}
-			// Cap at max power
-			maxW := s.maxPowerKW * 1000
-			if powerW > maxW {
-				powerW = maxW
-			}
-			conn.CurrentPower = powerW
-			totalPower += powerW
+
+			totalPower += conn.CurrentPower
 
 			// Add energy (Wh) for 1 second at this power
-			energyDelta := powerW / 3600.0
+			energyDelta := conn.CurrentPower / 3600.0
 			conn.EnergyWh += energyDelta
 			tx.MeterNow = int(conn.EnergyWh)
 		}
@@ -1707,6 +2184,13 @@ func (s *Server) GenerateValues(simTime time.Time) {
 		s.currentL1 = 0
 		s.currentL2 = 0
 		s.currentL3 = 0
+	}
+
+	s.mu.Unlock()
+
+	// Send status notifications outside the lock
+	for _, sc := range statusChanges {
+		s.sendStatusNotification(sc.connectorId, sc.status)
 	}
 }
 

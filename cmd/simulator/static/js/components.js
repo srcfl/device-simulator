@@ -605,7 +605,7 @@ document.addEventListener('alpine:init', () => {
                     if (!this.wasCharging) {
                         this.powerSliderValue = 0;
                     } else {
-                        this.powerSliderValue = state.targetPowerW ?? this.maxPower;
+                        this.powerSliderValue = state.effectivePowerW ?? this.maxPower;
                     }
                 }
             });

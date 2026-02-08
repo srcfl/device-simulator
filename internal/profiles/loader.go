@@ -661,7 +661,7 @@ var EmbeddedProfiles = map[string]*Profile{
 				"NumberOfConnectors":                      "1",
 				"ConnectorSwitch3to1PhaseSupported":       "false",
 				"ChargingScheduleAllowedChargingRateUnit": "Current",
-				"SupportedFeatureProfiles":                "Core,SmartCharging",
+				"SupportedFeatureProfiles":                "Core,SmartCharging,RemoteTrigger,LocalAuthListManagement",
 			},
 			DefaultStatus: "Available",
 		},

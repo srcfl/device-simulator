@@ -29,6 +29,12 @@ const (
 	ActionClearChargingProfile   = "ClearChargingProfile"
 	ActionGetLocalListVersion    = "GetLocalListVersion"
 	ActionSendLocalList          = "SendLocalList"
+	ActionTriggerMessage         = "TriggerMessage"
+	ActionUnlockConnector        = "UnlockConnector"
+	ActionDataTransfer           = "DataTransfer"
+	ActionChangeAvailability     = "ChangeAvailability"
+	ActionClearCache             = "ClearCache"
+	ActionGetCompositeSchedule   = "GetCompositeSchedule"
 )
 
 // Connector Status values (OCPP 1.6)
@@ -289,6 +295,74 @@ type AuthorizationData struct {
 // SendLocalListResponse represents a SendLocalList.conf
 type SendLocalListResponse struct {
 	Status string `json:"status"`
+}
+
+// TriggerMessageRequest represents a TriggerMessage.req from central system
+type TriggerMessageRequest struct {
+	RequestedMessage string `json:"requestedMessage"`
+	ConnectorId      *int   `json:"connectorId,omitempty"`
+}
+
+// TriggerMessageResponse represents a TriggerMessage.conf
+type TriggerMessageResponse struct {
+	Status string `json:"status"`
+}
+
+// UnlockConnectorRequest represents an UnlockConnector.req from central system
+type UnlockConnectorRequest struct {
+	ConnectorId int `json:"connectorId"`
+}
+
+// UnlockConnectorResponse represents an UnlockConnector.conf
+type UnlockConnectorResponse struct {
+	Status string `json:"status"`
+}
+
+// DataTransferRequest represents a DataTransfer.req from central system
+type DataTransferRequest struct {
+	VendorId  string `json:"vendorId"`
+	MessageId string `json:"messageId,omitempty"`
+	Data      string `json:"data,omitempty"`
+}
+
+// DataTransferResponse represents a DataTransfer.conf
+type DataTransferResponse struct {
+	Status string `json:"status"`
+	Data   string `json:"data,omitempty"`
+}
+
+// ChangeAvailabilityRequest represents a ChangeAvailability.req from central system
+type ChangeAvailabilityRequest struct {
+	ConnectorId int    `json:"connectorId"`
+	Type        string `json:"type"` // Operative or Inoperative
+}
+
+// ChangeAvailabilityResponse represents a ChangeAvailability.conf
+type ChangeAvailabilityResponse struct {
+	Status string `json:"status"` // Accepted, Rejected, Scheduled
+}
+
+// ClearCacheRequest represents a ClearCache.req from central system
+type ClearCacheRequest struct{}
+
+// ClearCacheResponse represents a ClearCache.conf
+type ClearCacheResponse struct {
+	Status string `json:"status"` // Accepted, Rejected
+}
+
+// GetCompositeScheduleRequest represents a GetCompositeSchedule.req from central system
+type GetCompositeScheduleRequest struct {
+	ConnectorId      int    `json:"connectorId"`
+	Duration         int    `json:"duration"`
+	ChargingRateUnit string `json:"chargingRateUnit,omitempty"` // W or A
+}
+
+// GetCompositeScheduleResponse represents a GetCompositeSchedule.conf
+type GetCompositeScheduleResponse struct {
+	Status          string           `json:"status"` // Accepted, Rejected
+	ConnectorId     *int             `json:"connectorId,omitempty"`
+	ScheduleStart   string           `json:"scheduleStart,omitempty"`
+	ChargingSchedule *ChargingSchedule `json:"chargingSchedule,omitempty"`
 }
 
 // ParseOCPPMessage parses an OCPP WebSocket message
