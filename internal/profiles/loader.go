@@ -22,6 +22,12 @@ type MQTTConfig struct {
 	Defaults          map[string]interface{} `json:"defaults,omitempty"`
 }
 
+// MDNSConfig holds mDNS advertisement configuration for a profile
+type MDNSConfig struct {
+	Hostname    string `json:"hostname"`               // e.g. "sid-os" (without .local)
+	ServiceType string `json:"service_type,omitempty"` // e.g. "_mqtt._tcp"
+}
+
 // OCPPConfig holds OCPP-specific profile configuration
 type OCPPConfig struct {
 	Version       string            `json:"version"` // "1.6" or "2.0.1"
@@ -52,6 +58,9 @@ type Profile struct {
 
 	// OCPP-specific
 	OCPPConfig *OCPPConfig `json:"ocpp_config,omitempty"`
+
+	// mDNS advertisement (optional)
+	MDNSConfig *MDNSConfig `json:"mdns_config,omitempty"`
 
 	// Generators work across all protocols
 	Generators map[string]GeneratorConfig `json:"generators,omitempty"`
@@ -617,6 +626,10 @@ var EmbeddedProfiles = map[string]*Profile{
 				"energyAcImport":    float64(0),
 				"energyAcExport":    float64(0),
 			},
+		},
+		MDNSConfig: &MDNSConfig{
+			Hostname:    "sid-os",
+			ServiceType: "_mqtt._tcp",
 		},
 	},
 

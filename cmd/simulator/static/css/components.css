@@ -191,6 +191,15 @@
 
 .toggle-switch-status.running { color: var(--color-success); }
 .toggle-switch-status.stopped { color: var(--text-secondary); }
+.toggle-switch-status.toggling { color: var(--color-warning, #f59e0b); }
+
+.toggle-switch-track.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+.toggle-switch-track.loading .toggle-switch-thumb {
+    animation: toggle-pulse 1s ease-in-out infinite;
+}
 
 /* Power Slider */
 .power-slider-container {
@@ -740,6 +749,18 @@
 
 .mini-toggle.on .mini-toggle-thumb {
     transform: translateX(14px);
+}
+.mini-toggle.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+.mini-toggle.loading .mini-toggle-thumb {
+    animation: toggle-pulse 1s ease-in-out infinite;
+}
+
+@keyframes toggle-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
 }
 
 /* Mini Slider (for member cards) */

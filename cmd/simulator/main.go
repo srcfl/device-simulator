@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/device"
+	simmdns "github.com/srcfl/device-simulator/internal/mdns"
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/modbus/devices"
 	"github.com/srcfl/device-simulator/internal/mcp"
@@ -166,8 +167,10 @@ var (
 	simulatorsMu    sync.RWMutex
 	nextSimulatorID int
 	nextIDMu        sync.Mutex
-	portAllocator   *ports.Allocator
-	runtimeSettings *settings.AppSettings
+	portAllocator    *ports.Allocator
+	mdnsAdvertiser   *simmdns.Advertiser
+	isDesktopMode    bool
+	runtimeSettings  *settings.AppSettings
 	stateDirty      bool
 	stateMu         sync.Mutex
 	stateWarningsMu sync.Mutex
@@ -271,6 +274,10 @@ func main() {
 	// Initialize port allocator
 	portAllocator = ports.NewAllocator(*modbusBasePort, *mqttBasePort, *ocppBasePort)
 
+	// Initialize mDNS advertiser (works in desktop mode; Docker bridge doesn't support multicast)
+	isDesktopMode = *desktopMode
+	mdnsAdvertiser = simmdns.New()
+
 	// Initialize empty simulator list
 	simulators = make([]*Simulator, 0)
 	nextSimulatorID = 1
@@ -310,6 +317,7 @@ func runHTTPServer(httpPort int) {
 		stopSimulatorServer(sim)
 	}
 	simulatorsMu.RUnlock()
+	mdnsAdvertiser.Shutdown()
 	saveStateIfDirty()
 }
 
@@ -356,6 +364,7 @@ func runWailsApp(httpPort int) {
 		stopSimulatorServer(sim)
 	}
 	simulatorsMu.RUnlock()
+	mdnsAdvertiser.Shutdown()
 	saveStateIfDirty()
 }
 
@@ -1080,6 +1089,16 @@ func startSimulatorServer(sim *Simulator) error {
 	}
 
 	sim.Running = true
+
+	// Start mDNS advertisement if profile has mDNS config (desktop mode only — Docker bridge doesn't support multicast)
+	if isDesktopMode {
+		if profile := sim.ProfilesManager.GetActive(); profile != nil && profile.MDNSConfig != nil {
+			if err := mdnsAdvertiser.Advertise(sim.ID, profile.MDNSConfig.Hostname, sim.Port, profile.MDNSConfig.ServiceType, nil); err != nil {
+				log.Printf("[%s] mDNS advertisement failed (non-fatal): %v", sim.Serial, err)
+			}
+		}
+	}
+
 	markStateDirty()
 	return nil
 }
@@ -1094,6 +1113,7 @@ func stopSimulatorServer(sim *Simulator) {
 	}
 
 	stopSimulatorAutomation(sim)
+	mdnsAdvertiser.Remove(sim.ID)
 
 	switch sim.Protocol {
 	case "modbus":
@@ -1449,12 +1469,13 @@ func handleSimulatorsCreate(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":       sim.ID,
-		"serial":   sim.Serial,
-		"protocol": sim.Protocol,
-		"category": sim.Category,
-		"port":     sim.Port,
-		"running":  sim.Running,
+		"id":             sim.ID,
+		"serial":         sim.Serial,
+		"protocol":       sim.Protocol,
+		"category":       sim.Category,
+		"port":           sim.Port,
+		"running":        sim.Running,
+		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
 	})
 }
 
@@ -1476,16 +1497,17 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 
 		sim.mu.RLock()
 		entry := map[string]interface{}{
-			"id":         sim.ID,
-			"serial":     sim.Serial,
-			"protocol":   sim.Protocol,
-			"category":   sim.Category,
-			"port":       sim.Port,
-			"running":    sim.Running,
-			"automation": sim.Automation.Enabled,
-			"profile":    sim.ProfilesManager.GetActiveName(),
-			"site_id":    sim.SiteID,
-			"device_on":  sim.DeviceOn,
+			"id":             sim.ID,
+			"serial":         sim.Serial,
+			"protocol":       sim.Protocol,
+			"category":       sim.Category,
+			"port":           sim.Port,
+			"running":        sim.Running,
+			"automation":     sim.Automation.Enabled,
+			"profile":        sim.ProfilesManager.GetActiveName(),
+			"site_id":        sim.SiteID,
+			"device_on":      sim.DeviceOn,
+			"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
 		}
 
 		// Add protocol-specific fields
@@ -1640,6 +1662,7 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 		"port":           sim.Port,
 		"running":        sim.Running,
 		"runtime_serial": getRuntimeSerial(sim),
+		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
 		"automation": map[string]interface{}{
 			"enabled":         sim.Automation.Enabled,
 			"time_multiplier": sim.Automation.TimeMultiplier,

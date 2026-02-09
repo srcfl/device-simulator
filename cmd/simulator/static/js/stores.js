@@ -1382,6 +1382,7 @@ document.addEventListener('alpine:init', () => {
         automation: null,
         clients: [],
         debugMeterValues: null,
+        emulatorToggling: false,
 
         init(id, protocol) {
             this.id = id;
@@ -1553,6 +1554,7 @@ document.addEventListener('alpine:init', () => {
 
         // Toggle emulator (server) only
         async toggleEmulator() {
+            if (this.emulatorToggling) return;
             const isRunning = this.data?.running;
 
             if (!isRunning && this.protocol === 'ocpp') {
@@ -1566,6 +1568,7 @@ document.addEventListener('alpine:init', () => {
                 }
             }
 
+            this.emulatorToggling = true;
             try {
                 if (isRunning) {
                     await api.stopEmulator(this.id);
@@ -1578,6 +1581,8 @@ document.addEventListener('alpine:init', () => {
                     'Error',
                     'Error toggling emulator: ' + e.message
                 );
+            } finally {
+                this.emulatorToggling = false;
             }
 
             const app = Alpine.store('app');

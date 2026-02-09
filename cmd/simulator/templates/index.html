@@ -452,17 +452,17 @@
                     <div class="sim-address">
                         <template x-if="sim.protocol === 'modbus'">
                             <template x-if="sim.port">
-                                <span x-text="`${$store.app.localIP}:${sim.port + $store.app.modbusDisplayOffset}`"></span>
+                                <span x-text="`${sim.mdns_hostname ? sim.mdns_hostname + '.local' : $store.app.localIP}:${sim.port + $store.app.modbusDisplayOffset}`"></span>
                             </template>
                         </template>
                         <template x-if="sim.protocol === 'mqtt'">
                             <template x-if="sim.port">
-                                <span x-text="`${$store.app.localIP}:${sim.port + $store.app.mqttDisplayOffset}`"></span>
+                                <span x-text="`${sim.mdns_hostname ? sim.mdns_hostname + '.local' : $store.app.localIP}:${sim.port + $store.app.mqttDisplayOffset}`"></span>
                             </template>
                         </template>
                         <template x-if="sim.protocol === 'ocpp'">
                             <template x-if="sim.port">
-                                <span x-text="`${$store.app.localIP}:${sim.port + $store.app.ocppDisplayOffset}`"></span>
+                                <span x-text="`${sim.mdns_hostname ? sim.mdns_hostname + '.local' : $store.app.localIP}:${sim.port + $store.app.ocppDisplayOffset}`"></span>
                             </template>
                         </template>
                         <template x-if="!sim.port">
@@ -731,7 +731,7 @@
                                         <span class="protocol-badge pv">modbus</span>
                                     </div>
                                     <div class="member-actions">
-                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running, 'loading': isToggleLocked('emu-' + inv.id) }"
                                              @click="toggleEmulator(inv.id)" title="Toggle emulation">
                                             <div class="mini-toggle-thumb"></div>
                                         </div>
@@ -803,7 +803,7 @@
                                         <span class="protocol-badge battery">modbus</span>
                                     </div>
                                     <div class="member-actions">
-                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running }"
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': inv.running, 'loading': isToggleLocked('emu-' + inv.id) }"
                                              @click="toggleEmulator(inv.id)" title="Toggle emulation">
                                             <div class="mini-toggle-thumb"></div>
                                         </div>
@@ -871,7 +871,7 @@
                                         </template>
                                     </div>
                                     <div class="member-actions">
-                                        <div class="mini-toggle emu-toggle" :class="{ 'on': sim.running }"
+                                        <div class="mini-toggle emu-toggle" :class="{ 'on': sim.running, 'loading': isToggleLocked('emu-' + sim.id) }"
                                              @click="toggleEmulator(sim.id)" title="Toggle emulation">
                                             <div class="mini-toggle-thumb"></div>
                                         </div>
@@ -1117,10 +1117,10 @@
                             <div class="value" x-text="getSiteName() || 'Not assigned'"></div>
                         </div>
                         <div class="config-item" style="margin-left: auto;">
-                            <label>Host IP</label>
+                            <label x-text="$store.simulator.data?.mdns_hostname ? 'Hostname' : 'Host IP'">Host IP</label>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span class="host-ip" x-text="$store.app.localIP"></span>
-                                <button class="copy-btn" @click="$store.app.copyIP()" title="Copy IP">
+                                <span class="host-ip" x-text="$store.simulator.data?.mdns_hostname ? $store.simulator.data.mdns_hostname + '.local' : $store.app.localIP"></span>
+                                <button class="copy-btn" @click="navigator.clipboard.writeText($store.simulator.data?.mdns_hostname ? $store.simulator.data.mdns_hostname + '.local' : $store.app.localIP)" title="Copy">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1132,13 +1132,13 @@
                             <label>Emulator</label>
                             <div class="toggle-switch" style="height: 32px;">
                                 <div class="toggle-switch-track"
-                                     :class="{ 'on': $store.simulator.data?.running }"
+                                     :class="{ 'on': $store.simulator.data?.running, 'loading': $store.simulator.emulatorToggling }"
                                      @click="$store.simulator.toggleEmulator()">
                                     <div class="toggle-switch-thumb"></div>
                                 </div>
                                 <span class="toggle-switch-status"
-                                      :class="$store.simulator.data?.running ? 'running' : 'stopped'"
-                                      x-text="$store.simulator.data?.running ? 'Online' : 'Offline'"></span>
+                                      :class="$store.simulator.emulatorToggling ? 'toggling' : ($store.simulator.data?.running ? 'running' : 'stopped')"
+                                      x-text="$store.simulator.emulatorToggling ? ($store.simulator.data?.running ? 'Stopping\u2026' : 'Starting\u2026') : ($store.simulator.data?.running ? 'Online' : 'Offline')"></span>
                             </div>
                         </div>
                     </div>
@@ -1385,12 +1385,12 @@
                             </div>
                         </template>
 
-                        <!-- Host IP -->
+                        <!-- Host IP / Hostname -->
                         <div class="config-item" style="margin-left: auto;">
-                            <label>Host IP</label>
+                            <label x-text="$store.simulator.data?.mdns_hostname ? 'Hostname' : 'Host IP'">Host IP</label>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span class="host-ip" x-text="$store.app.localIP"></span>
-                                <button class="copy-btn" @click="$store.app.copyIP()" title="Copy IP">
+                                <span class="host-ip" x-text="$store.simulator.data?.mdns_hostname ? $store.simulator.data.mdns_hostname + '.local' : $store.app.localIP"></span>
+                                <button class="copy-btn" @click="navigator.clipboard.writeText($store.simulator.data?.mdns_hostname ? $store.simulator.data.mdns_hostname + '.local' : $store.app.localIP)" title="Copy">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1404,13 +1404,13 @@
                             <label>Emulator</label>
                             <div class="toggle-switch" style="height: 32px;">
                                 <div class="toggle-switch-track"
-                                     :class="{ 'on': $store.simulator.data?.running }"
+                                     :class="{ 'on': $store.simulator.data?.running, 'loading': $store.simulator.emulatorToggling }"
                                      @click="toggleEmulator()">
                                     <div class="toggle-switch-thumb"></div>
                                 </div>
                                 <span class="toggle-switch-status"
-                                      :class="$store.simulator.data?.running ? 'running' : 'stopped'"
-                                      x-text="$store.simulator.data?.running ? 'Online' : 'Offline'"></span>
+                                      :class="$store.simulator.emulatorToggling ? 'toggling' : ($store.simulator.data?.running ? 'running' : 'stopped')"
+                                      x-text="$store.simulator.emulatorToggling ? ($store.simulator.data?.running ? 'Stopping\u2026' : 'Starting\u2026') : ($store.simulator.data?.running ? 'Online' : 'Offline')"></span>
                             </div>
                         </div>
                     </div>

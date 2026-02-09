@@ -75,16 +75,17 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 
 		sim.mu.RLock()
 		entry := map[string]interface{}{
-			"id":         sim.ID,
-			"serial":     sim.Serial,
-			"protocol":   sim.Protocol,
-			"category":   sim.Category,
-			"port":       sim.Port,
-			"running":    sim.Running,
-			"automation": sim.Automation.Enabled,
-			"profile":    sim.ProfilesManager.GetActiveName(),
-			"site_id":    sim.SiteID,
-			"device_on":  sim.DeviceOn,
+			"id":            sim.ID,
+			"serial":        sim.Serial,
+			"protocol":      sim.Protocol,
+			"category":      sim.Category,
+			"port":          sim.Port,
+			"running":       sim.Running,
+			"automation":    sim.Automation.Enabled,
+			"profile":       sim.ProfilesManager.GetActiveName(),
+			"site_id":       sim.SiteID,
+			"device_on":     sim.DeviceOn,
+			"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 		}
 
 		switch sim.Protocol {
@@ -135,12 +136,13 @@ func (a *App) CreateSimulator(simType string) (map[string]interface{}, error) {
 	}
 
 	result := map[string]interface{}{
-		"id":       sim.ID,
-		"serial":   sim.Serial,
-		"protocol": sim.Protocol,
-		"category": sim.Category,
-		"port":     sim.Port,
-		"running":  sim.Running,
+		"id":            sim.ID,
+		"serial":        sim.Serial,
+		"protocol":      sim.Protocol,
+		"category":      sim.Category,
+		"port":          sim.Port,
+		"running":       sim.Running,
+		"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 	}
 
 	// Emit event for UI update
@@ -179,6 +181,7 @@ func (a *App) GetSimulator(id int) (map[string]interface{}, error) {
 		"profile":              sim.ProfilesManager.GetActiveName(),
 		"battery_capacity_kwh": sim.BatteryCapacityKWh,
 		"runtime_serial":       getRuntimeSerial(sim),
+		"mdns_hostname":        mdnsAdvertiser.ActiveHostname(sim.ID),
 		"automation": map[string]interface{}{
 			"enabled":         sim.Automation.Enabled,
 			"time_multiplier": sim.Automation.TimeMultiplier,
@@ -1178,14 +1181,15 @@ func (a *App) CreateSimulatorInSite(siteId int, simType string) (map[string]inte
 	a.emitSiteUpdate()
 
 	return map[string]interface{}{
-		"id":        sim.ID,
-		"serial":    sim.Serial,
-		"protocol":  sim.Protocol,
-		"category":  sim.Category,
-		"port":      sim.Port,
-		"running":   sim.Running,
-		"site_id":   siteId,
-		"device_on": sim.DeviceOn,
+		"id":             sim.ID,
+		"serial":         sim.Serial,
+		"protocol":       sim.Protocol,
+		"category":       sim.Category,
+		"port":           sim.Port,
+		"running":        sim.Running,
+		"site_id":        siteId,
+		"device_on":      sim.DeviceOn,
+		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
 	}, nil
 }
 
