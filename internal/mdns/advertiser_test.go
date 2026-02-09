@@ -1,15 +1,39 @@
 package mdns
 
 import (
+	"context"
+	"os/exec"
 	"testing"
 )
 
-// newTestAdvertiser creates an Advertiser with network lookup disabled
-// so tests don't depend on mDNS network state.
+// newTestAdvertiser creates an Advertiser that uses a no-op registration
+// instead of launching real system processes.
 func newTestAdvertiser() *Advertiser {
 	a := New()
-	a.lookup = nil // disable network collision checks in tests
+	a.lookup = nil // disable network collision checks
+	// Patch startRegistration to avoid launching real dns-sd/avahi processes
+	testStartRegistration = func(hostname, serviceType string, port int, ip string) (*registration, error) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := exec.CommandContext(ctx, "sleep", "3600")
+		_ = cmd.Start()
+		return &registration{cmd: cmd, cancel: cancel}, nil
+	}
 	return a
+}
+
+// testStartRegistration allows tests to override the registration function.
+// This is set by newTestAdvertiser and read by startRegistrationFunc.
+var testStartRegistration func(hostname, serviceType string, port int, ip string) (*registration, error)
+
+func init() {
+	// Override the real startRegistration with the test version when set
+	origStart := startRegistrationVar
+	startRegistrationVar = func(hostname, serviceType string, port int, ip string) (*registration, error) {
+		if testStartRegistration != nil {
+			return testStartRegistration(hostname, serviceType, port, ip)
+		}
+		return origStart(hostname, serviceType, port, ip)
+	}
 }
 
 func TestNewAdvertiser(t *testing.T) {
@@ -17,8 +41,8 @@ func TestNewAdvertiser(t *testing.T) {
 	if a == nil {
 		t.Fatal("New() returned nil")
 	}
-	if len(a.servers) != 0 {
-		t.Errorf("expected empty servers map, got %d entries", len(a.servers))
+	if len(a.regs) != 0 {
+		t.Errorf("expected empty regs map, got %d entries", len(a.regs))
 	}
 	if len(a.hosts) != 0 {
 		t.Errorf("expected empty hosts map, got %d entries", len(a.hosts))
@@ -31,8 +55,8 @@ func TestAdvertiseEmptyHostname(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected nil error for empty hostname, got %v", err)
 	}
-	if len(a.servers) != 0 {
-		t.Error("expected no servers for empty hostname")
+	if len(a.regs) != 0 {
+		t.Error("expected no regs for empty hostname")
 	}
 }
 
@@ -87,8 +111,7 @@ func TestInternalCollisionDetection(t *testing.T) {
 }
 
 func TestNetworkCollisionDetection(t *testing.T) {
-	// Simulate a network where "taken-host" is already in use
-	a := New()
+	a := newTestAdvertiser()
 	a.lookup = func(hostname string) bool {
 		return hostname == "taken-host"
 	}
@@ -125,8 +148,8 @@ func TestShutdown(t *testing.T) {
 
 	a.Shutdown()
 
-	if len(a.servers) != 0 {
-		t.Errorf("expected empty servers after shutdown, got %d", len(a.servers))
+	if len(a.regs) != 0 {
+		t.Errorf("expected empty regs after shutdown, got %d", len(a.regs))
 	}
 	if len(a.hosts) != 0 {
 		t.Errorf("expected empty hosts after shutdown, got %d", len(a.hosts))
@@ -150,7 +173,6 @@ func TestReAdvertiseSameSimulator(t *testing.T) {
 		t.Fatalf("first Advertise failed: %v", err)
 	}
 
-	// Re-advertise same simulator with different hostname
 	err = a.Advertise(1, "device-y", 1884, "_mqtt._tcp", nil)
 	if err != nil {
 		t.Fatalf("second Advertise failed: %v", err)
@@ -161,7 +183,6 @@ func TestReAdvertiseSameSimulator(t *testing.T) {
 		t.Errorf("expected hostname 'device-y' after re-advertise, got '%s'", hostname)
 	}
 
-	// Old hostname should be freed
 	if _, taken := a.hosts["device-x"]; taken {
 		t.Error("old hostname 'device-x' should have been freed")
 	}
@@ -172,7 +193,6 @@ func TestLocalIP(t *testing.T) {
 	if ip == nil {
 		t.Fatal("localIP() returned nil")
 	}
-	// Should be an IPv4 address
 	if ip.To4() == nil {
 		t.Errorf("expected IPv4 address, got %v", ip)
 	}
@@ -182,7 +202,6 @@ func TestDefaultServiceType(t *testing.T) {
 	a := newTestAdvertiser()
 	defer a.Shutdown()
 
-	// Empty service type should default to _device._tcp
 	err := a.Advertise(1, "test-default-svc", 5000, "", nil)
 	if err != nil {
 		t.Fatalf("Advertise with empty service type failed: %v", err)
