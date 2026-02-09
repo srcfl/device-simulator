@@ -10,33 +10,35 @@
     align-items: center;
     justify-content: space-between;
     padding: 0 var(--spacing-lg);
-    height: 56px;
+    padding-left: 80px;
+    height: 52px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
-}
-
-.docs-title {
-    font-size: var(--font-size-lg);
-    font-weight: 600;
-    color: var(--color-primary);
+    flex-shrink: 0;
+    --wails-draggable: drag;
 }
 
 .docs-actions {
     display: flex;
     align-items: center;
     gap: var(--spacing-sm);
+    margin-left: auto;
+    --wails-draggable: no-drag;
 }
 
 .docs-close-btn {
     display: inline-flex;
     align-items: center;
-    padding: 0.45rem 0.85rem;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
     border-radius: var(--radius-md);
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
+    background: transparent;
+    color: var(--text-secondary);
     text-decoration: none;
-    font-weight: 600;
-    border: 1px solid var(--border-color);
+    border: none;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .docs-close-btn:hover {
@@ -51,27 +53,33 @@
 }
 
 .docs-tabs {
-    display: inline-flex;
-    gap: var(--spacing-sm);
-    background: var(--bg-secondary);
-    padding: 0.35rem;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-color);
-    margin-bottom: var(--spacing-lg);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    --wails-draggable: no-drag;
 }
 
 .docs-tab {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--text-secondary);
     background: transparent;
     border: none;
-    color: var(--text-secondary);
-    padding: 0.5rem 1rem;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-weight: 600;
+    font-size: var(--font-size-md);
+    font-weight: 500;
+    transition: background var(--transition-fast);
+}
+
+.docs-tab:hover {
+    background: var(--color-primary-hover);
 }
 
 .docs-tab.active {
-    background: rgba(var(--color-primary-rgb), 0.18);
+    background: rgba(var(--color-primary-rgb), 0.15);
     color: var(--color-primary);
 }
 

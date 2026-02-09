@@ -383,6 +383,31 @@ func (h *templateAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Handle docs page
+	if path == "/docs" {
+		tmpl, err := template.ParseFS(h.staticFS, "templates/docs.html")
+		if err != nil {
+			http.Error(w, "Template error", http.StatusInternalServerError)
+			log.Printf("Docs template error: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		tmpl.Execute(w, nil)
+		return
+	}
+
+	// Handle OpenAPI spec
+	if path == "/openapi.json" {
+		content, err := h.staticFS.ReadFile("static/openapi.json")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(content)
+		return
+	}
+
 	// Handle static files
 	if strings.HasPrefix(path, "/static/") {
 		staticPath := strings.TrimPrefix(path, "/")
