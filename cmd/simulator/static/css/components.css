@@ -1982,8 +1982,22 @@
 .site-top-dashboards .site-dashboard-item {
     flex: 1;
     margin: 0;
-    padding: 3px var(--spacing-sm);
+    padding: var(--spacing-sm);
     gap: var(--spacing-sm);
+    flex-direction: row;
+    align-items: center;
+}
+
+.site-dashboard-item-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.site-dashboard-item-title {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: var(--text-primary);
 }
 
 /* Simulator View Tabs */
@@ -2708,23 +2722,6 @@
     flex-shrink: 0;
 }
 
-.site-dashboard-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.site-dashboard-name {
-    font-size: var(--font-size-md);
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.site-dashboard-value {
-    font-size: var(--font-size-sm);
-    color: var(--text-muted);
-}
 
 /* ========== Warning Banner ========== */
 
@@ -2776,18 +2773,6 @@
     font-size: 1.5rem;
 }
 
-.site-load-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.site-load-name {
-    font-size: var(--font-size-md);
-    font-weight: 500;
-    color: var(--text-primary);
-}
 
 .site-load-value {
     font-size: var(--font-size-sm);
@@ -2795,8 +2780,17 @@
     color: var(--color-warning);
 }
 
-.site-load-scenario-badge {
-    font-size: 1.2rem;
+.site-overview-value {
+    font-size: var(--font-size-sm);
+    font-family: var(--font-mono);
+}
+
+.site-overview-value.importing {
+    color: var(--color-warning);
+}
+
+.site-overview-value.exporting {
+    color: var(--color-export);
 }
 
 /* ========== Site Load Dashboard ========== */
