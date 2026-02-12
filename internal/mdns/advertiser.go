@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+
 // registration tracks a running mDNS registration process.
 type registration struct {
 	cmd    *exec.Cmd
@@ -43,7 +44,7 @@ func New() *Advertiser {
 // If the hostname is already in use (internally or on the network), it
 // appends -1, -2, etc. until an unused name is found.
 // Returns nil on success. A no-op if hostname is empty.
-func (a *Advertiser) Advertise(simID int, hostname string, port int, serviceType string, txt []string) error {
+func (a *Advertiser) Advertise(simID int, hostname string, port int, serviceType string, ip string, txt []string) error {
 	if hostname == "" {
 		return nil
 	}
@@ -61,9 +62,11 @@ func (a *Advertiser) Advertise(simID int, hostname string, port int, serviceType
 		serviceType = "_device._tcp"
 	}
 
-	ip := localIP()
+	if ip == "" {
+		ip = "127.0.0.1"
+	}
 
-	reg, err := startRegistrationVar(resolvedHost, serviceType, port, ip.String())
+	reg, err := startRegistrationVar(resolvedHost, serviceType, port, ip)
 	if err != nil {
 		return fmt.Errorf("mdns registration: %w", err)
 	}
@@ -212,22 +215,4 @@ func networkLookup(hostname string) bool {
 
 	addrs, err := resolver.LookupHost(ctx, hostname+".local")
 	return err == nil && len(addrs) > 0
-}
-
-// localIP returns the first non-loopback IPv4 address found on the system.
-func localIP() net.IP {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return net.IPv4(127, 0, 0, 1)
-	}
-
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
-			if ipNet.IP.To4() != nil {
-				return ipNet.IP
-			}
-		}
-	}
-
-	return net.IPv4(127, 0, 0, 1)
 }

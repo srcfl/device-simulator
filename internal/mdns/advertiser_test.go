@@ -51,7 +51,7 @@ func TestNewAdvertiser(t *testing.T) {
 
 func TestAdvertiseEmptyHostname(t *testing.T) {
 	a := newTestAdvertiser()
-	err := a.Advertise(1, "", 1883, "_mqtt._tcp", nil)
+	err := a.Advertise(1, "", 1883, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Errorf("expected nil error for empty hostname, got %v", err)
 	}
@@ -64,7 +64,7 @@ func TestAdvertiseAndRemove(t *testing.T) {
 	a := newTestAdvertiser()
 	defer a.Shutdown()
 
-	err := a.Advertise(1, "test-device", 1883, "_mqtt._tcp", nil)
+	err := a.Advertise(1, "test-device", 1883, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("Advertise failed: %v", err)
 	}
@@ -86,12 +86,12 @@ func TestInternalCollisionDetection(t *testing.T) {
 	a := newTestAdvertiser()
 	defer a.Shutdown()
 
-	err := a.Advertise(1, "sid-os", 1883, "_mqtt._tcp", nil)
+	err := a.Advertise(1, "sid-os", 1883, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("first Advertise failed: %v", err)
 	}
 
-	err = a.Advertise(2, "sid-os", 1884, "_mqtt._tcp", nil)
+	err = a.Advertise(2, "sid-os", 1884, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("second Advertise failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestNetworkCollisionDetection(t *testing.T) {
 	}
 	defer a.Shutdown()
 
-	err := a.Advertise(1, "taken-host", 1883, "_mqtt._tcp", nil)
+	err := a.Advertise(1, "taken-host", 1883, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("Advertise failed: %v", err)
 	}
@@ -137,11 +137,11 @@ func TestRemoveNonexistent(t *testing.T) {
 func TestShutdown(t *testing.T) {
 	a := newTestAdvertiser()
 
-	err := a.Advertise(1, "device-a", 1883, "_mqtt._tcp", nil)
+	err := a.Advertise(1, "device-a", 1883, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("Advertise failed: %v", err)
 	}
-	err = a.Advertise(2, "device-b", 1884, "_mqtt._tcp", nil)
+	err = a.Advertise(2, "device-b", 1884, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("Advertise failed: %v", err)
 	}
@@ -168,12 +168,12 @@ func TestReAdvertiseSameSimulator(t *testing.T) {
 	a := newTestAdvertiser()
 	defer a.Shutdown()
 
-	err := a.Advertise(1, "device-x", 1883, "_mqtt._tcp", nil)
+	err := a.Advertise(1, "device-x", 1883, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("first Advertise failed: %v", err)
 	}
 
-	err = a.Advertise(1, "device-y", 1884, "_mqtt._tcp", nil)
+	err = a.Advertise(1, "device-y", 1884, "_mqtt._tcp", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("second Advertise failed: %v", err)
 	}
@@ -188,21 +188,11 @@ func TestReAdvertiseSameSimulator(t *testing.T) {
 	}
 }
 
-func TestLocalIP(t *testing.T) {
-	ip := localIP()
-	if ip == nil {
-		t.Fatal("localIP() returned nil")
-	}
-	if ip.To4() == nil {
-		t.Errorf("expected IPv4 address, got %v", ip)
-	}
-}
-
 func TestDefaultServiceType(t *testing.T) {
 	a := newTestAdvertiser()
 	defer a.Shutdown()
 
-	err := a.Advertise(1, "test-default-svc", 5000, "", nil)
+	err := a.Advertise(1, "test-default-svc", 5000, "", "192.168.1.100", nil)
 	if err != nil {
 		t.Fatalf("Advertise with empty service type failed: %v", err)
 	}

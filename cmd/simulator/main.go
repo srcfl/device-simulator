@@ -1093,7 +1093,7 @@ func startSimulatorServer(sim *Simulator) error {
 	// Start mDNS advertisement if profile has mDNS config (desktop mode only — Docker bridge doesn't support multicast)
 	if isDesktopMode {
 		if profile := sim.ProfilesManager.GetActive(); profile != nil && profile.MDNSConfig != nil {
-			if err := mdnsAdvertiser.Advertise(sim.ID, profile.MDNSConfig.Hostname, sim.Port, profile.MDNSConfig.ServiceType, nil); err != nil {
+			if err := mdnsAdvertiser.Advertise(sim.ID, profile.MDNSConfig.Hostname, sim.Port, profile.MDNSConfig.ServiceType, getLocalIP(), nil); err != nil {
 				log.Printf("[%s] mDNS advertisement failed (non-fatal): %v", sim.Serial, err)
 			}
 		}
