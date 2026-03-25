@@ -317,7 +317,11 @@ func (s *Server) publishState() {
 		"soc":               fmt.Sprintf("%.3f", state.SoC),
 	}
 
-	// Publish evCharger topics
+	// Publish serialNumber as retained so new subscribers get it immediately
+	s.broker.Publish("device/evCharger/0/serialNumber", []byte(evChargerTopics["serialNumber"]), true, 0)
+	delete(evChargerTopics, "serialNumber")
+
+	// Publish remaining evCharger topics
 	for topic, payload := range evChargerTopics {
 		s.broker.Publish("device/evCharger/0/"+topic, []byte(payload), false, 0)
 	}
