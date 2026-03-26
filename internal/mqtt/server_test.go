@@ -111,13 +111,13 @@ func TestServerDefaultState(t *testing.T) {
 
 	// Verify default state values
 	if state["sessionState"] != "PAUSED" {
-		t.Errorf("Expected default sessionState 'PAUSED', got '%v'", state["sessionState"])
+		t.Errorf("Expected default sessionState 'paused', got '%v'", state["sessionState"])
 	}
 	if state["controlMode"] != "CONTROLLABLE" {
 		t.Errorf("Expected default controlMode 'CONTROLLABLE', got '%v'", state["controlMode"])
 	}
-	if state["evConnected"] != true {
-		t.Errorf("Expected default evConnected true, got %v", state["evConnected"])
+	if state["evConnected"] != false {
+		t.Errorf("Expected default evConnected false, got %v", state["evConnected"])
 	}
 	if state["soc"] != 50.0 {
 		t.Errorf("Expected default SoC 50.0, got %v", state["soc"])
@@ -149,7 +149,7 @@ func TestServerSetValue(t *testing.T) {
 
 	state = server.GetState()
 	if state["sessionState"] != "CHARGE_LOOP" {
-		t.Errorf("Expected sessionState 'CHARGE_LOOP', got '%v'", state["sessionState"])
+		t.Errorf("Expected sessionState 'charge_loop', got '%v'", state["sessionState"])
 	}
 
 	// Test setting invalid key
@@ -205,14 +205,17 @@ func TestServerDoubleStartStop(t *testing.T) {
 func TestServerSetTargetPower(t *testing.T) {
 	server := NewServer(7, 51889)
 
+	// Plug in EV first (defaults to disconnected)
+	server.SetValue("evConnected", true)
+
 	// Set target power for charging (negative = charging)
 	server.SetTargetPower(-5000)
 
 	state := server.GetState()
 
-	// Should transition to CHARGE_LOOP
+	// Should transition to charge_loop
 	if state["sessionState"] != "CHARGE_LOOP" {
-		t.Errorf("Expected sessionState 'CHARGE_LOOP', got '%v'", state["sessionState"])
+		t.Errorf("Expected sessionState 'charge_loop', got '%v'", state["sessionState"])
 	}
 
 	// Power should be applied (EV connected and CONTROLLABLE mode by default)
@@ -230,14 +233,17 @@ func TestServerSetTargetPower(t *testing.T) {
 func TestServerWakeUp(t *testing.T) {
 	server := NewServer(8, 51890)
 
+	// Plug in EV first (defaults to disconnected)
+	server.SetValue("evConnected", true)
+
 	// Wake up the charger
 	server.WakeUp(true)
 
 	state := server.GetState()
 
-	// Should transition to CHARGE_LOOP
+	// Should transition to charge_loop
 	if state["sessionState"] != "CHARGE_LOOP" {
-		t.Errorf("Expected sessionState 'CHARGE_LOOP', got '%v'", state["sessionState"])
+		t.Errorf("Expected sessionState 'charge_loop', got '%v'", state["sessionState"])
 	}
 
 	// Should start with 200W charging (negative)
@@ -250,9 +256,9 @@ func TestServerWakeUp(t *testing.T) {
 
 	state = server.GetState()
 
-	// Should transition to IDLE
-	if state["sessionState"] != "IDLE" {
-		t.Errorf("Expected sessionState 'IDLE', got '%v'", state["sessionState"])
+	// Should transition to paused (not IDLE — IDLE no longer exists)
+	if state["sessionState"] != "PAUSED" {
+		t.Errorf("Expected sessionState 'paused', got '%v'", state["sessionState"])
 	}
 
 	// Power should be zero

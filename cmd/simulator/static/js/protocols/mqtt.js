@@ -33,7 +33,11 @@ export function mqttControls() {
 
         get isAwake() {
             const sessionState = this.state.sessionState;
-            return sessionState === 'CHARGE_LOOP' || sessionState === 'PAUSED';
+            return sessionState === 'CHARGE_LOOP' || sessionState === 'PAUSED' || sessionState === 'STOPPED' || sessionState === 'ERROR';
+        },
+
+        get hasError() {
+            return this.state.errorState || false;
         },
 
         get maxCharge() {
@@ -110,6 +114,10 @@ export function mqttControls() {
             await Alpine.store('simulator').toggleWakeUp();
         },
 
+        async toggleError() {
+            await Alpine.store('simulator').setState('errorState', !this.hasError);
+        },
+
         async setControlMode() {
             await Alpine.store('simulator').setState('controlMode', this.controlMode);
         }
@@ -124,22 +132,29 @@ export function mqttState() {
 
         get stateCards() {
             const s = this.state;
-            return [
-                { label: 'Session State', value: s.sessionState || 'IDLE', highlight: true },
+            const cards = [
                 { label: 'Control Mode', value: s.controlMode || 'CONTROLLABLE', highlight: true },
                 { label: 'EV Connected', value: s.evConnected ? 'Yes' : 'No' },
-                { label: 'Charge Protocol', value: s.chargeProtocol || 'CCS' },
-                { label: 'Power AC', value: `${(s.powerAc || 0).toFixed(0)} W`, highlight: true, colorClass: this.getPowerColorClass(s.powerAc) },
-                { label: 'Power DC', value: `${(s.powerDc || 0).toFixed(0)} W` },
-                { label: 'State of Charge', value: `${(s.soc || 0).toFixed(1)} %`, highlight: true },
+            ];
+            if (s.evConnected) {
+                cards.unshift({ label: 'Session State', value: s.sessionState || 'PAUSED', highlight: true });
+                cards.push(
+                    { label: 'Charge Protocol', value: s.chargeProtocol || 'CCS' },
+                    { label: 'Power AC', value: `${(s.powerAc || 0).toFixed(0)} W`, highlight: true, colorClass: this.getPowerColorClass(s.powerAc) },
+                    { label: 'Power DC', value: `${(s.powerDc || 0).toFixed(0)} W` },
+                    { label: 'State of Charge', value: `${(s.soc || 0).toFixed(1)} %`, highlight: true },
+                    { label: 'Current AC (L1)', value: `${(s.currentAc1 || 0).toFixed(1)} A` },
+                );
+            }
+            cards.push(
                 { label: 'Voltage AC (L1/L2/L3)', value: `${(s.voltageAc1 || 0).toFixed(0)} V` },
-                { label: 'Current AC (L1)', value: `${(s.currentAc1 || 0).toFixed(1)} A` },
                 { label: 'Frequency', value: `${(s.frequency || 50).toFixed(1)} Hz` },
                 { label: 'Energy Import', value: `${(s.energyAcImport || 0).toFixed(0)} Wh` },
                 { label: 'Energy Export', value: `${(s.energyAcExport || 0).toFixed(0)} Wh` },
                 { label: 'Max Charge Power', value: `${(s.chargePowerMax || 0).toFixed(0)} W` },
-                { label: 'Max Discharge Power', value: `${(s.dischargePowerMax || 0).toFixed(0)} W` }
-            ];
+                { label: 'Max Discharge Power', value: `${(s.dischargePowerMax || 0).toFixed(0)} W` },
+            );
+            return cards;
         },
 
         getPowerColorClass(power) {

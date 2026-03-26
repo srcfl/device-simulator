@@ -449,7 +449,7 @@ document.addEventListener('alpine:init', () => {
 
         async toggleWakeUp() {
             const state = this.data?.state || {};
-            const isAwake = state.sessionState === 'CHARGE_LOOP' || state.sessionState === 'PAUSED';
+            const isAwake = state.sessionState === 'CHARGE_LOOP' || state.sessionState === 'PAUSED' || state.sessionState === 'STOPPED' || state.sessionState === 'ERROR';
             try {
                 await api.wakeUp(this.id, !isAwake);
                 await this.loadAllData();

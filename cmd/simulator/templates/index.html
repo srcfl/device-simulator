@@ -1502,6 +1502,21 @@
                                                   x-text="isAwake ? 'Yes' : 'No'"></span>
                                         </div>
                                     </div>
+                                    <template x-if="evConnected">
+                                        <div class="control-group">
+                                            <span class="control-group-label">Error</span>
+                                            <div class="toggle-switch">
+                                                <div class="toggle-switch-track"
+                                                     :class="{ 'on': hasError }"
+                                                     @click="toggleError()">
+                                                    <div class="toggle-switch-thumb"></div>
+                                                </div>
+                                                <span class="toggle-switch-status"
+                                                      :class="hasError ? 'stopped' : 'running'"
+                                                      x-text="hasError ? 'Yes' : 'No'"></span>
+                                            </div>
+                                        </div>
+                                    </template>
                                     <div class="control-group">
                                         <span class="control-group-label">Mode</span>
                                         <select x-model="controlMode" @change="setControlMode()">
@@ -1510,7 +1525,7 @@
                                         </select>
                                     </div>
                                 </div>
-                                <div class="controls-column-right">
+                                <div class="controls-column-right" :style="!evConnected && 'opacity: 0.4; pointer-events: none'">
                                     <div class="control-group vertical">
                                         <span class="control-group-label">Power Control</span>
                                         <div class="power-slider-container">
@@ -1524,6 +1539,7 @@
                                                 <input type="range" class="power-slider-input"
                                                        :min="-maxDischarge" :max="maxCharge"
                                                        :value="powerSliderValue" step="100"
+                                                       :disabled="!evConnected"
                                                        @input="onPowerInput($event)"
                                                        @change="onPowerChange($event)">
                                             </div>
@@ -1539,6 +1555,7 @@
                                             <div class="soc-slider-track">
                                                 <input type="range" class="soc-slider-input"
                                                        min="0" max="100" :value="socSliderValue" step="1"
+                                                       :disabled="!evConnected"
                                                        @input="onSocInput($event)"
                                                        @change="onSocChange($event)">
                                             </div>

@@ -42,6 +42,7 @@ type V2XState struct {
 	SessionState   string `json:"sessionState"`
 	ControlMode    string `json:"controlMode"`
 	EVConnected    bool   `json:"evConnected"`
+	ErrorState     bool   `json:"errorState"`
 	ChargeProtocol string `json:"chargeProtocol"`
 	ReplugRequired bool   `json:"replugRequired"`
 	Sleep          bool   `json:"sleep"`
@@ -109,10 +110,11 @@ func newDefaultState() *V2XState {
 		Version:      "1.0.0-sim",
 		SerialNumber: "",
 
-		// Session state
+		// Session state (not published when EV not connected)
 		SessionState:   "PAUSED",
 		ControlMode:    "CONTROLLABLE",
-		EVConnected:    true,
+		EVConnected:    false,
+		ErrorState:     false,
 		ChargeProtocol: "ISO_15118_2",
 		ReplugRequired: false,
 		Sleep:          false,
@@ -254,40 +256,35 @@ func (s *Server) publishState() {
 	state := *s.state
 	s.mu.RUnlock()
 
-	// device/evCharger/0/* topics
+	s.publishStateFromSnapshot(state)
+}
+
+func (s *Server) publishStateFromSnapshot(state V2XState) {
+	// device/evCharger/0/* topics — always published (charger-level)
 	evChargerTopics := map[string]string{
 		// Connection & identity
 		"connected":    fmt.Sprintf("%t", state.Connected),
 		"version":      state.Version,
 		"serialNumber": state.SerialNumber,
 
-		// Session state
-		"sessionState":   state.SessionState,
+		// Charger state
 		"controlMode":    state.ControlMode,
 		"evConnected":    fmt.Sprintf("%t", state.EVConnected),
-		"chargeProtocol": state.ChargeProtocol,
 		"replugRequired": fmt.Sprintf("%t", state.ReplugRequired),
 		"sleep":          fmt.Sprintf("%t", state.Sleep),
 
-		// AC measurements
-		"powerAc":    fmt.Sprintf("%.3f", state.PowerAc),
-		"currentAc":  fmt.Sprintf("%.3f", state.CurrentAc),
-		"currentAc1": fmt.Sprintf("%.3f", state.CurrentAc1),
-		"currentAc2": fmt.Sprintf("%.3f", state.CurrentAc2),
-		"currentAc3": fmt.Sprintf("%.3f", state.CurrentAc3),
+		// AC voltages & frequency (charger-level, always available)
 		"voltageAc":  fmt.Sprintf("%.3f", state.VoltageAc),
 		"voltageAc1": fmt.Sprintf("%.3f", state.VoltageAc1),
 		"voltageAc2": fmt.Sprintf("%.3f", state.VoltageAc2),
 		"voltageAc3": fmt.Sprintf("%.3f", state.VoltageAc3),
 		"frequency":  fmt.Sprintf("%.3f", state.Frequency),
 
-		// DC measurements
-		"powerDc":             fmt.Sprintf("%.3f", state.PowerDc),
-		"currentDc":           fmt.Sprintf("%.3f", state.CurrentDc),
+		// DC voltage & temperature (charger-level)
 		"voltageDc":           fmt.Sprintf("%.3f", state.VoltageDc),
 		"inverterTemperature": fmt.Sprintf("%.3f", state.InverterTemperature),
 
-		// Energy
+		// Energy totals
 		"energyAc":              fmt.Sprintf("%.3f", state.EnergyAc),
 		"energyAcImport":        fmt.Sprintf("%.3f", state.EnergyAcImport),
 		"energyAcExport":        fmt.Sprintf("%.3f", state.EnergyAcExport),
@@ -299,11 +296,26 @@ func (s *Server) publishState() {
 		"chargePowerMin":    fmt.Sprintf("%.3f", state.ChargePowerMin),
 		"dischargePowerMax": fmt.Sprintf("%.3f", state.DischargePowerMax),
 		"dischargePowerMin": fmt.Sprintf("%.3f", state.DischargePowerMin),
+	}
+
+	// Car-related topics — only published when EV is connected
+	if state.EVConnected {
+		evChargerTopics["sessionState"] = state.SessionState
+		evChargerTopics["chargeProtocol"] = state.ChargeProtocol
+
+		// Power measurements
+		evChargerTopics["powerAc"] = fmt.Sprintf("%.3f", state.PowerAc)
+		evChargerTopics["currentAc"] = fmt.Sprintf("%.3f", state.CurrentAc)
+		evChargerTopics["currentAc1"] = fmt.Sprintf("%.3f", state.CurrentAc1)
+		evChargerTopics["currentAc2"] = fmt.Sprintf("%.3f", state.CurrentAc2)
+		evChargerTopics["currentAc3"] = fmt.Sprintf("%.3f", state.CurrentAc3)
+		evChargerTopics["powerDc"] = fmt.Sprintf("%.3f", state.PowerDc)
+		evChargerTopics["currentDc"] = fmt.Sprintf("%.3f", state.CurrentDc)
 
 		// Vehicle state
-		"soc":                  fmt.Sprintf("%.3f", state.SoC),
-		"targetEnergyRequest":  fmt.Sprintf("%.3f", state.TargetEnergyRequest),
-		"requestedTargetPower": fmt.Sprintf("%.3f", state.RequestedTargetPower),
+		evChargerTopics["soc"] = fmt.Sprintf("%.3f", state.SoC)
+		evChargerTopics["targetEnergyRequest"] = fmt.Sprintf("%.3f", state.TargetEnergyRequest)
+		evChargerTopics["requestedTargetPower"] = fmt.Sprintf("%.3f", state.RequestedTargetPower)
 	}
 
 	// device/ess/0/* topics (mirrors relevant charger state)
@@ -313,8 +325,12 @@ func (s *Server) publishState() {
 		"dischargePowerMin": fmt.Sprintf("%.3f", state.DischargePowerMin),
 		"dischargePowerMax": fmt.Sprintf("%.3f", state.DischargePowerMax),
 		"controlMode":       state.ControlMode,
-		"powerAc":           fmt.Sprintf("%.3f", state.PowerAc),
-		"soc":               fmt.Sprintf("%.3f", state.SoC),
+	}
+
+	// Only include power and soc on ess topics when EV is connected
+	if state.EVConnected {
+		essTopics["powerAc"] = fmt.Sprintf("%.3f", state.PowerAc)
+		essTopics["soc"] = fmt.Sprintf("%.3f", state.SoC)
 	}
 
 	// Publish serialNumber as retained so new subscribers get it immediately
@@ -330,6 +346,23 @@ func (s *Server) publishState() {
 	for topic, payload := range essTopics {
 		s.broker.Publish("device/ess/0/"+topic, []byte(payload), false, 0)
 	}
+}
+
+// clearCarTopics publishes empty payloads to all car-related topics,
+// effectively removing them from the MQTT broker. Caller must hold mu.
+func (s *Server) clearCarTopics() {
+	carTopics := []string{
+		"sessionState", "chargeProtocol",
+		"powerAc", "currentAc", "currentAc1", "currentAc2", "currentAc3",
+		"powerDc", "currentDc",
+		"soc", "targetEnergyRequest", "requestedTargetPower",
+	}
+	for _, topic := range carTopics {
+		s.broker.Publish("device/evCharger/0/"+topic, []byte{}, false, 0)
+	}
+	// Also clear ess mirrored car topics
+	s.broker.Publish("device/ess/0/powerAc", []byte{}, false, 0)
+	s.broker.Publish("device/ess/0/soc", []byte{}, false, 0)
 }
 
 // handleMessage processes incoming MQTT messages
@@ -373,8 +406,8 @@ func (s *Server) handleMessage(topic string, payload []byte, clientID string, cl
 		s.state.TargetPower = power
 		s.state.RequestedTargetPower = power
 
-		// Only apply power if EV is connected and not in IDLE
-		if s.state.EVConnected && s.state.SessionState != "IDLE" && s.state.ControlMode == "CONTROLLABLE" {
+		// Only apply power if EV is connected
+		if s.state.EVConnected && s.state.ControlMode == "CONTROLLABLE" {
 			if power != 0 {
 				// Transition to CHARGE_LOOP when power is commanded
 				if s.state.SessionState == "PAUSED" {
@@ -412,8 +445,8 @@ func (s *Server) handleMessage(topic string, payload []byte, clientID string, cl
 		fmt.Sscanf(payloadStr, "%f", &limit)
 		s.state.LimitChargePower = limit
 
-		// Only apply limit if EV is connected and not in IDLE
-		if s.state.EVConnected && s.state.SessionState != "IDLE" && s.state.ControlMode == "LIMITABLE" {
+		// Only apply limit if EV is connected
+		if s.state.EVConnected && s.state.ControlMode == "LIMITABLE" {
 			if limit != 0 {
 				// Transition to CHARGE_LOOP when limit is set
 				if s.state.SessionState == "PAUSED" {
@@ -465,10 +498,10 @@ func (s *Server) wakeUpCharger() {
 	}
 }
 
-// sleepCharger transitions charger to idle state
+// sleepCharger transitions charger to paused state and stops power
 func (s *Server) sleepCharger() {
 	s.cancelLowPowerTimeout()
-	s.state.SessionState = "IDLE"
+	s.state.SessionState = "PAUSED"
 	s.state.PowerAc = 0
 	s.state.PowerDc = 0
 	s.state.RequestedTargetPower = 0
@@ -563,6 +596,7 @@ func (s *Server) GetState() map[string]interface{} {
 		"sessionState":   s.state.SessionState,
 		"controlMode":    s.state.ControlMode,
 		"evConnected":    s.state.EVConnected,
+		"errorState":     s.state.ErrorState,
 		"chargeProtocol": s.state.ChargeProtocol,
 		"replugRequired": s.state.ReplugRequired,
 		"sleep":          s.state.Sleep,
@@ -621,18 +655,38 @@ func (s *Server) SetValue(key string, value interface{}) error {
 		}
 	case "evConnected":
 		if v, ok := value.(bool); ok {
-			s.state.EVConnected = v
 			if v {
-				// Auto-transition to PAUSED when EV connects
-				if s.state.SessionState == "IDLE" {
-					s.state.SessionState = "PAUSED"
-				}
+				s.state.EVConnected = true
+				s.state.SessionState = "PAUSED"
+				s.state.ErrorState = false
 			} else {
-				// Auto-transition to IDLE when EV disconnects, stop power
-				s.state.SessionState = "IDLE"
+				// EV disconnected — clear car topics and stop power
+				s.state.ErrorState = false
+				s.state.SessionState = "PAUSED"
+				s.state.EVConnected = false
 				s.state.PowerAc = 0
 				s.state.PowerDc = 0
+				s.state.RequestedTargetPower = 0
+				s.state.TargetPower = 0
 				s.updateCurrents()
+				// Remove car-related topics from the broker
+				s.clearCarTopics()
+			}
+		}
+	case "errorState":
+		if v, ok := value.(bool); ok {
+			// Error toggle only applies when EV is connected
+			if s.state.EVConnected {
+				s.state.ErrorState = v
+				if v {
+					s.cancelLowPowerTimeout()
+					s.state.SessionState = "ERROR"
+					s.state.PowerAc = 0
+					s.state.PowerDc = 0
+					s.updateCurrents()
+				} else {
+					s.state.SessionState = "PAUSED"
+				}
 			}
 		}
 	case "soc":
@@ -814,8 +868,8 @@ func (s *Server) SetTargetPower(power float64) {
 	s.state.TargetPower = power
 	s.state.RequestedTargetPower = power
 
-	// Only apply power if EV is connected and not in IDLE
-	if s.state.EVConnected && s.state.SessionState != "IDLE" {
+	// Only apply power if EV is connected
+	if s.state.EVConnected {
 		if power != 0 {
 			// Transition to CHARGE_LOOP when power is commanded
 			if s.state.SessionState == "PAUSED" {

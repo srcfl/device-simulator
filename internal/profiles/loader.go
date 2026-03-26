@@ -605,7 +605,7 @@ var EmbeddedProfiles = map[string]*Profile{
 			BaseTopic:         "device/evCharger/0",
 			PublishIntervalMs: 1000,
 			Defaults: map[string]interface{}{
-				"sessionState":      "IDLE",
+				"sessionState":      "PAUSED",
 				"controlMode":       "CONTROLLABLE",
 				"evConnected":       false,
 				"chargeProtocol":    "CCS",
