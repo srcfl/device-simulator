@@ -16,14 +16,10 @@ import (
 
 	"github.com/blang/semver"
 	"github.com/google/go-github/v50/github"
-	"golang.org/x/oauth2"
 )
 
 // Version is set at build time via ldflags
 var Version = "0.0.0-dev"
-
-// GitHubToken is set at build time via ldflags for private repo access
-var GitHubToken = ""
 
 const (
 	// GitHub repository for updates
@@ -42,14 +38,9 @@ type UpdateInfo struct {
 	AssetName      string `json:"asset_name"`
 }
 
-// getGitHubClient returns a GitHub API client, with auth if token is available
+// getGitHubClient returns an unauthenticated GitHub API client.
+// The repository is public, so release checks need no token.
 func getGitHubClient() *github.Client {
-	ctx := context.Background()
-	if GitHubToken != "" {
-		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: GitHubToken})
-		tc := oauth2.NewClient(ctx, ts)
-		return github.NewClient(tc)
-	}
 	return github.NewClient(nil)
 }
 
@@ -109,33 +100,22 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	current, parseErr := semver.Parse(Version)
 	isDevVersion := parseErr != nil
 
-	// Only log token status in dev builds (no token means dev build)
-	if GitHubToken == "" {
-		log.Printf("Update check: No GitHub token (dev build)")
+	if isDevVersion {
+		log.Printf("Update check: dev build (version %q)", Version)
 	}
 
 	// Fetch latest release directly from GitHub API
 	release, err := fetchLatestRelease()
 	if err != nil {
 		log.Printf("Update check failed: %v", err)
-		if GitHubToken == "" {
-			info.LatestVersion = "no token"
-			info.ReleaseNotes = "Cannot check updates: No access token configured.\n\nThis is a development build. Release builds have update checking enabled."
-		} else {
-			info.LatestVersion = "error"
-			info.ReleaseNotes = fmt.Sprintf("Could not check for updates: %v", err)
-		}
+		info.LatestVersion = "error"
+		info.ReleaseNotes = fmt.Sprintf("Could not check for updates: %v", err)
 		return info, nil
 	}
 
 	if release == nil || release.TagName == nil {
 		log.Printf("No release or tag name found")
-		if GitHubToken == "" {
-			info.LatestVersion = "unknown"
-			info.ReleaseNotes = "Cannot check updates: No access token configured for private repository."
-		} else {
-			info.LatestVersion = "no releases"
-		}
+		info.LatestVersion = "no releases"
 		return info, nil
 	}
 
@@ -152,7 +132,6 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	}
 
 	// Find asset URL for current platform
-	// Use API URL for private repos (works with token auth), browser URL as fallback
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
 
@@ -170,10 +149,7 @@ func CheckForUpdate() (*UpdateInfo, error) {
 				if strings.Contains(name, osName) && strings.Contains(name, arch) {
 					// Store asset name for proper file extension handling
 					info.AssetName = *asset.Name
-					// Prefer API URL for private repo downloads (requires token)
-					if asset.URL != nil && GitHubToken != "" {
-						info.AssetURL = *asset.URL
-					} else if asset.BrowserDownloadURL != nil {
+					if asset.BrowserDownloadURL != nil {
 						info.AssetURL = *asset.BrowserDownloadURL
 					}
 					break
@@ -263,32 +239,13 @@ func DoUpdate() error {
 
 // downloadAsset downloads the release asset to temp directory
 func downloadAsset(url string, assetName string, destDir string) (string, error) {
-	// For private repos, we need to use GitHub API to download assets
-	// The BrowserDownloadURL redirects to S3 and doesn't pass auth headers
-
-	// Create HTTP client that doesn't follow redirects automatically
-	// so we can add auth to the redirected request
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Add auth header to redirected requests if we have a token
-			if GitHubToken != "" && len(via) > 0 {
-				req.Header.Set("Authorization", "token "+GitHubToken)
-			}
-			return nil
-		},
-	}
-
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
 	}
-
-	if GitHubToken != "" {
-		req.Header.Set("Authorization", "token "+GitHubToken)
-	}
 	req.Header.Set("Accept", "application/octet-stream")
 
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}

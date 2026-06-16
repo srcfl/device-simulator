@@ -1,5 +1,10 @@
 # Device Simulator
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Build](https://github.com/srcfl/device-simulator/actions/workflows/build.yml/badge.svg)](https://github.com/srcfl/device-simulator/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/srcfl/device-simulator)](https://github.com/srcfl/device-simulator/releases)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](go.mod)
+
 > *"In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move."* - But Modbus? Modbus is mostly harmless.
 
 A **Mostly Harmless** multi-protocol device simulator for testing solar inverters, batteries, EV chargers, and energy systems. Don't Panic - it's just registers.
@@ -75,6 +80,8 @@ docker compose up --build
 | pixii-powershaper | Pixii PowerShaper |
 | ferroamp | FerroAmp EnergyHub |
 | sdm630 | SDM630 Energy Meter |
+
+> **Disclaimer:** Device Simulator is an independent testing tool and is **not affiliated with, endorsed by, or sponsored by** any of the manufacturers listed above. Product and company names are trademarks of their respective owners and are used only to identify the device behavior being simulated.
 
 ## API Endpoints
 

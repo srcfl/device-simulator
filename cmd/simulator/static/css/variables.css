@@ -2,24 +2,24 @@
 
 /* Font Faces */
 @font-face {
-    font-family: 'Satoshi';
-    src: url('/static/fonts/satoshi-regular.woff2') format('woff2');
+    font-family: 'Manrope';
+    src: url('/static/fonts/manrope-regular.woff2') format('woff2');
     font-weight: 400;
     font-style: normal;
     font-display: swap;
 }
 
 @font-face {
-    font-family: 'Satoshi';
-    src: url('/static/fonts/satoshi-medium.woff2') format('woff2');
+    font-family: 'Manrope';
+    src: url('/static/fonts/manrope-medium.woff2') format('woff2');
     font-weight: 500;
     font-style: normal;
     font-display: swap;
 }
 
 @font-face {
-    font-family: 'Satoshi';
-    src: url('/static/fonts/satoshi-bold.woff2') format('woff2');
+    font-family: 'Manrope';
+    src: url('/static/fonts/manrope-bold.woff2') format('woff2');
     font-weight: 700;
     font-style: normal;
     font-display: swap;
@@ -98,7 +98,7 @@
     --radius-full: 9999px;
 
     /* Typography */
-    --font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
     --font-size-xs: 0.625rem;
     --font-size-sm: 0.75rem;

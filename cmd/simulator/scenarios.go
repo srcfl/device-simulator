@@ -79,13 +79,13 @@ var LoadScenarios = map[string]*LoadScenario{
 			{StartHour: 22, EndHour: 24, L1: 80, L2: 60, L3: 60},
 		},
 	},
-	"weed_factory": {
-		Key:         "weed_factory",
-		Name:        "The Secret Weed Factory",
-		Description: "Constant high load 24/7 from grow lights and ventilation",
+	"always_on": {
+		Key:         "always_on",
+		Name:        "Always-On Facility",
+		Description: "Constant high load 24/7 from industrial equipment and ventilation",
 		PeakLoad:    10500,
 		TimeSlots: []LoadScenarioSlot{
-			// 24/7 constant high load (grow lights run 18-24h, ventilation always)
+			// 24/7 constant high load (equipment and ventilation run continuously)
 			{StartHour: 0, EndHour: 24, L1: 3500, L2: 3500, L3: 3500},
 		},
 	},
@@ -135,7 +135,7 @@ var LoadScenarios = map[string]*LoadScenario{
 func GetLoadScenariosSlice() []*LoadScenario {
 	scenarios := make([]*LoadScenario, 0, len(LoadScenarios))
 	// Ordered list
-	order := []string{"static", "gaming_family", "old_couple", "weed_factory", "work_from_home", "night_owl"}
+	order := []string{"static", "gaming_family", "old_couple", "always_on", "work_from_home", "night_owl"}
 	for _, key := range order {
 		if s, ok := LoadScenarios[key]; ok {
 			scenarios = append(scenarios, s)

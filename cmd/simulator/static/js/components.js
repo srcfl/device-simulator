@@ -977,7 +977,7 @@ document.addEventListener('alpine:init', () => {
             const fallbackNames = {
                 gaming_family: 'Gaming Family',
                 old_couple: 'Old Couple',
-                weed_factory: 'Weed Factory',
+                always_on: 'Always-On Facility',
                 work_from_home: 'Work From Home',
                 night_owl: 'Night Owl'
             };
@@ -989,7 +989,7 @@ document.addEventListener('alpine:init', () => {
                 static: '📌',
                 gaming_family: '🎮',
                 old_couple: '👴',
-                weed_factory: '🌿',
+                always_on: '🏭',
                 work_from_home: '💻',
                 night_owl: '🦉'
             };
@@ -2773,7 +2773,7 @@ document.addEventListener('alpine:init', () => {
                 static: '📌',
                 gaming_family: '🎮',
                 old_couple: '👴',
-                weed_factory: '🌿',
+                always_on: '🏭',
                 work_from_home: '💻',
                 night_owl: '🦉'
             };

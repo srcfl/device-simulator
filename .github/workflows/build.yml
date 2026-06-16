@@ -190,14 +190,13 @@ jobs:
       - name: Build macOS App
         env:
           VERSION: ${{ needs.check-release.outputs.version }}
-          UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
         run: |
           mkdir -p build/macos
 
-          # Build binary with version and update token
+          # Build binary with version
           CGO_ENABLED=1 CGO_LDFLAGS="-framework UniformTypeIdentifiers" \
             go build -tags "desktop,production" \
-            -ldflags "-s -w -X main.Version=${VERSION} -X main.GitHubToken=${UPDATE_TOKEN}" \
+            -ldflags "-s -w -X main.Version=${VERSION}" \
             -o build/macos/device-simulator \
             ./cmd/simulator/
 
@@ -356,13 +355,12 @@ jobs:
       - name: Build Linux App
         env:
           VERSION: ${{ needs.check-release.outputs.version }}
-          UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
         run: |
           mkdir -p build/linux
 
-          # Build desktop binary with version and update token
+          # Build desktop binary with version
           CGO_ENABLED=1 go build -tags "desktop,production" \
-            -ldflags "-s -w -X main.Version=${VERSION} -X main.GitHubToken=${UPDATE_TOKEN}" \
+            -ldflags "-s -w -X main.Version=${VERSION}" \
             -o build/linux/device-simulator \
             ./cmd/simulator/
 
@@ -410,13 +408,12 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ needs.check-release.outputs.version }}
-          UPDATE_TOKEN: ${{ secrets.UPDATE_TOKEN }}
         run: |
           New-Item -ItemType Directory -Force -Path build\windows
 
           $env:CGO_ENABLED = "1"
           go build -tags "desktop,production" `
-            -ldflags "-s -w -H windowsgui -X main.Version=$env:VERSION -X main.GitHubToken=$env:UPDATE_TOKEN" `
+            -ldflags "-s -w -H windowsgui -X main.Version=$env:VERSION" `
             -o build\windows\device-simulator.exe `
             .\cmd\simulator\
 
