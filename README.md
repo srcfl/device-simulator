@@ -30,7 +30,9 @@ sudo apt install libgtk-3-0 libwebkit2gtk-4.0-37  # Debian/Ubuntu
 ./linux/device-simulator.sh
 ```
 
-**Windows:** Unzip and run `device-simulator.exe --desktop`
+**Windows:** Unzip and double-click `device-simulator.exe` — the desktop window opens automatically (WebView2 auto-installs if needed).
+
+> **Run headless on Windows?** Open a terminal and run `device-simulator.exe --desktop=false`, then browse to <http://localhost:8762>. (The released `.exe` is a GUI build, so it does not print to the console; the web dashboard is the interface. For console logs, use Docker or `make build-windows-server`.)
 
 The app auto-updates when new versions are available.
 

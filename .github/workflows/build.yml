@@ -412,16 +412,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path build\windows
 
           $env:CGO_ENABLED = "1"
+          # Built with the "desktop" tag so the executable defaults to desktop
+          # mode: double-clicking device-simulator.exe opens the native window
+          # (no launcher .bat needed). Run with --desktop=false for headless mode.
           go build -tags "desktop,production" `
             -ldflags "-s -w -H windowsgui -X main.Version=$env:VERSION" `
             -o build\windows\device-simulator.exe `
             .\cmd\simulator\
-
-          # Create launcher batch file
-          @"
-          @echo off
-          start "" "%~dp0device-simulator.exe" --desktop %*
-          "@ | Out-File -FilePath build\windows\Device-Simulator.bat -Encoding ASCII
 
           # Create zip (use consistent naming for selfupdate compatibility)
           Compress-Archive -Path build\windows\* -DestinationPath build\device-simulator_windows_amd64.zip
@@ -483,5 +480,11 @@ jobs:
             ```
 
             ### Windows
-            1. Unzip and run `Device-Simulator.bat` or `device-simulator.exe --desktop`
+            1. Unzip and double-click `device-simulator.exe`
             2. WebView2 will auto-install if needed
+
+            To run headless (HTTP server only, no window), open a terminal and run
+            `device-simulator.exe --desktop=false`, then browse to http://localhost:8762
+            Note: the released `.exe` is a GUI build, so it produces no console output and
+            Ctrl+C will not stop it — control it from the web dashboard, or use the Docker
+            image / `make build-windows-server` if you need console logs.

@@ -59,9 +59,9 @@ go test ./...
 
 ```
 device-simulator
-├── Mode Selection (--desktop flag or WAILS_DESKTOP=1)
-│   ├── Desktop Mode: Wails window + HTTP API on :8762
-│   └── Server Mode: HTTP-only on :80 (Docker default)
+├── Mode Selection (--desktop flag, build tag default, or WAILS_DESKTOP)
+│   ├── Desktop Mode: Wails window + HTTP API on :8762 (default for desktop builds)
+│   └── Server Mode: HTTP-only on :80 (default for server/Docker builds)
 ├── HTTP API Server (unified dashboard + REST API)
 ├── Modbus TCP Servers (:5000+)
 ├── MQTT Brokers (:1883+)
@@ -70,12 +70,17 @@ device-simulator
 
 ### Dual-Mode Operation
 
-The app supports two modes controlled by the `--desktop` flag:
+The app supports two modes controlled by the `--desktop` flag. The flag's
+**default depends on the build tag**: builds compiled with the `desktop` tag
+(the released macOS/Linux/Windows apps) default to desktop mode, so launching
+the executable directly opens the native window. Server/Docker builds omit the
+tag and default to headless. The default is defined in
+`cmd/simulator/desktop_mode_on.go` / `desktop_mode_off.go`.
 
 | Mode | Trigger | UI | Use Case |
 |------|---------|-----|----------|
-| Desktop | `--desktop` or `WAILS_DESKTOP=1` | Native Wails window | End users |
-| Server | Default (no flag) | Browser at HTTP port | Docker, development |
+| Desktop | `--desktop`, `WAILS_DESKTOP=1`, or a `desktop`-tagged build | Native Wails window | End users |
+| Server | `--desktop=false`, `WAILS_DESKTOP=0`, or an untagged build | Browser at HTTP port | Docker, development |
 
 ### Go Backend (`cmd/simulator/`, `internal/`)
 
@@ -203,7 +208,7 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error)
 | MQTT_BASE_PORT | 1883 | First MQTT port |
 | OCPP_BASE_PORT | 9000 | First OCPP port |
 | HTTP_PORT | 80 (Docker) / 8762 (Desktop) | Web dashboard port |
-| WAILS_DESKTOP | 0 | Set to 1 to force desktop mode |
+| WAILS_DESKTOP | build-tag default | Set to 1 to force desktop mode, 0 to force headless (overrides --desktop) |
 | HOST_IP | auto-detected | Override displayed host IP |
 
 ## CI/CD (GitHub Actions)
