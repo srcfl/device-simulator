@@ -1,0 +1,5 @@
+# The raw dependency tree is large (~114MB, 23k files). We commit the
+# compressed archive (node_modules.tgz) instead, which is what gets embedded
+# into the Go binary and extracted at runtime. Regenerate both with:
+#   make vendor-matter
+node_modules/

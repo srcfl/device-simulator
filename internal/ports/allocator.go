@@ -13,6 +13,7 @@ const (
 	ProtocolModbus Protocol = "modbus"
 	ProtocolMQTT   Protocol = "mqtt"
 	ProtocolOCPP   Protocol = "ocpp"
+	ProtocolMatter Protocol = "matter"
 )
 
 // Allocator manages dynamic port allocation for simulators
@@ -21,15 +22,17 @@ type Allocator struct {
 	modbusBase     int
 	mqttBase       int
 	ocppBase       int
+	matterBase     int
 	allocatedPorts map[int]bool
 }
 
 // NewAllocator creates a new port allocator with the given base ports
-func NewAllocator(modbusBase, mqttBase, ocppBase int) *Allocator {
+func NewAllocator(modbusBase, mqttBase, ocppBase, matterBase int) *Allocator {
 	return &Allocator{
 		modbusBase:     modbusBase,
 		mqttBase:       mqttBase,
 		ocppBase:       ocppBase,
+		matterBase:     matterBase,
 		allocatedPorts: make(map[int]bool),
 	}
 }
@@ -48,6 +51,8 @@ func (a *Allocator) Allocate(protocol Protocol) int {
 		base = a.mqttBase
 	case ProtocolOCPP:
 		base = a.ocppBase
+	case ProtocolMatter:
+		base = a.matterBase
 	default:
 		return 0
 	}
@@ -95,6 +100,8 @@ func (a *Allocator) AllocateAvailable(protocol Protocol) int {
 		base = a.mqttBase
 	case ProtocolOCPP:
 		base = a.ocppBase
+	case ProtocolMatter:
+		base = a.matterBase
 	default:
 		return 0
 	}
@@ -145,8 +152,8 @@ func (a *Allocator) AllocatedCount() int {
 }
 
 // GetBasePorts returns the configured base ports for each protocol
-func (a *Allocator) GetBasePorts() (modbus, mqtt, ocpp int) {
-	return a.modbusBase, a.mqttBase, a.ocppBase
+func (a *Allocator) GetBasePorts() (modbus, mqtt, ocpp, matter int) {
+	return a.modbusBase, a.mqttBase, a.ocppBase, a.matterBase
 }
 
 func isPortAvailable(port int) bool {
