@@ -1,6 +1,6 @@
 .PHONY: up down restart build logs clean test env \
 	build-macos build-linux build-linux-server build-windows \
-	run-macos package help
+	run-macos package help vendor-matter test-matter
 
 # Auto-detect host IP for Mac (en0 = WiFi, en1 = Ethernet)
 HOST_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
@@ -31,6 +31,18 @@ clean:
 
 test:
 	go test ./...
+
+# Vendor the matter.js bridge dependencies and repackage them for embedding.
+# Run this after changing the bridge's package.json (e.g. bumping matter.js).
+# Produces internal/matter/bridge/node_modules.tgz, which is embedded into the
+# Go binary; the raw node_modules/ is gitignored.
+vendor-matter:
+	cd internal/matter/bridge && npm ci --omit=dev && tar czf node_modules.tgz node_modules
+	@echo "Vendored matter.js -> internal/matter/bridge/node_modules.tgz"
+
+# Run the real-Node Matter integration tests (skipped without Node installed).
+test-matter:
+	go test -tags matter_integration ./internal/matter/...
 
 # Build macOS desktop app (native, requires macOS)
 build-macos:

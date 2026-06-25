@@ -11,10 +11,10 @@ import (
 // means commissioning survives app restarts and bridge crashes.
 //
 // Resolution order mirrors internal/state so a single DATA_DIR controls both:
-//   1. MATTER_STORAGE_ROOT (explicit override)
-//   2. DEVICE_SIMULATOR_DATA_DIR/matter
-//   3. <user config dir>/Device Simulator/matter
-//   4. <temp>/device-simulator-matter (last resort)
+//  1. MATTER_STORAGE_ROOT (explicit override)
+//  2. DEVICE_SIMULATOR_DATA_DIR/matter
+//  3. <user config dir>/Device Simulator/matter
+//  4. <temp>/device-simulator-matter (last resort)
 func StorageRoot() string {
 	if explicit := os.Getenv("MATTER_STORAGE_ROOT"); explicit != "" {
 		return explicit

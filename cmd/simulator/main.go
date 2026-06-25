@@ -21,11 +21,11 @@ import (
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/device"
+	"github.com/srcfl/device-simulator/internal/matter"
+	"github.com/srcfl/device-simulator/internal/mcp"
 	simmdns "github.com/srcfl/device-simulator/internal/mdns"
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/modbus/devices"
-	"github.com/srcfl/device-simulator/internal/matter"
-	"github.com/srcfl/device-simulator/internal/mcp"
 	"github.com/srcfl/device-simulator/internal/mqtt"
 	"github.com/srcfl/device-simulator/internal/ocpp"
 	"github.com/srcfl/device-simulator/internal/ports"
@@ -43,27 +43,27 @@ var embeddedFS embed.FS
 
 // Simulator represents a single simulator instance
 type Simulator struct {
-	ID                 int                    `json:"id"`
-	Serial             string                 `json:"serial"`
-	Protocol           string                 `json:"protocol"`
-	Category           string                 `json:"category"`
-	SlaveID            uint8                  `json:"slave_id,omitempty"`
-	Port               int                    `json:"port"`
-	Running            bool                   `json:"running"`
-	SiteID             int                    `json:"site_id"`   // Which site this simulator belongs to (0 = orphan)
-	DeviceOn           bool                   `json:"device_on"` // Whether device is contributing power (can be off but still on site)
-	BatteryCapacityKWh float64                `json:"battery_capacity_kwh"`
-	Server             *modbus.Server         `json:"-"`
-	MQTTServer         *mqtt.Server           `json:"-"`
-	OCPPServer         *ocpp.Server           `json:"-"`
-	MatterServer       *matter.Server         `json:"-"`
-	MatterType         string                 `json:"matter_type,omitempty"` // e.g. "matter_thermostat"
-	Device             device.DeviceServer    `json:"-"`
-	ProfilesManager    *profiles.Manager      `json:"-"`
-	RegisterSet        *modbus.RegisterSet    `json:"-"` // Device-specific register definitions
-	Automation         *AutomationState       `json:"-"` // Legacy - will be removed once migration complete
-	internalSOC        float64                           // High-precision SOC accumulator (avoids register truncation)
-	socInitialized     bool                              // Whether internalSOC has been initialized from register
+	ID                 int                 `json:"id"`
+	Serial             string              `json:"serial"`
+	Protocol           string              `json:"protocol"`
+	Category           string              `json:"category"`
+	SlaveID            uint8               `json:"slave_id,omitempty"`
+	Port               int                 `json:"port"`
+	Running            bool                `json:"running"`
+	SiteID             int                 `json:"site_id"`   // Which site this simulator belongs to (0 = orphan)
+	DeviceOn           bool                `json:"device_on"` // Whether device is contributing power (can be off but still on site)
+	BatteryCapacityKWh float64             `json:"battery_capacity_kwh"`
+	Server             *modbus.Server      `json:"-"`
+	MQTTServer         *mqtt.Server        `json:"-"`
+	OCPPServer         *ocpp.Server        `json:"-"`
+	MatterServer       *matter.Server      `json:"-"`
+	MatterType         string              `json:"matter_type,omitempty"` // e.g. "matter_thermostat"
+	Device             device.DeviceServer `json:"-"`
+	ProfilesManager    *profiles.Manager   `json:"-"`
+	RegisterSet        *modbus.RegisterSet `json:"-"` // Device-specific register definitions
+	Automation         *AutomationState    `json:"-"` // Legacy - will be removed once migration complete
+	internalSOC        float64             // High-precision SOC accumulator (avoids register truncation)
+	socInitialized     bool                // Whether internalSOC has been initialized from register
 	mu                 sync.RWMutex
 }
 
@@ -170,10 +170,10 @@ var (
 	simulatorsMu    sync.RWMutex
 	nextSimulatorID int
 	nextIDMu        sync.Mutex
-	portAllocator    *ports.Allocator
-	mdnsAdvertiser   *simmdns.Advertiser
-	isDesktopMode    bool
-	runtimeSettings  *settings.AppSettings
+	portAllocator   *ports.Allocator
+	mdnsAdvertiser  *simmdns.Advertiser
+	isDesktopMode   bool
+	runtimeSettings *settings.AppSettings
 	stateDirty      bool
 	stateMu         sync.Mutex
 	stateWarningsMu sync.Mutex
@@ -1559,13 +1559,13 @@ func handleSimulatorsCreate(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":             sim.ID,
-		"serial":         sim.Serial,
-		"protocol":       sim.Protocol,
-		"category":       sim.Category,
-		"port":           sim.Port,
-		"running":        sim.Running,
-		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
+		"id":            sim.ID,
+		"serial":        sim.Serial,
+		"protocol":      sim.Protocol,
+		"category":      sim.Category,
+		"port":          sim.Port,
+		"running":       sim.Running,
+		"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 	})
 }
 
@@ -1587,17 +1587,17 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 
 		sim.mu.RLock()
 		entry := map[string]interface{}{
-			"id":             sim.ID,
-			"serial":         sim.Serial,
-			"protocol":       sim.Protocol,
-			"category":       sim.Category,
-			"port":           sim.Port,
-			"running":        sim.Running,
-			"automation":     sim.Automation.Enabled,
-			"profile":        sim.ProfilesManager.GetActiveName(),
-			"site_id":        sim.SiteID,
-			"device_on":      sim.DeviceOn,
-			"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
+			"id":            sim.ID,
+			"serial":        sim.Serial,
+			"protocol":      sim.Protocol,
+			"category":      sim.Category,
+			"port":          sim.Port,
+			"running":       sim.Running,
+			"automation":    sim.Automation.Enabled,
+			"profile":       sim.ProfilesManager.GetActiveName(),
+			"site_id":       sim.SiteID,
+			"device_on":     sim.DeviceOn,
+			"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 		}
 
 		// Add protocol-specific fields
@@ -4587,8 +4587,8 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	// If meter is an inverter, read its PV/Battery values and include them in the calculation
 	// Distribute PV/battery contributions using phase factors
 	if meterCategory == "inverter" {
-		pvPower := getSemanticValue(meterSim, "pv_power")     // PV power
-		batteryPower := getBatterySignedPower(meterSim) // Signed battery power
+		pvPower := getSemanticValue(meterSim, "pv_power") // PV power
+		batteryPower := getBatterySignedPower(meterSim)   // Signed battery power
 
 		// Distribute PV generation (reduces load) and battery across phases
 		pvBatteryNet := -pvPower + batteryPower

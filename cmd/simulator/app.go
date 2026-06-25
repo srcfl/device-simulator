@@ -1213,15 +1213,15 @@ func (a *App) CreateSimulatorInSite(siteId int, simType string) (map[string]inte
 	a.emitSiteUpdate()
 
 	return map[string]interface{}{
-		"id":             sim.ID,
-		"serial":         sim.Serial,
-		"protocol":       sim.Protocol,
-		"category":       sim.Category,
-		"port":           sim.Port,
-		"running":        sim.Running,
-		"site_id":        siteId,
-		"device_on":      sim.DeviceOn,
-		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
+		"id":            sim.ID,
+		"serial":        sim.Serial,
+		"protocol":      sim.Protocol,
+		"category":      sim.Category,
+		"port":          sim.Port,
+		"running":       sim.Running,
+		"site_id":       siteId,
+		"device_on":     sim.DeviceOn,
+		"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 	}, nil
 }
 

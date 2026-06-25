@@ -11,11 +11,11 @@ import (
 // initial physics state, and the functions that drive/control it. Device
 // physics live here in Go; the bridge only mirrors the resulting attributes.
 type deviceType struct {
-	Key            string  // bridge key, e.g. "thermostat"
-	SimType        string  // createSimulator type, e.g. "matter_thermostat"
-	Label          string  // UI label
-	Icon           string  // UI icon
-	SerialTag      string  // short serial infix
+	Key            string // bridge key, e.g. "thermostat"
+	SimType        string // createSimulator type, e.g. "matter_thermostat"
+	Label          string // UI label
+	Icon           string // UI icon
+	SerialTag      string // short serial infix
 	MatterDefaults map[string]float64
 	InitPhys       map[string]float64
 	Generate       func(s *Server, t time.Time) []AttrChange

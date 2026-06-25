@@ -359,8 +359,8 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Description: "Create a simulator",
 				InputSchema: schemaObject(map[string]interface{}{
 					"type": map[string]interface{}{
-						"type": "string",
-						"description": "Simulator type (inverter, energy_meter, v2x_charger, ocpp_charger)",
+						"type":        "string",
+						"description": "Simulator type: inverter, energy_meter, v2x_charger, ocpp_charger, or a Matter device (matter_tempsensor, matter_lightsensor, matter_smartplug, matter_evse, matter_thermostat, matter_heatpump, matter_dishwasher, matter_laundrywasher). Matter types require Node.js on the host.",
 					},
 				}, []string{"type"}),
 			},
@@ -397,10 +397,10 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Name:        "simulators.update_config",
 				Description: "Update simulator config",
 				InputSchema: schemaObject(map[string]interface{}{
-					"id":                    schemaInteger("Simulator ID"),
-					"slave_id":              schemaInteger("Modbus slave ID"),
-					"serial":                schemaString("Simulator serial"),
-					"ocpp_url":              schemaString("OCPP URL"),
+					"id":                   schemaInteger("Simulator ID"),
+					"slave_id":             schemaInteger("Modbus slave ID"),
+					"serial":               schemaString("Simulator serial"),
+					"ocpp_url":             schemaString("OCPP URL"),
 					"battery_capacity_kwh": schemaNumber("Battery capacity in kWh"),
 				}, []string{"id"}),
 			},
@@ -519,10 +519,10 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Name:        "simulators.automation.config",
 				Description: "Configure simulator automation",
 				InputSchema: schemaObject(map[string]interface{}{
-					"id":                schemaInteger("Simulator ID"),
-					"time_multiplier":   schemaNumber("Time multiplier"),
-					"scenario":          schemaString("Scenario"),
-					"profile":           schemaString("Profile"),
+					"id":                 schemaInteger("Simulator ID"),
+					"time_multiplier":    schemaNumber("Time multiplier"),
+					"scenario":           schemaString("Scenario"),
+					"profile":            schemaString("Profile"),
 					"update_interval_ms": schemaInteger("Update interval ms"),
 				}, []string{"id"}),
 			},
@@ -686,11 +686,11 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Name:        "sites.update_config",
 				Description: "Update site config",
 				InputSchema: schemaObject(map[string]interface{}{
-					"id":           schemaInteger("Site ID"),
-					"name":         schemaString("Site name"),
-					"base_load_w":  schemaNumber("Base load in watts"),
-					"fuse_size":    schemaInteger("Fuse size"),
-					"fuse_profile": schemaString("Fuse profile"),
+					"id":            schemaInteger("Site ID"),
+					"name":          schemaString("Site name"),
+					"base_load_w":   schemaNumber("Base load in watts"),
+					"fuse_size":     schemaInteger("Fuse size"),
+					"fuse_profile":  schemaString("Fuse profile"),
 					"phase_factors": schemaObject(nil, nil),
 					"fuse_blown":    schemaObject(nil, nil),
 				}, []string{"id"}),
@@ -913,6 +913,15 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 		},
 		{
 			Tool: Tool{
+				Name:        "matter.status",
+				Description: "Get Matter availability (requires Node.js on the host)",
+				InputSchema: schemaObject(nil, nil),
+			},
+			Method:       http.MethodGet,
+			PathTemplate: "/api/matter/status",
+		},
+		{
+			Tool: Tool{
 				Name:        "settings.get",
 				Description: "Get runtime settings",
 				InputSchema: schemaObject(nil, nil),
@@ -1055,7 +1064,7 @@ func schemaBoolean(description string) map[string]interface{} {
 
 func schemaArray(description string, itemType string) map[string]interface{} {
 	schema := map[string]interface{}{
-		"type": "array",
+		"type":  "array",
 		"items": map[string]interface{}{"type": itemType},
 	}
 	if description != "" {

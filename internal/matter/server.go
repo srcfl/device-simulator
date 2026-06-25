@@ -263,7 +263,7 @@ func (s *Server) GetLogs(limit int) []device.LogEntry {
 }
 
 func (s *Server) Protocol() device.Protocol { return device.ProtocolMatter }
-func (s *Server) Category() device.Category  { return device.CategoryMatter }
+func (s *Server) Category() device.Category { return device.CategoryMatter }
 
 func (s *Server) Address() string {
 	s.mu.RLock()

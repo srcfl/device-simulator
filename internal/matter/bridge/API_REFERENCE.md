@@ -72,6 +72,27 @@ endpoint.events.onOff.onOff$Changed.on((value, oldValue, context) => {
 - Energy: mWh (Wh × 1000) inside `EnergyMeasurementStruct.energy`.
 - EVSE currents: mA; sessionEnergyCharged: mWh.
 
+## Test vendor ID / DCL test-net (commissioning into real ecosystems)
+
+Simulated devices use the **CSA test Vendor ID `0xFFF1` (65521)** and a test
+Product ID (`0x8000`). These are the standard *test* identifiers — they are **not
+registered in the production Distributed Compliance Ledger (DCL)**, so a
+controller that only trusts certified/production devices will reject them.
+
+To commission a simulated device into a real ecosystem you must allow
+uncertified / test devices:
+
+- **Home Assistant** (Matter Server add-on): enable the **test/Test-Net DCL**
+  option (a.k.a. "Allow non-certified / test devices"). Without it, pairing a
+  `0xFFF1` device fails at attestation.
+- **Apple Home / Google Home**: pairing an uncertified test device shows an
+  "uncertified accessory" warning that must be accepted; some production builds
+  refuse test VIDs entirely — use a developer/test controller (e.g. chip-tool,
+  Home Assistant) for reliable testing.
+
+The manual pairing code and `MT:` QR payload are surfaced per device by the
+simulator (and via `GET /api/matter/status` for availability).
+
 ## Key enums
 - `Thermostat.SystemMode`: Off=0, Auto=1, Cool=3, Heat=4, EmergencyHeat=5, Precooling=6, FanOnly=7, Dry=8, Sleep=9.
 - `Thermostat.ControlSequenceOfOperation`: CoolingOnly=0, HeatingOnly=2, CoolingAndHeating=4.

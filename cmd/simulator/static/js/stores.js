@@ -858,8 +858,22 @@ const categories = {
     inverter: { name: 'Inverters', icon: '⚡', collapsed: false },
     energy_meter: { name: 'Energy Meters', icon: '📊', collapsed: false },
     v2x_charger: { name: 'V2X Chargers', icon: '🔋', collapsed: false },
-    ocpp_charger: { name: 'OCPP Chargers', icon: '🔌', collapsed: false }
+    ocpp_charger: { name: 'OCPP Chargers', icon: '🔌', collapsed: false },
+    matter: { name: 'Matter Devices', icon: '🏠', collapsed: false }
 };
+
+// Matter device types offered in the create dialog. Each is a commissionable
+// matter.js device (see /api/matter/status for availability).
+const matterDeviceTypes = [
+    { type: 'matter_tempsensor', name: 'Temperature Sensor', icon: '🌡️', desc: 'Reports temperature (diurnal curve)' },
+    { type: 'matter_lightsensor', name: 'Light Sensor', icon: '💡', desc: 'Reports illuminance (daylight curve)' },
+    { type: 'matter_smartplug', name: 'Smart Plug', icon: '🔌', desc: 'On/off plug with power & energy metering' },
+    { type: 'matter_evse', name: 'EVSE Charger', icon: '🚗', desc: 'EV charger with session energy' },
+    { type: 'matter_thermostat', name: 'Thermostat', icon: '🎛️', desc: 'Heating/cooling with setpoints' },
+    { type: 'matter_heatpump', name: 'Heat Pump', icon: '♨️', desc: 'Thermostat with electrical power & energy' },
+    { type: 'matter_dishwasher', name: 'Dishwasher', icon: '🍽️', desc: 'Timed wash cycle with operational state' },
+    { type: 'matter_laundrywasher', name: 'Washing Machine', icon: '🧺', desc: 'Timed wash cycle with operational state' }
+];
 
 // Register Alpine stores on alpine:init
 document.addEventListener('alpine:init', () => {
@@ -940,6 +954,8 @@ document.addEventListener('alpine:init', () => {
         selectedView: null,  // 'site_load' or null (for normal view)
         localIP: '--',
         categories: categories,
+        matterDeviceTypes: matterDeviceTypes,
+        matterStatus: { available: false, reason: 'Checking…', node_version: '' },
         addMenuOpen: false,
         refreshInterval: null,
         globalRefreshInterval: null,
@@ -958,6 +974,22 @@ document.addEventListener('alpine:init', () => {
         modbusDisplayOffset: 0,
         ocppDisplayOffset: 0,
         warnings: [],
+
+        // Fetch Matter availability (Node.js must be installed on the host).
+        async fetchMatterStatus() {
+            try {
+                let status;
+                if (isWails) {
+                    status = await window.go.main.App.MatterStatus();
+                } else {
+                    const resp = await fetch('/api/matter/status');
+                    status = await resp.json();
+                }
+                if (status) this.matterStatus = status;
+            } catch (e) {
+                this.matterStatus = { available: false, reason: 'Could not determine Matter status', node_version: '' };
+            }
+        },
 
         async init() {
             // Fetch version, local IP, and settings from backend
@@ -992,6 +1024,7 @@ document.addEventListener('alpine:init', () => {
             // Check for updates (non-blocking)
             this.checkForUpdate();
             this.loadWarnings();
+            this.fetchMatterStatus();
 
             try {
                 const serverSims = await api.getSimulators();

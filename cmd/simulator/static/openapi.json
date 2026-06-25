@@ -20,10 +20,25 @@
         "summary": "Create a simulator",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Simulator type. Matter types require Node.js on the host (see GET /api/matter/status).",
+                "enum": [
+                  "inverter", "energy_meter", "v2x_charger", "ocpp_charger",
+                  "matter_tempsensor", "matter_lightsensor", "matter_smartplug", "matter_evse",
+                  "matter_thermostat", "matter_heatpump", "matter_dishwasher", "matter_laundrywasher"
+                ]
+              }
+            }
+          } } }
         },
         "responses": {
-          "200": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } }
+          "200": { "description": "Created", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "Bad request (e.g. Matter requested but Node.js unavailable)" }
         }
       }
     },
@@ -431,6 +446,22 @@
       "get": {
         "summary": "Get application version",
         "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/matter/status": {
+      "get": {
+        "summary": "Get Matter availability",
+        "description": "Reports whether Matter device emulation is available. Matter requires Node.js (v18+, v20+ recommended) on the host; when unavailable the reason explains why.",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": {
+            "type": "object",
+            "properties": {
+              "available": { "type": "boolean" },
+              "reason": { "type": "string" },
+              "node_version": { "type": "string" }
+            }
+          } } } }
+        }
       }
     },
     "/api/settings": {
