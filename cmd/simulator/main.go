@@ -1631,6 +1631,17 @@ func handleSimulatorsListGet(w http.ResponseWriter, r *http.Request) {
 			entry["total_power"] = state["totalPower"]
 			entry["has_active_transaction"] = state["hasActiveTransaction"]
 			entry["max_power_kw"] = state["maxPowerKW"]
+		case "matter":
+			if sim.MatterServer != nil {
+				state := sim.MatterServer.GetState()
+				entry["device_type"] = state["device_type"]
+				entry["label"] = state["label"]
+				entry["pairing_code"] = state["pairing_code"]
+				entry["qr"] = state["qr"]
+				entry["commissioned"] = state["commissioned"]
+				entry["fabric_count"] = state["fabric_count"]
+				entry["bridge_up"] = state["bridge_up"]
+			}
 		}
 
 		sim.mu.RUnlock()
@@ -1777,6 +1788,11 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 		state := sim.OCPPServer.GetState()
 		status["state"] = state
 		status["ocpp_url"] = sim.OCPPServer.GetOCPPURL()
+	case "matter":
+		if sim.MatterServer != nil {
+			status["state"] = sim.MatterServer.GetState()
+			status["matter_type"] = sim.MatterType
+		}
 	}
 	sim.mu.RUnlock()
 
@@ -2280,6 +2296,12 @@ func handleState(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 		err = sim.MQTTServer.SetValue(req.Key, req.Value)
 	case "ocpp":
 		err = sim.OCPPServer.SetValue(req.Key, req.Value)
+	case "matter":
+		if sim.MatterServer == nil {
+			http.Error(w, "matter device not initialized", http.StatusBadRequest)
+			return
+		}
+		err = sim.MatterServer.SetValue(req.Key, req.Value)
 	default:
 		http.Error(w, "State changes not supported for this protocol", http.StatusBadRequest)
 		return
