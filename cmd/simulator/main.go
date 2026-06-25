@@ -24,6 +24,7 @@ import (
 	simmdns "github.com/srcfl/device-simulator/internal/mdns"
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/modbus/devices"
+	"github.com/srcfl/device-simulator/internal/matter"
 	"github.com/srcfl/device-simulator/internal/mcp"
 	"github.com/srcfl/device-simulator/internal/mqtt"
 	"github.com/srcfl/device-simulator/internal/ocpp"
@@ -55,6 +56,8 @@ type Simulator struct {
 	Server             *modbus.Server         `json:"-"`
 	MQTTServer         *mqtt.Server           `json:"-"`
 	OCPPServer         *ocpp.Server           `json:"-"`
+	MatterServer       *matter.Server         `json:"-"`
+	MatterType         string                 `json:"matter_type,omitempty"` // e.g. "matter_thermostat"
 	Device             device.DeviceServer    `json:"-"`
 	ProfilesManager    *profiles.Manager      `json:"-"`
 	RegisterSet        *modbus.RegisterSet    `json:"-"` // Device-specific register definitions
@@ -187,6 +190,7 @@ func main() {
 	modbusBasePort := flag.Int("modbus-base", 5000, "Base port for Modbus servers")
 	mqttBasePort := flag.Int("mqtt-base", 1883, "Base port for MQTT brokers")
 	ocppBasePort := flag.Int("ocpp-base", 9000, "Base port for OCPP servers")
+	matterBasePort := flag.Int("matter-base", 5540, "Base port for Matter devices")
 	httpPort := flag.Int("http", 8762, "HTTP server port")
 	desktopMode := flag.Bool("desktop", false, "Run in desktop mode (Wails)")
 	flag.Parse()
@@ -204,6 +208,9 @@ func main() {
 	if os.Getenv("OCPP_BASE_PORT") == "" {
 		*ocppBasePort = appSettings.OCPPBasePort
 	}
+	if os.Getenv("MATTER_BASE_PORT") == "" && appSettings.MatterBasePort != 0 {
+		*matterBasePort = appSettings.MatterBasePort
+	}
 
 	// Environment variable overrides (takes precedence over settings)
 	if env := os.Getenv("MODBUS_BASE_PORT"); env != "" {
@@ -219,6 +226,11 @@ func main() {
 	if env := os.Getenv("OCPP_BASE_PORT"); env != "" {
 		if n, err := strconv.Atoi(env); err == nil {
 			*ocppBasePort = n
+		}
+	}
+	if env := os.Getenv("MATTER_BASE_PORT"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			*matterBasePort = n
 		}
 	}
 	if env := os.Getenv("HTTP_PORT"); env != "" {
@@ -262,6 +274,7 @@ func main() {
 		ModbusBasePort:      *modbusBasePort,
 		MQTTBasePort:        *mqttBasePort,
 		OCPPBasePort:        *ocppBasePort,
+		MatterBasePort:      *matterBasePort,
 		ModbusDisplayOffset: modbusDisplayOffset,
 		MQTTDisplayOffset:   mqttDisplayOffset,
 		OCPPDisplayOffset:   ocppDisplayOffset,
@@ -269,10 +282,10 @@ func main() {
 	}
 
 	log.Printf("Starting Device Simulator")
-	log.Printf("Port ranges: Modbus %d+, MQTT %d+, OCPP %d+", *modbusBasePort, *mqttBasePort, *ocppBasePort)
+	log.Printf("Port ranges: Modbus %d+, MQTT %d+, OCPP %d+, Matter %d+", *modbusBasePort, *mqttBasePort, *ocppBasePort, *matterBasePort)
 
 	// Initialize port allocator
-	portAllocator = ports.NewAllocator(*modbusBasePort, *mqttBasePort, *ocppBasePort)
+	portAllocator = ports.NewAllocator(*modbusBasePort, *mqttBasePort, *ocppBasePort, *matterBasePort)
 
 	// Initialize mDNS advertiser (works in desktop mode; Docker bridge doesn't support multicast)
 	isDesktopMode = *desktopMode
@@ -318,6 +331,7 @@ func runHTTPServer(httpPort int) {
 	}
 	simulatorsMu.RUnlock()
 	mdnsAdvertiser.Shutdown()
+	matter.Shared().Shutdown()
 	saveStateIfDirty()
 }
 
@@ -365,6 +379,7 @@ func runWailsApp(httpPort int) {
 	}
 	simulatorsMu.RUnlock()
 	mdnsAdvertiser.Shutdown()
+	matter.Shared().Shutdown()
 	saveStateIfDirty()
 }
 
@@ -465,7 +480,12 @@ func createSimulator(simType string) (*Simulator, error) {
 		protocol = "ocpp"
 		category = "ocpp_charger"
 	default:
-		return nil, fmt.Errorf("unknown simulator type: %s", simType)
+		if matter.IsMatterType(simType) {
+			protocol = "matter"
+			category = string(device.CategoryMatter)
+		} else {
+			return nil, fmt.Errorf("unknown simulator type: %s", simType)
+		}
 	}
 
 	port := 0
@@ -589,6 +609,21 @@ func createSimulator(simType string) (*Simulator, error) {
 		sim.Serial = ocppServer.SerialNumber()
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
+		sim.Automation.Scenario = "idle"
+
+	case "matter":
+		// Fail cleanly (no dangling simulator) when Node.js is unavailable.
+		if ok, reason := matter.Shared().Available(); !ok {
+			return nil, &matter.ErrNodeUnavailable{Reason: reason}
+		}
+		matterServer, err := matter.NewServer(id, simType)
+		if err != nil {
+			return nil, err
+		}
+		sim.Serial = matterServer.SerialNumber()
+		sim.MatterServer = matterServer
+		sim.MatterType = simType
+		sim.Device = matterServer
 		sim.Automation.Scenario = "idle"
 	}
 
@@ -820,6 +855,30 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 		}
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
+		if sim.Automation.Scenario == "" {
+			sim.Automation.Scenario = "idle"
+		}
+	case "matter":
+		matterType := saved.MatterType
+		if matterType == "" {
+			return nil, fmt.Errorf("matter simulator missing device type")
+		}
+		if ok, reason := matter.Shared().Available(); !ok {
+			return nil, &matter.ErrNodeUnavailable{Reason: reason}
+		}
+		matterServer, err := matter.NewServer(sim.ID, matterType)
+		if err != nil {
+			return nil, err
+		}
+		if saved.Serial != "" {
+			matterServer.SetSerialNumber(saved.Serial)
+			sim.Serial = saved.Serial
+		} else {
+			sim.Serial = matterServer.SerialNumber()
+		}
+		sim.MatterServer = matterServer
+		sim.MatterType = matterType
+		sim.Device = matterServer
 		if sim.Automation.Scenario == "" {
 			sim.Automation.Scenario = "idle"
 		}
@@ -1056,6 +1115,10 @@ func startSimulatorServer(sim *Simulator) error {
 		if sim.OCPPServer != nil {
 			sim.OCPPServer.SetPort(sim.Port)
 		}
+	case "matter":
+		if sim.MatterServer != nil {
+			sim.MatterServer.SetPort(sim.Port)
+		}
 	}
 
 	var err error
@@ -1086,6 +1149,13 @@ func startSimulatorServer(sim *Simulator) error {
 			return fmt.Errorf("ocpp start error: %v", err)
 		}
 		log.Printf("[%s] Started OCPP server on port %d", sim.Serial, sim.Port)
+
+	case "matter":
+		if err = sim.MatterServer.Start(); err != nil {
+			portAllocator.Release(sim.Port)
+			return fmt.Errorf("matter start error: %v", err)
+		}
+		log.Printf("[%s] Started Matter device on port %d (pairing %s)", sim.Serial, sim.Port, sim.MatterServer.PairingCode())
 	}
 
 	sim.Running = true
@@ -1125,6 +1195,13 @@ func stopSimulatorServer(sim *Simulator) {
 	case "ocpp":
 		sim.OCPPServer.Stop()
 		log.Printf("[%s] Stopped OCPP server", sim.Serial)
+	case "matter":
+		if sim.MatterServer != nil {
+			if err := sim.MatterServer.Stop(); err != nil {
+				log.Printf("[%s] Matter stop error: %v", sim.Serial, err)
+			}
+		}
+		log.Printf("[%s] Stopped Matter device", sim.Serial)
 	}
 
 	sim.Running = false
@@ -1174,6 +1251,7 @@ func buildHTTPMux() *http.ServeMux {
 
 	// Update endpoints
 	mux.HandleFunc("/api/version", handleVersion)
+	mux.HandleFunc("/api/matter/status", handleMatterStatus)
 	mux.HandleFunc("/api/update/check", handleUpdateCheck)
 	mux.HandleFunc("/api/update/apply", handleUpdateApply)
 	mux.HandleFunc("/api/restart", handleRestart)
@@ -1260,6 +1338,18 @@ func handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 func handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(GetVersionInfo())
+}
+
+// handleMatterStatus reports whether Matter device emulation is available
+// (Node.js is required on the host) so the UI can enable/disable it.
+func handleMatterStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	available, reason := matter.Shared().Available()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"available":    available,
+		"reason":       reason,
+		"node_version": matter.Shared().NodeVersion(),
+	})
 }
 
 func handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -3451,6 +3541,11 @@ func generateValues(sim *Simulator, simTime time.Time) {
 			sim.OCPPServer.GenerateValues(simTime)
 		}
 		return
+	case "matter":
+		if sim.MatterServer != nil {
+			sim.MatterServer.GenerateValues(simTime)
+		}
+		return
 	}
 
 	// Energy meters don't generate their own values - they are controlled by site aggregation
@@ -3720,6 +3815,7 @@ func buildStateSnapshot() *state.AppState {
 			DeviceOn:           sim.DeviceOn,
 			BatteryCapacityKWh: sim.BatteryCapacityKWh,
 			Profile:            sim.ProfilesManager.GetActiveName(),
+			MatterType:         sim.MatterType,
 			Automation: state.AutomationState{
 				Enabled:        sim.Automation.Enabled,
 				TimeMultiplier: sim.Automation.TimeMultiplier,
@@ -4291,6 +4387,11 @@ func generateValuesForSite(sim *Simulator, simTime time.Time, scenario string) {
 	case "ocpp":
 		if sim.OCPPServer != nil {
 			sim.OCPPServer.GenerateValues(simTime)
+		}
+		return
+	case "matter":
+		if sim.MatterServer != nil {
+			sim.MatterServer.GenerateValues(simTime)
 		}
 		return
 	}
