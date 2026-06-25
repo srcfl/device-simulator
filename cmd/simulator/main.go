@@ -317,7 +317,10 @@ func runHTTPServer(httpPort int) {
 	// Start HTTP server
 	go startHTTPServer(httpPort)
 
-	log.Println("Ready. Use the web UI to create simulators.")
+	log.Printf("Ready. Open the web UI: http://localhost:%d", httpPort)
+	if ip := getLocalIP(); ip != "" && ip != "localhost" {
+		log.Printf("On your network:       http://%s:%d", ip, httpPort)
+	}
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
