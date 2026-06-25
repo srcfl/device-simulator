@@ -188,7 +188,11 @@ func main() {
 	mqttBasePort := flag.Int("mqtt-base", 1883, "Base port for MQTT brokers")
 	ocppBasePort := flag.Int("ocpp-base", 9000, "Base port for OCPP servers")
 	httpPort := flag.Int("http", 8762, "HTTP server port")
-	desktopMode := flag.Bool("desktop", false, "Run in desktop mode (Wails)")
+	// Default depends on the build: desktop release builds (compiled with the
+	// "desktop" tag) open the native window so double-clicking the executable
+	// works; server/Docker builds default to headless. Use --desktop=false to
+	// force headless on a desktop build.
+	desktopMode := flag.Bool("desktop", defaultDesktopMode, "Run in desktop mode (Wails window); use --desktop=false for headless server mode")
 	flag.Parse()
 
 	// Load settings from config file (applies before env var overrides)
@@ -226,9 +230,12 @@ func main() {
 			*httpPort = n
 		}
 	}
-	// WAILS_DESKTOP env var overrides flag
-	if os.Getenv("WAILS_DESKTOP") == "1" {
+	// WAILS_DESKTOP env var overrides flag/default (1 = desktop, 0 = headless)
+	switch os.Getenv("WAILS_DESKTOP") {
+	case "1":
 		*desktopMode = true
+	case "0":
+		*desktopMode = false
 	}
 
 	// Display offsets (used for UI port display)
