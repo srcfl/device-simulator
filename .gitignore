@@ -177,3 +177,7 @@ data/state.json
 
 # Go binaries
 /simulator
+
+# Windows bash crash dumps
+bash.exe.stackdump
+*.stackdump
