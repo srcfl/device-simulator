@@ -25,7 +25,7 @@ func requireNode(t *testing.T) {
 
 func TestIntegrationCommissionAllTypes(t *testing.T) {
 	requireNode(t)
-	t.Setenv("MATTER_STORAGE_PATH", t.TempDir())
+	t.Setenv("MATTER_STORAGE_ROOT", t.TempDir())
 	t.Setenv("MATTER_LOG_LEVEL", "fatal")
 
 	m := Shared()
@@ -69,7 +69,7 @@ func TestIntegrationCommissionAllTypes(t *testing.T) {
 
 func TestIntegrationSmartPlugControl(t *testing.T) {
 	requireNode(t)
-	t.Setenv("MATTER_STORAGE_PATH", t.TempDir())
+	t.Setenv("MATTER_STORAGE_ROOT", t.TempDir())
 	t.Setenv("MATTER_LOG_LEVEL", "fatal")
 
 	m := Shared()

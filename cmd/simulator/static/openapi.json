@@ -205,6 +205,7 @@
     "/api/simulators/{id}/state": {
       "post": {
         "summary": "Update simulator state",
+        "description": "Control a device value with a {key, value} body. For Matter devices the keys per type (e.g. on/load_w for the smart plug, plugged/charging/max_current_a for the EVSE, heating_setpoint_c/cooling_setpoint_c/system_mode for thermostat and heat pump, start/stop for appliances, temperature_c/lux/auto for sensors) are documented in docs/MATTER.md.",
         "parameters": [
           { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
         ],

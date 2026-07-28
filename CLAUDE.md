@@ -209,7 +209,7 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error)
 | WAILS_DESKTOP | 0 | Set to 1 to force desktop mode |
 | HOST_IP | auto-detected | Override displayed host IP |
 | MATTER_NODE_PATH | auto-detected | Override path to the `node` binary for Matter |
-| MATTER_STORAGE_PATH | OS config dir | Matter fabric/credential storage root |
+| MATTER_STORAGE_ROOT | OS config dir | Matter fabric/credential storage root |
 | MATTER_LOG_LEVEL | notice | matter.js bridge log level (debug/info/notice/warn/error/fatal) |
 
 ## Matter support (matter.js)
@@ -223,7 +223,11 @@ Matter is disabled gracefully — see `GET /api/matter/status`. Device types:
 `matter_thermostat`, `matter_heatpump`, `matter_dishwasher`, `matter_laundrywasher`.
 Each is commissionable (manual pairing code + `MT:` QR). Devices use the CSA **test**
 Vendor ID `0xFFF1`, so pairing into Home Assistant requires enabling its **test/Test-Net
-DCL** option. `go test ./...` stays Node-free; real-Node tests run via
+DCL** option. Device physics live in Go (`internal/matter/devicetypes.go`) and run in the
+per-simulator automation loop (`POST /api/simulators/{id}/automation/start`); devices are
+controlled via `POST /api/simulators/{id}/state` with `{key, value}` (e.g. `on`,
+`load_w`, `charging`, `heating_setpoint_c`, `start`). Full user guide: `docs/MATTER.md`.
+`go test ./...` stays Node-free; real-Node tests run via
 `make test-matter` (`-tags matter_integration`). Re-vendor deps with `make vendor-matter`.
 
 ## CI/CD (GitHub Actions)

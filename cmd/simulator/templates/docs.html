@@ -73,6 +73,24 @@
                     </div>
                 </div>
                 <p class="docs-muted" style="margin-top: 0.5rem;">
+                    <strong>Typical flow:</strong> create the device (<code>POST /api/simulators</code>) →
+                    start its simulation loop (<code>POST /api/simulators/{id}/automation/start</code>) →
+                    read <code>pairing_code</code> / <code>qr</code> from <code>GET /api/simulators/{id}</code> →
+                    commission it into your controller → control it via
+                    <code>POST /api/simulators/{id}/state</code> with <code>{"key", "value"}</code>.
+                </p>
+                <p class="docs-muted" style="margin-top: 0.5rem;">
+                    Each device has built-in physics that emulate real usage while automation runs
+                    (diurnal sensor curves, thermostat thermal model, plug/EVSE/heat-pump power draw with
+                    accumulating energy, timed appliance cycles). Control keys per type — e.g.
+                    <code>on</code>/<code>load_w</code> (plug), <code>plugged</code>/<code>charging</code>/<code>max_current_a</code>
+                    (EVSE), <code>heating_setpoint_c</code>/<code>system_mode</code> (thermostat/heat pump),
+                    <code>start</code>/<code>stop</code> (appliances), <code>temperature_c</code>/<code>lux</code>/<code>auto</code>
+                    (sensors) — are documented in
+                    <a class="docs-link" href="https://github.com/srcfl/device-simulator/blob/main/docs/MATTER.md" target="_blank" rel="noopener">docs/MATTER.md</a>.
+                    Changes made from a paired Home app flow back into the simulation.
+                </p>
+                <p class="docs-muted" style="margin-top: 0.5rem;">
                     Matter commissioning needs LAN multicast (mDNS). It works in desktop mode and Docker
                     <em>host</em> networking; under Docker bridge networking devices won't be discoverable.
                 </p>
