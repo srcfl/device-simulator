@@ -29,6 +29,7 @@ type SimulatorState struct {
 	BatteryCapacityKWh float64         `json:"battery_capacity_kwh"`
 	Profile            string          `json:"profile"`
 	OCPPURL            string          `json:"ocpp_url"`
+	MatterType         string          `json:"matter_type,omitempty"`
 	Automation         AutomationState `json:"automation"`
 }
 

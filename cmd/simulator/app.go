@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/srcfl/device-simulator/internal/matter"
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/modbus/devices"
 	"github.com/srcfl/device-simulator/internal/settings"
@@ -117,6 +118,17 @@ func (a *App) GetSimulators(filters map[string]string) []map[string]interface{} 
 			entry["total_power"] = state["totalPower"]
 			entry["has_active_transaction"] = state["hasActiveTransaction"]
 			entry["max_power_kw"] = state["maxPowerKW"]
+		case "matter":
+			if sim.MatterServer != nil {
+				state := sim.MatterServer.GetState()
+				entry["device_type"] = state["device_type"]
+				entry["label"] = state["label"]
+				entry["pairing_code"] = state["pairing_code"]
+				entry["qr"] = state["qr"]
+				entry["commissioned"] = state["commissioned"]
+				entry["fabric_count"] = state["fabric_count"]
+				entry["bridge_up"] = state["bridge_up"]
+			}
 		}
 		sim.mu.RUnlock()
 		list = append(list, entry)
@@ -198,9 +210,25 @@ func (a *App) GetSimulator(id int) (map[string]interface{}, error) {
 		state := sim.OCPPServer.GetState()
 		result["state"] = state
 		result["ocpp_url"] = sim.OCPPServer.GetOCPPURL()
+	case "matter":
+		if sim.MatterServer != nil {
+			result["state"] = sim.MatterServer.GetState()
+			result["matter_type"] = sim.MatterType
+		}
 	}
 
 	return result, nil
+}
+
+// MatterStatus reports whether Matter is available (Node.js detected) so the UI
+// can enable/disable Matter device creation and explain why.
+func (a *App) MatterStatus() map[string]interface{} {
+	available, reason := matter.Shared().Available()
+	return map[string]interface{}{
+		"available":    available,
+		"reason":       reason,
+		"node_version": matter.Shared().NodeVersion(),
+	}
 }
 
 // UpdateConfig updates simulator configuration
@@ -227,6 +255,10 @@ func (a *App) UpdateConfig(id int, config map[string]interface{}) error {
 		case "ocpp":
 			if sim.OCPPServer != nil {
 				sim.OCPPServer.SetSerialNumber(serial)
+			}
+		case "matter":
+			if sim.MatterServer != nil {
+				sim.MatterServer.SetSerialNumber(serial)
 			}
 		}
 	}
@@ -1181,15 +1213,15 @@ func (a *App) CreateSimulatorInSite(siteId int, simType string) (map[string]inte
 	a.emitSiteUpdate()
 
 	return map[string]interface{}{
-		"id":             sim.ID,
-		"serial":         sim.Serial,
-		"protocol":       sim.Protocol,
-		"category":       sim.Category,
-		"port":           sim.Port,
-		"running":        sim.Running,
-		"site_id":        siteId,
-		"device_on":      sim.DeviceOn,
-		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
+		"id":            sim.ID,
+		"serial":        sim.Serial,
+		"protocol":      sim.Protocol,
+		"category":      sim.Category,
+		"port":          sim.Port,
+		"running":       sim.Running,
+		"site_id":       siteId,
+		"device_on":     sim.DeviceOn,
+		"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 	}, nil
 }
 

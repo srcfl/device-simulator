@@ -46,6 +46,7 @@ make build-linux
 - Modbus TCP: 5000+
 - MQTT: 1883+
 - OCPP: 9000+
+- Matter (UDP): 5540+
 
 ### Run Tests
 
@@ -107,7 +108,7 @@ HTTP API (port 80 in Docker, 8762 in desktop mode):
 ```
 GET  /                                    # Dashboard UI
 GET  /api/simulators                      # List all simulators
-POST /api/simulators                      # Create simulator {type: "inverter"|"energy_meter"|"v2x_charger"|"ocpp_charger"}
+POST /api/simulators                      # Create simulator {type: "inverter"|"energy_meter"|"v2x_charger"|"ocpp_charger"|"matter_*"}
 DELETE /api/simulators/{id}               # Delete simulator
 GET  /api/simulators/{id}                 # Get simulator details
 POST /api/simulators/{id}/config          # Update serial/slave ID
@@ -121,6 +122,7 @@ GET  /api/sites                           # List all sites
 POST /api/sites                           # Create site
 GET  /api/system                          # Get system info (local IP)
 GET  /api/version                         # Get app version
+GET  /api/matter/status                   # Matter availability (Node.js required)
 GET  /api/update/check                    # Check for updates
 POST /api/update/apply                    # Apply update
 ```
@@ -202,9 +204,31 @@ func (a *App) CheckForUpdate() (*UpdateInfo, error)
 | MODBUS_BASE_PORT | 5000 | First Modbus port |
 | MQTT_BASE_PORT | 1883 | First MQTT port |
 | OCPP_BASE_PORT | 9000 | First OCPP port |
+| MATTER_BASE_PORT | 5540 | First Matter (UDP) operational port |
 | HTTP_PORT | 80 (Docker) / 8762 (Desktop) | Web dashboard port |
 | WAILS_DESKTOP | 0 | Set to 1 to force desktop mode |
 | HOST_IP | auto-detected | Override displayed host IP |
+| MATTER_NODE_PATH | auto-detected | Override path to the `node` binary for Matter |
+| MATTER_STORAGE_ROOT | OS config dir | Matter fabric/credential storage root |
+| MATTER_LOG_LEVEL | notice | matter.js bridge log level (debug/info/notice/warn/error/fatal) |
+
+## Matter support (matter.js)
+
+Matter devices are emulated via [matter.js](https://github.com/matter-js/matter.js)
+(`@matter/main` v0.16, Matter 1.4.2). Because matter.js is Node.js, the app spawns and
+supervises a Node bridge (`internal/matter/bridge`, vendored as `node_modules.tgz` and
+embedded). **Node.js (v18+, v20+ recommended) must be installed on the host**; if absent,
+Matter is disabled gracefully — see `GET /api/matter/status`. Device types:
+`matter_tempsensor`, `matter_lightsensor`, `matter_smartplug`, `matter_evse`,
+`matter_thermostat`, `matter_heatpump`, `matter_dishwasher`, `matter_laundrywasher`.
+Each is commissionable (manual pairing code + `MT:` QR). Devices use the CSA **test**
+Vendor ID `0xFFF1`, so pairing into Home Assistant requires enabling its **test/Test-Net
+DCL** option. Device physics live in Go (`internal/matter/devicetypes.go`) and run in the
+per-simulator automation loop (`POST /api/simulators/{id}/automation/start`); devices are
+controlled via `POST /api/simulators/{id}/state` with `{key, value}` (e.g. `on`,
+`load_w`, `charging`, `heating_setpoint_c`, `start`). Full user guide: `docs/MATTER.md`.
+`go test ./...` stays Node-free; real-Node tests run via
+`make test-matter` (`-tags matter_integration`). Re-vendor deps with `make vendor-matter`.
 
 ## CI/CD (GitHub Actions)
 

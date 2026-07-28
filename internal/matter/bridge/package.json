@@ -1,0 +1,17 @@
+{
+  "name": "device-simulator-matter-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js bridge that drives matter.js ServerNodes on behalf of the Go device-simulator",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@matter/main": "^0.16.0"
+  }
+}

@@ -2296,6 +2296,31 @@
                             <div class="add-device-option-desc">OCPP 1.6J charge point with remote start/stop</div>
                         </button>
                     </div>
+
+                    <!-- Matter devices -->
+                    <div class="add-device-section-header" style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <span>🏠 Matter (Smart Home)</span>
+                        <span x-show="!$store.app.matterStatus.available"
+                              :title="$store.app.matterStatus.reason"
+                              style="font-size: 0.75rem; color: var(--text-muted); cursor: help;"
+                              x-text="'— unavailable: ' + $store.app.matterStatus.reason"></span>
+                        <span x-show="$store.app.matterStatus.available"
+                              style="font-size: 0.75rem; color: var(--text-muted);"
+                              x-text="'— Node ' + $store.app.matterStatus.node_version"></span>
+                    </div>
+                    <div class="add-device-options">
+                        <template x-for="md in $store.app.matterDeviceTypes" :key="md.type">
+                            <button class="add-device-option"
+                                    :disabled="!$store.app.matterStatus.available"
+                                    :style="!$store.app.matterStatus.available ? 'opacity:0.5; cursor:not-allowed;' : ''"
+                                    @click="$store.app.matterStatus.available && $store.app.addSimulatorToSite(md.type)">
+                                <div class="add-device-option-icon" style="font-size: 28px;" x-text="md.icon"></div>
+                                <div class="add-device-option-name" x-text="md.name"></div>
+                                <span class="protocol-badge matter">matter</span>
+                                <div class="add-device-option-desc" x-text="md.desc"></div>
+                            </button>
+                        </template>
+                    </div>
                 </div>
             </div>
         </div>

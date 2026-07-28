@@ -9,6 +9,7 @@ const (
 	ProtocolModbus Protocol = "modbus"
 	ProtocolMQTT   Protocol = "mqtt"
 	ProtocolOCPP   Protocol = "ocpp"
+	ProtocolMatter Protocol = "matter"
 )
 
 // Category represents the high-level device category
@@ -18,6 +19,9 @@ const (
 	CategoryInverter    Category = "inverter"
 	CategoryV2XCharger  Category = "v2x_charger"
 	CategoryOCPPCharger Category = "ocpp_charger"
+	// CategoryMatter groups all Matter devices under a single UI category; the
+	// specific Matter device type (thermostat, evse, ...) is carried separately.
+	CategoryMatter Category = "matter"
 )
 
 // LogEntry represents a protocol operation log entry

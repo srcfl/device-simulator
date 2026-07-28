@@ -12,6 +12,7 @@ type AppSettings struct {
 	ModbusBasePort      int `json:"modbusBasePort"`
 	MQTTBasePort        int `json:"mqttBasePort"`
 	OCPPBasePort        int `json:"ocppBasePort"`
+	MatterBasePort      int `json:"matterBasePort"`
 	ModbusDisplayOffset int `json:"modbusDisplayOffset"`
 	MQTTDisplayOffset   int `json:"mqttDisplayOffset"`
 	OCPPDisplayOffset   int `json:"ocppDisplayOffset"`
@@ -24,6 +25,7 @@ func DefaultSettings() *AppSettings {
 		ModbusBasePort:      5000,
 		MQTTBasePort:        1883,
 		OCPPBasePort:        9000,
+		MatterBasePort:      5540,
 		ModbusDisplayOffset: 0,
 		MQTTDisplayOffset:   0,
 		OCPPDisplayOffset:   0,

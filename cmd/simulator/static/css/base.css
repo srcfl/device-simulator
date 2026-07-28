@@ -154,6 +154,7 @@ body {
 .protocol-badge.modbus { background: var(--color-modbus); color: #fff; }
 .protocol-badge.mqtt { background: var(--color-mqtt); color: #fff; }
 .protocol-badge.ocpp { background: var(--color-ocpp); color: #000; }
+.protocol-badge.matter { background: #6c5ce7; color: #fff; }
 .protocol-badge.load { background: var(--color-warning); color: #000; }
 
 /* Status Indicators */

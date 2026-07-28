@@ -7,7 +7,7 @@
 
 > *"In the beginning the Universe was created. This has made a lot of people very angry and been widely regarded as a bad move."* - But Modbus? Modbus is mostly harmless.
 
-A **Mostly Harmless** multi-protocol device simulator for testing solar inverters, batteries, EV chargers, and energy systems. Don't Panic - it's just registers.
+A **Mostly Harmless** multi-protocol device simulator for testing solar inverters, batteries, EV chargers, energy systems — and now commissionable **Matter** smart-home devices. Don't Panic - it's just registers.
 
 ## Quick Start
 
@@ -50,13 +50,17 @@ docker compose up --build
 | 5000+ | ✓ | ✓ | Modbus TCP servers |
 | 1883+ | ✓ | ✓ | MQTT brokers (V2X chargers) |
 | 9000+ | ✓ | ✓ | OCPP WebSocket servers |
+| 5540+ (UDP) | ✓* | ✓ | Matter devices (matter.js) |
 
 - **Docker:** Open http://localhost
 - **Desktop:** The app opens automatically with a native window
 
+\* Matter commissioning needs LAN multicast (mDNS) — use Docker *host* networking or the desktop app for pairing.
+
 ## Features
 
-- **Multi-Protocol Support** - Modbus TCP, MQTT, and OCPP in one app
+- **Multi-Protocol Support** - Modbus TCP, MQTT, OCPP, and Matter in one app
+- **Matter Devices** - Commissionable sensors, smart plugs, EVSE, thermostats, heat pumps, and appliances via [matter.js](https://github.com/matter-js/matter.js) — pair them into Home Assistant and control them like real hardware ([details](docs/MATTER.md))
 - **Desktop & Server Modes** - Native app or Docker container
 - **Auto-Updates** - Desktop app updates itself from GitHub Releases
 - **Dynamic Simulators** - Create/delete simulators on the fly
@@ -83,14 +87,34 @@ docker compose up --build
 
 > **Disclaimer:** Device Simulator is an independent testing tool and is **not affiliated with, endorsed by, or sponsored by** any of the manufacturers listed above. Product and company names are trademarks of their respective owners and are used only to identify the device behavior being simulated.
 
+## Matter Devices
+
+The simulator emulates **real, commissionable Matter devices** using
+[matter.js](https://github.com/matter-js/matter.js): temperature and light sensors,
+smart plugs and EVSE chargers with energy metering, thermostats, heat pumps,
+dishwashers, and washing machines. Each device gets its own pairing code and QR, can
+be paired into Home Assistant / Apple Home / Google Home, reports live measurements
+and accumulating energy while its built-in simulation runs, and reacts to controller
+commands (toggles, setpoints) with the changes reflected back into the simulation.
+
+Requires **Node.js v18+ on the host** (matter.js itself is embedded — no npm needed);
+without Node, Matter is simply disabled and everything else works. Devices use the CSA
+*test* Vendor ID, so enable Home Assistant's **Test-Net DCL** option to pair.
+
+**→ Full guide: [docs/MATTER.md](docs/MATTER.md)** — device types, control API,
+built-in behavior, pairing, and architecture.
+
 ## API Endpoints
 
 All simulators are accessible through a unified API:
 
 ```
 GET  /api/simulators                        # List all simulators
+POST /api/simulators                        # Create simulator (Modbus/MQTT/OCPP/Matter types)
 GET  /api/simulators/{id}                   # Get simulator details
 POST /api/simulators/{id}/config            # Update serial/slave ID
+POST /api/simulators/{id}/state             # Control device state {key, value} (see docs/MATTER.md)
+GET  /api/matter/status                     # Matter availability (Node.js detection)
 GET  /api/simulators/{id}/registers         # Get all registers
 POST /api/simulators/{id}/registers/{addr}  # Write register value
 GET  /api/simulators/{id}/logs              # Get Modbus operation logs
@@ -109,6 +133,10 @@ GET  /health                                # Health check (always 42... I mean 
 |---------------------|---------|-------------|
 | NUM_INSTANCES | 10 | Number of simulator instances |
 | MODBUS_BASE_PORT | 5000 | First Modbus port |
+| MATTER_BASE_PORT | 5540 | First Matter (UDP) operational port |
+| MATTER_NODE_PATH | auto-detected | Path to the `node` binary for Matter |
+| MATTER_STORAGE_ROOT | OS config dir | Matter fabric/credential storage root |
+| MATTER_LOG_LEVEL | notice | Matter bridge log level |
 | HTTP_PORT | 80 | Web dashboard port |
 
 ## Testing Modbus Connections
@@ -186,7 +214,8 @@ device-simulator (single process)
 ├── HTTP API Server (:80 Docker, :8762 Desktop)
 ├── Modbus TCP Servers (:5000+)
 ├── MQTT Brokers (:1883+)
-└── OCPP WebSocket Servers (:9000+)
+├── OCPP WebSocket Servers (:9000+)
+└── Matter Bridge (supervised Node.js child, matter.js, UDP :5540+)
 ```
 
 **Dual-Mode Operation:**

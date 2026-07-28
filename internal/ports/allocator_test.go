@@ -6,9 +6,9 @@ import (
 )
 
 func TestNewAllocator(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
-	modbus, mqtt, ocpp := a.GetBasePorts()
+	modbus, mqtt, ocpp, matter := a.GetBasePorts()
 	if modbus != 5000 {
 		t.Errorf("Expected modbus base 5000, got %d", modbus)
 	}
@@ -18,10 +18,13 @@ func TestNewAllocator(t *testing.T) {
 	if ocpp != 9000 {
 		t.Errorf("Expected ocpp base 9000, got %d", ocpp)
 	}
+	if matter != 5540 {
+		t.Errorf("Expected matter base 5540, got %d", matter)
+	}
 }
 
 func TestAllocateModbus(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	// First allocation should return base port
 	port := a.Allocate(ProtocolModbus)
@@ -43,7 +46,7 @@ func TestAllocateModbus(t *testing.T) {
 }
 
 func TestAllocateMQTT(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	port := a.Allocate(ProtocolMQTT)
 	if port != 1883 {
@@ -57,7 +60,7 @@ func TestAllocateMQTT(t *testing.T) {
 }
 
 func TestAllocateOCPP(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	port := a.Allocate(ProtocolOCPP)
 	if port != 9000 {
@@ -71,7 +74,7 @@ func TestAllocateOCPP(t *testing.T) {
 }
 
 func TestAllocateUnknownProtocol(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	port := a.Allocate("unknown")
 	if port != 0 {
@@ -80,7 +83,7 @@ func TestAllocateUnknownProtocol(t *testing.T) {
 }
 
 func TestAllocateString(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	// Test string-based allocation (backward compatibility)
 	port := a.AllocateString("modbus")
@@ -100,7 +103,7 @@ func TestAllocateString(t *testing.T) {
 }
 
 func TestRelease(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	// Allocate a port
 	port1 := a.Allocate(ProtocolModbus)
@@ -125,7 +128,7 @@ func TestRelease(t *testing.T) {
 }
 
 func TestIsAllocated(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	// Initially not allocated
 	if a.IsAllocated(5000) {
@@ -150,7 +153,7 @@ func TestIsAllocated(t *testing.T) {
 }
 
 func TestAllocatedCount(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	if a.AllocatedCount() != 0 {
 		t.Errorf("Expected 0 allocated ports initially, got %d", a.AllocatedCount())
@@ -174,7 +177,7 @@ func TestAllocatedCount(t *testing.T) {
 }
 
 func TestMixedProtocolAllocation(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	// Allocate ports from different protocols
 	modbus1 := a.Allocate(ProtocolModbus)
@@ -200,7 +203,7 @@ func TestMixedProtocolAllocation(t *testing.T) {
 }
 
 func TestConcurrentAllocation(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	var wg sync.WaitGroup
 	allocatedPorts := make(chan int, 100)
@@ -245,7 +248,7 @@ func TestConcurrentAllocation(t *testing.T) {
 }
 
 func TestReleaseNonExistentPort(t *testing.T) {
-	a := NewAllocator(5000, 1883, 9000)
+	a := NewAllocator(5000, 1883, 9000, 5540)
 
 	// Should not panic or error
 	a.Release(9999)
@@ -261,7 +264,7 @@ func TestReleaseNonExistentPort(t *testing.T) {
 
 func TestCustomBasePorts(t *testing.T) {
 	// Test with non-standard base ports
-	a := NewAllocator(10000, 20000, 30000)
+	a := NewAllocator(10000, 20000, 30000, 40000)
 
 	modbus := a.Allocate(ProtocolModbus)
 	mqtt := a.Allocate(ProtocolMQTT)
