@@ -59,10 +59,11 @@ coverage.xml
 .pytest_cache/
 cover/
 
-# Translations
+# Translations (gettext). Keep Modelica sources.
 *.mo
+!modelica/
+!modelica/*.mo
 *.pot
-!modelica/**/*.mo
 
 # Django stuff:
 *.log

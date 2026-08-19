@@ -1,6 +1,14 @@
 # Lua drivers and a physical plant
 
-This repository should be a **hardware stand-in** for [`srcfl/device-drivers`](https://github.com/srcfl/device-drivers): the same Lua that polls a Sungrow on a roof should poll this process over Modbus TCP, and writes from `driver_command` should move energy through a small DAE rather than a scripted sine wave.
+This is the picture of a **site** as one electrical node, with physics as a
+module that can be swapped.
+
+![Site plant sketch](site-plant-sketch.svg)
+
+Full notes: [SITE_PLANT_SKETCH.md](SITE_PLANT_SKETCH.md). Source of the bus
+equation: [`modelica/SiteEnergy.mo`](../modelica/SiteEnergy.mo).
+Go stand-in (no OpenModelica required): `internal/plant.NativeSite`.
+Lua talks only Modbus: [`srcfl/device-drivers`](https://github.com/srcfl/device-drivers).
 
 Drivers never talk to this app's HTTP API. They talk to a device. The job of the simulator is to *be* that device, with a plant behind the register map.
 
