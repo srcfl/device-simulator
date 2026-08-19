@@ -179,3 +179,20 @@ data/state.json
 
 # Go binaries
 /simulator
+
+# OpenModelica / FMI build products (compile locally with `make fmu`)
+modelica/*.fmu
+modelica/Site4_*
+modelica/*.inst.mo
+modelica/*.libs
+modelica/*.makefile
+modelica/*.json
+modelica/*.html
+modelica/*.c
+modelica/*.h
+modelica/*.o
+modelica/*.xml
+modelica/*.log
+modelica/*.exe
+modelica/*.so
+

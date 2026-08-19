@@ -7,6 +7,7 @@ module that can be swapped. The drawing:
 
 Source of the bus equation: [`modelica/SiteEnergy.mo`](../modelica/SiteEnergy.mo).
 Go stand-in (no OpenModelica required): `internal/plant.NativeSite`.
+Compiled Modelica: `make fmu` then `siteplant.Open`.
 Lua talks only Modbus: [`srcfl/device-drivers`](https://github.com/srcfl/device-drivers).
 
 ## What is in the sketch
@@ -51,9 +52,10 @@ flowchart LR
 flowchart TB
   MO["modelica/SiteEnergy.mo"]
   MO -->|same equations| Native["NativeSite\nGo, default"]
-  MO -.->|omc / Dymola later| FMU["Site.fmu\nFMI 2.0 CS"]
+  MO -->|make fmu / omc| FMU["Site4.fmu\nFMI 2.0 CS"]
   Native --> I["plant.Model"]
-  FMU -.-> I
+  FMU --> Open["siteplant.Open"]
+  Open --> I
   I --> Clock["site clock"]
   Clock --> Maps["vendor maps"]
   Maps --> TCP["Modbus TCP"]
@@ -68,7 +70,7 @@ Keep self-consumption slack in the **master** (Go). A mode-0 battery must see ev
 site tick (dt includes time acceleration)
   read P_load from site phase loads
   read Control from each inverter's holding registers  ← Lua writes land here
-  NativeSite.StepSite(dt)
+  NativeSite.StepSite(dt)  or  Site4.fmu via siteplant
     preview PV from GHI
     EMS/forced batteries follow setpoint
     mode-0 batteries share residual so the meter wants to be ~0
@@ -82,6 +84,6 @@ site tick (dt includes time acceleration)
 
 - Full 3-phase electrical (only power split by `phase_factors`)
 - Thermal networks, MPPT tracking dynamics, transformer impedance
-- Compiling and loading the FMU (`LoadFMU` is the hole for that)
+- FMU parameterisation of rated power (Site4 is fixed at 8 kW / 10 kWh per slot)
 
 Those can grow **inside** `SiteEnergy.mo` without changing Lua.

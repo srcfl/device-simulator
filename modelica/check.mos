@@ -1,0 +1,4 @@
+loadFile("SiteEnergy.mo");
+getErrorString();
+instantiateModel(SiteEnergy.Site);
+getErrorString();

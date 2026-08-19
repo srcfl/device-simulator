@@ -1,0 +1,8 @@
+// Export SiteEnergy.Site4 as FMI 2.0 co-simulation FMU.
+// Run from this directory: omc export.mos
+cd(".");
+loadFile("SiteEnergy.mo");
+getErrorString();
+buildModelFMU(SiteEnergy.Site4, version="2.0", fmuType="cs", fileNamePrefix="Site4");
+getErrorString();
+system("ls -la Site4.fmu");

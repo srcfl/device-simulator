@@ -1,12 +1,9 @@
 within ;
 
 package SiteEnergy
-  "Lumped AC site plant for srcfl/device-simulator.
-
-   Physics source of truth. internal/plant.NativeSite implements the same
-   bus equation so the app runs without a Modelica tool. Compile this
-   package to an FMI 2.0 CS FMU and plant.LoadFMU replaces the backend
-   without changing Modbus maps or Lua drivers.
+  "Lumped AC site plant. Compile SiteEnergy.Site4 to an FMI 2.0 CS FMU
+   (see export.mos). The Go module siteplant loads that FMU, or falls
+   back to a native backend that implements the same equations.
 
    Connector flow P is positive INTO the component.
    Lua meter (positive import) is -grid.ac.P."
@@ -17,6 +14,8 @@ package SiteEnergy
   type Energy = Real(final unit = "W.h");
 
   connector PowerPort
+    "Balanced connector: one potential (frequency) and one flow (power)."
+    Real freq "shared frequency in Hz";
     flow Power P;
   end PowerPort;
 
@@ -28,6 +27,11 @@ package SiteEnergy
     PowerPort grid;
   equation
     0 = sum(inv.P) + load.P + ev.P + grid.P;
+    for i in 1:nInv loop
+      inv[i].freq = grid.freq;
+    end for;
+    load.freq = grid.freq;
+    ev.freq = grid.freq;
   end ACBus;
 
   model HouseLoad
@@ -49,12 +53,13 @@ package SiteEnergy
     output Power P_meter "Lua convention: positive import";
   equation
     P_meter = -ac.P;
+    ac.freq = 50;
   end GridSlack;
 
   model Battery
     input Power P_cmd;
-    input Real soc_min = 0;
-    input Real soc_max = 100;
+    parameter Real soc_min = 0;
+    parameter Real soc_max = 100;
     parameter Energy E_nom = 10000;
     parameter Power P_chg_max = 5000;
     parameter Power P_dis_max = 5000;
@@ -64,14 +69,15 @@ package SiteEnergy
     output Power P;
   equation
     P = min(P_chg_max, max(-P_dis_max, P_cmd));
-    der(soc) = 100.0 * (if P > 0 then P * eta_c / E_nom else P / (eta_d * E_nom));
+    // E_nom is W.h; Modelica time is seconds.
+    der(soc) = 100.0 * (if P > 0 then P * eta_c else P / eta_d) / (E_nom * 3600.0);
   end Battery;
 
   model PVArray
     input Irradiance ghi;
     input Temperature T_amb;
     input Power P_limit;
-    input Real u_ratio(min = 0, max = 1) = 1;
+    parameter Real u_ratio(min = 0, max = 1) = 1;
     parameter Power P_stc = 8000;
     parameter Power P_rated = 8000;
     parameter Real eta = 0.97;
@@ -94,8 +100,8 @@ package SiteEnergy
     input Integer u_mode;
     input Integer u_cmd;
     input Power u_sp;
-    input Power u_pv_limit = 0;
-    input Power u_self_batt = 0 "FMI master assigns site self-consumption slack";
+    input Power u_pv_limit;
+    input Power u_self_batt "FMI master assigns site self-consumption slack";
     PVArray pv;
     Battery bat;
     output Power P_pv;
@@ -115,18 +121,17 @@ package SiteEnergy
 
   model Site
     "nInv hybrids + house + EV + grid. Mode-0 self-consumption slack is
-     assigned by the FMI master (Go) each step, because it depends on
-     the live Lua writes of every unit. Do not put that outer loop in
-     the FMU — keep the slave causal."
+     assigned by the FMI master each step."
     parameter Integer nInv(min = 1) = 1;
     input Irradiance ghi;
     input Temperature T_amb;
     input Power P_load;
-    input Power P_ev = 0;
+    input Power P_ev;
     input Integer u_mode[nInv];
     input Integer u_cmd[nInv];
     input Power u_sp[nInv];
-    input Power u_self_batt[nInv] "master-assigned slack for mode 0";
+    input Power u_self_batt[nInv];
+    input Power u_pv_limit[nInv];
     ACBus bus(nInv = nInv);
     InverterUnit unit[nInv];
     HouseLoad house;
@@ -134,6 +139,8 @@ package SiteEnergy
     GridSlack grid;
     output Power P_meter;
     output Real soc[nInv];
+    output Power P_pv[nInv];
+    output Power P_batt[nInv];
   equation
     connect(house.ac, bus.load);
     connect(ev.ac, bus.ev);
@@ -148,8 +155,47 @@ package SiteEnergy
       unit[i].u_cmd = u_cmd[i];
       unit[i].u_sp = u_sp[i];
       unit[i].u_self_batt = u_self_batt[i];
+      unit[i].u_pv_limit = u_pv_limit[i];
       soc[i] = unit[i].soc;
+      P_pv[i] = unit[i].P_pv;
+      P_batt[i] = unit[i].P_batt;
     end for;
     P_meter = grid.P_meter;
   end Site;
+
+  model Site4
+    "Causal FMI 2.0 co-simulation slave. Same physics as Site, no connectors.
+     The master (siteplant) assigns u_self_batt for mode-0 slack."
+    constant Integer n = 4;
+    input Irradiance ghi;
+    input Temperature T_amb;
+    input Power P_load;
+    input Power P_ev;
+    input Real u_mode[n] "0=self, 2=forced, 3=EMS (Real for FMI)";
+    input Real u_cmd[n] "170=charge, 187=discharge, 204=stop";
+    input Power u_sp[n];
+    input Power u_self_batt[n];
+    input Power u_pv_limit[n];
+    input Real u_on[n] "1=inverter present, 0=empty FMI slot";
+    PVArray pv[n];
+    Battery bat[n];
+    output Power P_meter;
+    output Real soc[n];
+    output Power P_pv[n];
+    output Power P_batt[n];
+  equation
+    for i in 1:n loop
+      pv[i].ghi = ghi;
+      pv[i].T_amb = T_amb;
+      pv[i].P_limit = u_pv_limit[i];
+      bat[i].P_cmd = if u_on[i] < 0.5 then 0.0 elseif u_mode[i] < 0.5 then u_self_batt[i] else
+        (if u_cmd[i] > 169.5 and u_cmd[i] < 170.5 then abs(u_sp[i])
+         elseif u_cmd[i] > 186.5 and u_cmd[i] < 187.5 then -abs(u_sp[i])
+         else 0.0);
+      P_pv[i] = if u_on[i] < 0.5 then 0.0 else pv[i].P_pv;
+      P_batt[i] = if u_on[i] < 0.5 then 0.0 else bat[i].P;
+      soc[i] = bat[i].soc;
+    end for;
+    P_meter = -(sum(P_pv) + sum(P_batt) + noEvent(max(0.0, P_load)) + noEvent(max(0.0, P_ev)));
+  end Site4;
 end SiteEnergy;

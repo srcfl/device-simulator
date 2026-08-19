@@ -227,7 +227,11 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 	return p.commit(dt, in.Time, in.Weather, pPV, pDC, pBatt, pLoad, pEV, pGrid, ambient, minSOC, maxSOC)
 }
 
-// previewPV is the algebraic PV injection (negative watts) before battery/grid.
+// PreviewPV is the algebraic PV injection (negative watts) before battery/grid.
+func (p *Plant) PreviewPV(w Weather, ctrl Control) (pPV, pDC float64) {
+	return p.previewPV(w, ctrl)
+}
+
 func (p *Plant) previewPV(w Weather, ctrl Control) (pPV, pDC float64) {
 	pr := p.Params
 	ambient := w.AmbientC

@@ -4,7 +4,7 @@ import "math"
 
 // NativeSite is the in-process backend. It implements the same connection
 // equations as modelica/SiteEnergy.mo so the simulator runs without OpenModelica.
-// Swap it for an FMU via LoadFMU when one is compiled from that package.
+// Swap it for a compiled FMU via siteplant.Open.
 type NativeSite struct {
 	units map[string]*Plant
 	order []string

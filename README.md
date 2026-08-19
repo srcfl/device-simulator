@@ -63,7 +63,7 @@ docker compose up --build
 - **Site Management** - Group simulators into sites with energy meters
 - **Device Profiles** - Sungrow, SolarEdge, Fronius, Huawei, and more
 - **Time Acceleration** - Compress 24 hours into minutes for testing
-- **Physical plant** - Site AC bus with conserved power and battery SoC; Modelica source in `modelica/SiteEnergy.mo` — [sketch](docs/SITE_PLANT_SKETCH.md)
+- **Physical plant** - Site AC bus with conserved power and battery SoC. Modelica in `modelica/SiteEnergy.mo`; compile with `make fmu` and plug in via `siteplant`. Sketch: [docs/SITE_PLANT_SKETCH.md](docs/SITE_PLANT_SKETCH.md)
 - **Real-time Logging** - See every protocol operation as it happens
 
 ## Supported Profiles

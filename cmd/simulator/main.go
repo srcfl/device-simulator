@@ -32,6 +32,7 @@ import (
 	"github.com/srcfl/device-simulator/internal/profiles"
 	"github.com/srcfl/device-simulator/internal/settings"
 	"github.com/srcfl/device-simulator/internal/state"
+	"github.com/srcfl/device-simulator/siteplant"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -162,7 +163,7 @@ type Site struct {
 	mu          sync.RWMutex
 	stopChan    chan struct{}
 	simStopChan chan struct{} // Stop channel for simulation loop
-	sitePlant   *plant.NativeSite
+	sitePlant   plant.Model
 }
 
 var (
@@ -3539,11 +3540,17 @@ func siteUsesPhysicalPlant(site *Site) bool {
 	return site.Scenario == "physical"
 }
 
-func ensureSitePlant(site *Site) *plant.NativeSite {
+func ensureSitePlant(site *Site) plant.Model {
 	site.mu.Lock()
 	defer site.mu.Unlock()
 	if site.sitePlant == nil {
-		site.sitePlant = plant.NewNativeSite()
+		m, err := siteplant.Open(siteplant.Options{})
+		if err != nil {
+			log.Printf("[Site %d] siteplant: %v; using native Go plant", site.ID, err)
+			m = plant.NewNativeSite()
+		}
+		site.sitePlant = m
+		log.Printf("[Site %d] plant backend %s", site.ID, m.Backend())
 	}
 	return site.sitePlant
 }

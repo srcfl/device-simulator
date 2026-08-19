@@ -72,10 +72,3 @@ func TestNativeSiteEMSDoesNotStealSelfConsumptionSlack(t *testing.T) {
 		t.Fatalf("grid %v, want 1500", out.GridW)
 	}
 }
-
-func TestLoadFMUMissingFile(t *testing.T) {
-	_, err := LoadFMU("/no/such/site.fmu")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}

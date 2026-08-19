@@ -2,11 +2,12 @@ package plant
 
 import "time"
 
-// Model is the plug the simulator talks to. Native Go and a future
-// FMI-2 co-simulation FMU both implement it. Names match public
+// Model is the plug the simulator talks to. Native Go and the compiled
+// Modelica FMU (siteplant.Open) both implement it. Names match public
 // variables in modelica/SiteEnergy.mo.
 type Model interface {
 	Backend() string
+	Attach(key string, unit *Plant)
 	StepSite(dt float64, in SiteStep) (SiteResult, error)
 }
 
