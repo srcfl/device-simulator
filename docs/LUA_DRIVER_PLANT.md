@@ -56,7 +56,39 @@ Not a Modelica compiler. The same modelling split:
 
 The site electrical node is the slack connection. In self-consumption the battery tries to zero the grid; in EMS/forced mode the battery follows the Lua setpoint and the grid takes the residual. Export limits curtail PV rather than fabricating meter zeros.
 
-Implementation: `internal/plant`. Scenario **Physical plant** in the UI (`physical`) steps this model and writes semantic registers.
+Implementation: `internal/plant`. Scenario **Physical plant** (`physical`) on a **site** steps the site bus (house load + every hybrid) on the site clock. A lone inverter still steps a one-unit plant from its automation loop.
+
+## Site bus + a pluggable Modelica module
+
+The site is one AC node, not N independent sine waves. The connection law is the same as in Modelica:
+
+```text
+0 = sum(inverter.P) + load.P + ev.P + grid.P
+```
+
+`flow P` is positive **into** the component. Lua's meter (positive import) is `-grid.P`.
+
+The easiest way to keep that physics editable without dragging OpenModelica into the Go binary:
+
+```text
+modelica/SiteEnergy.mo     <-- source of truth (connectors, SoC ODE)
+        |
+        |  omc / Dymola  -->  Site.fmu   (optional)
+        |
+internal/plant.Model       <-- plug: NativeSite today, LoadFMU later
+        |
+site clock (calculateAndUpdateMeter)
+        |
+vendor register maps / Lua
+```
+
+`NativeSite` implements the same bus equation in Go so `go test` and Docker work with zero extra tools. Self-consumption slack (mode 0) is assigned by the **master** each step: it depends on every unit's live Lua writes, so it must not sit inside the FMU as a hidden algebraic loop.
+
+```bash
+# later, when you want the Modelica slave on the same plug:
+omc script to export FMI 2.0 CS for SiteEnergy.Site
+# then plant.LoadFMU("Site.fmu") — not linked yet; see internal/plant/fmu.go
+```
 
 ## Lua compatibility (Sungrow first)
 
@@ -95,16 +127,17 @@ Sunny / cloudy / … still write independent PV and load sines, then a late mete
 Next couplings, in order:
 
 1. Drive **all** weather scenarios through `plant.WeatherForScenario` so Lua tests do not need a special scenario.
-2. Step the plant on the **site** clock with the site's phase loads as `P_load`, one plant per inverter, grid slack on the site meter.
+2. Link `LoadFMU` (FMI 2.0 CS) so `modelica/SiteEnergy.mo` can replace NativeSite without API changes.
 3. Per-driver fixture packs: the register window each Lua file reads, generated from the driver source (same idea as `test_modbus_drivers.py`).
-4. MQTT / OCPP facades on the same plant (Ambibox, OCPP chargers) so a site with mixed protocols still conserves energy.
+4. MQTT / OCPP facades on the same bus (Ambibox, OCPP chargers) so mixed-protocol sites still conserve energy.
 
 ## Package map
 
 | Path | Responsibility |
 |------|----------------|
-| `internal/plant` | DAE: balance, SoC, GHI, semantic projection |
+| `modelica/SiteEnergy.mo` | Modelica site (ACBus, hybrids, grid slack) |
+| `internal/plant` | NativeSite + FMU plug, semantic projection |
 | `internal/modbus/devices` | Vendor addresses and encoding |
 | `internal/modbus/server.go` | Modbus TCP (what Lua actually hits) |
-| `cmd/simulator/main.go` | `physical` scenario → `stepPhysicalPlant` |
+| `cmd/simulator/main.go` | site clock → `runSitePlantAndApply` when scenario is `physical` |
 | `srcfl/device-drivers` | Lua, host API, emit schema — **not copied here** |

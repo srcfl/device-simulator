@@ -62,6 +62,7 @@ cover/
 # Translations
 *.mo
 *.pot
+!modelica/**/*.mo
 
 # Django stuff:
 *.log

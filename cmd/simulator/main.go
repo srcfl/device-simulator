@@ -162,6 +162,7 @@ type Site struct {
 	mu          sync.RWMutex
 	stopChan    chan struct{}
 	simStopChan chan struct{} // Stop channel for simulation loop
+	sitePlant   *plant.NativeSite
 }
 
 var (
@@ -3529,6 +3530,132 @@ func applyPlantOutputs(sim *Simulator, out plant.Outputs) {
 	sim.mu.Unlock()
 }
 
+func siteUsesPhysicalPlant(site *Site) bool {
+	if site == nil {
+		return false
+	}
+	site.mu.RLock()
+	defer site.mu.RUnlock()
+	return site.Scenario == "physical"
+}
+
+func ensureSitePlant(site *Site) *plant.NativeSite {
+	site.mu.Lock()
+	defer site.mu.Unlock()
+	if site.sitePlant == nil {
+		site.sitePlant = plant.NewNativeSite()
+	}
+	return site.sitePlant
+}
+
+func collectSiteInverters(site *Site) []*Simulator {
+	site.mu.RLock()
+	meterID := site.MeterID
+	ids := append([]int{}, site.SimulatorIDs...)
+	site.mu.RUnlock()
+
+	seen := map[int]struct{}{}
+	var out []*Simulator
+	add := func(id int) {
+		if id == 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		sim := getSimulator(id)
+		if sim == nil {
+			return
+		}
+		sim.mu.RLock()
+		ok := sim.Running && sim.DeviceOn && sim.Category == "inverter" && sim.Protocol == "modbus" && sim.Server != nil
+		sim.mu.RUnlock()
+		if ok {
+			out = append(out, sim)
+		}
+	}
+	add(meterID)
+	for _, id := range ids {
+		add(id)
+	}
+	return out
+}
+
+// runSitePlantAndApply steps the site DAE on the site clock and writes
+// member registers. The meter is written by calculateAndUpdateMeter.
+func runSitePlantAndApply(site *Site, simDelta time.Duration) (gridW float64, ok bool) {
+	if !siteUsesPhysicalPlant(site) {
+		return 0, false
+	}
+	inverters := collectSiteInverters(site)
+	if len(inverters) == 0 {
+		return 0, false
+	}
+	site.mu.RLock()
+	simTime := site.SimulatedTime
+	loadW := site.SitePhaseLoads.Total()
+	if loadW == 0 {
+		loadW = site.BaseLoadW
+	}
+	scenario := site.Scenario
+	site.mu.RUnlock()
+	if simTime.IsZero() {
+		simTime = time.Now()
+	}
+
+	model := ensureSitePlant(site)
+	members := make([]plant.MemberStep, 0, len(inverters))
+	exportLimit := false
+	exportW := 0.0
+	for _, sim := range inverters {
+		key := strconv.Itoa(sim.ID)
+		u := ensurePlant(sim)
+		if rated := getSemanticValue(sim, "nominal_power"); rated > 0 {
+			u.Params.RatedACW = rated * 1000
+			u.Params.RatedPVW = rated * 1000
+		}
+		if sim.BatteryCapacityKWh > 0 {
+			u.Params.BatteryCapacityWh = sim.BatteryCapacityKWh * 1000
+		}
+		if soc := getSemanticValue(sim, "battery_soc"); soc > 0 {
+			u.SeedSOC(soc)
+		}
+		model.Attach(key, u)
+		ctrl := controlFromRegisters(sim)
+		members = append(members, plant.MemberStep{Key: key, Control: ctrl})
+		if ctrl.ExportLimitEnable && ctrl.PVLimitW > 0 {
+			exportLimit = true
+			exportW = ctrl.PVLimitW
+		}
+	}
+
+	res, err := model.StepSite(simDelta.Seconds(), plant.SiteStep{
+		Time:              simTime,
+		Weather:           plant.WeatherForScenario(simTime, scenario),
+		LoadW:             loadW,
+		ExportLimitEnable: exportLimit,
+		ExportLimitW:      exportW,
+		Members:           members,
+	})
+	if err != nil {
+		log.Printf("[Site %d] plant step: %v", site.ID, err)
+		return 0, false
+	}
+	for _, m := range res.Members {
+		id, convErr := strconv.Atoi(m.Key)
+		if convErr != nil {
+			continue
+		}
+		sim := getSimulator(id)
+		if sim == nil {
+			continue
+		}
+		applyPlantOutputs(sim, m.Out)
+	}
+	return res.GridW, true
+}
+
 func generateValues(sim *Simulator, simTime time.Time) {
 	// Handle different protocols
 	switch sim.Protocol {
@@ -4323,56 +4450,58 @@ func runSiteSimulationLoop(site *Site, stopChan chan struct{}) {
 			}
 			site.mu.Unlock()
 
-			// Generate values for each device in the site
-			for _, simID := range simIDs {
-				sim := getSimulator(simID)
-				if sim == nil {
-					continue
+			if scenario != "physical" {
+				// Generate values for each device in the site
+				for _, simID := range simIDs {
+					sim := getSimulator(simID)
+					if sim == nil {
+						continue
+					}
+
+					sim.mu.RLock()
+					running := sim.Running
+					deviceOn := sim.DeviceOn
+					category := sim.Category
+					sim.mu.RUnlock()
+
+					if category != "inverter" {
+						continue
+					}
+					if running && deviceOn {
+						sim.Automation.mu.RLock()
+						simScenario := sim.Automation.Scenario
+						sim.Automation.mu.RUnlock()
+						if simScenario == "" {
+							simScenario = scenario
+						}
+						if simScenario == "physical" {
+							stepPhysicalPlant(sim, simTime, simScenario, 0)
+						} else {
+							generateValuesForSite(sim, simTime, simScenario)
+						}
+					}
 				}
 
-				sim.mu.RLock()
-				running := sim.Running
-				deviceOn := sim.DeviceOn
-				category := sim.Category
-				sim.mu.RUnlock()
+				// Also generate for the meter if it's an inverter
+				meterSim := getSimulator(meterID)
+				if meterSim != nil {
+					meterSim.mu.RLock()
+					running := meterSim.Running
+					category := meterSim.Category
+					meterSim.mu.RUnlock()
 
-				if category != "inverter" {
-					continue
-				}
-				if running && deviceOn {
-					sim.Automation.mu.RLock()
-					simScenario := sim.Automation.Scenario
-					sim.Automation.mu.RUnlock()
-					if simScenario == "" {
-						simScenario = scenario
-					}
-					if simScenario == "physical" {
-						stepPhysicalPlant(sim, simTime, simScenario, 0)
-					} else {
-						generateValuesForSite(sim, simTime, simScenario)
-					}
-				}
-			}
-
-			// Also generate for the meter if it's an inverter
-			meterSim := getSimulator(meterID)
-			if meterSim != nil {
-				meterSim.mu.RLock()
-				running := meterSim.Running
-				category := meterSim.Category
-				meterSim.mu.RUnlock()
-
-				if running && category == "inverter" {
-					meterSim.Automation.mu.RLock()
-					meterScenario := meterSim.Automation.Scenario
-					meterSim.Automation.mu.RUnlock()
-					if meterScenario == "" {
-						meterScenario = scenario
-					}
-					if meterScenario == "physical" {
-						stepPhysicalPlant(meterSim, simTime, meterScenario, 0)
-					} else {
-						generateValuesForSite(meterSim, simTime, meterScenario)
+					if running && category == "inverter" {
+						meterSim.Automation.mu.RLock()
+						meterScenario := meterSim.Automation.Scenario
+						meterSim.Automation.mu.RUnlock()
+						if meterScenario == "" {
+							meterScenario = scenario
+						}
+						if meterScenario == "physical" {
+							stepPhysicalPlant(meterSim, simTime, meterScenario, 0)
+						} else {
+							generateValuesForSite(meterSim, simTime, meterScenario)
+						}
 					}
 				}
 			}
@@ -4592,9 +4721,14 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		}
 	}
 
-	// If meter is an inverter, read its PV/Battery values and include them in the calculation
-	// Distribute PV/battery contributions using phase factors
-	if meterCategory == "inverter" {
+	plantGrid, usedPlant := runSitePlantAndApply(site, simDelta)
+	if usedPlant {
+		phasePowers = PhasePowers{
+			L1: plantGrid * phaseFactors.L1,
+			L2: plantGrid * phaseFactors.L2,
+			L3: plantGrid * phaseFactors.L3,
+		}
+	} else if meterCategory == "inverter" {
 		pvPower := getSemanticValue(meterSim, "pv_power") // PV power
 		batteryPower := getBatterySignedPower(meterSim)   // Signed battery power
 
@@ -4605,24 +4739,24 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		phasePowers.L3 += pvBatteryNet * phaseFactors.L3
 	}
 
-	// Add contributions from other simulators (distributed using phase factors)
-	var otherPower float64
-	for _, simID := range simIDs {
-		// Skip meter simulator to avoid double-counting its own power
-		if simID == meterID {
-			continue
+	if !usedPlant {
+		var otherPower float64
+		for _, simID := range simIDs {
+			// Skip meter simulator to avoid double-counting its own power
+			if simID == meterID {
+				continue
+			}
+			sim := getSimulator(simID)
+			if sim == nil {
+				continue
+			}
+			otherPower += getPowerContribution(sim)
 		}
-		sim := getSimulator(simID)
-		if sim == nil {
-			continue
-		}
-		otherPower += getPowerContribution(sim)
-	}
 
-	// Distribute other power contributions across phases
-	phasePowers.L1 += otherPower * phaseFactors.L1
-	phasePowers.L2 += otherPower * phaseFactors.L2
-	phasePowers.L3 += otherPower * phaseFactors.L3
+		phasePowers.L1 += otherPower * phaseFactors.L1
+		phasePowers.L2 += otherPower * phaseFactors.L2
+		phasePowers.L3 += otherPower * phaseFactors.L3
+	}
 
 	// Update fuse state based on overload profile (before applying blown phases)
 	fuseBlown := updateFuseState(site, phasePowers, simDelta)
@@ -4653,7 +4787,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	energyDeltaKWh := math.Abs(totalPower) / 1000.0 * simHours
 	energyDeltaWh := math.Abs(totalPower) * simHours
 
-	if simHours > 0 {
+	if simHours > 0 && !usedPlant {
 		// Update battery SOC and PV energy for all inverters using the central clock
 		if meterCategory == "inverter" && meterSim.Server != nil && !simulatorUsesPlant(meterSim) {
 			updateBatterySOC(meterSim, simHours, meterCapacityKWh)

@@ -202,33 +202,52 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 		ambient = pr.AmbientC
 	}
 
-	maxChg := firstPositive(ctrl.MaxChargeW, pr.MaxChargeW)
-	maxDis := firstPositive(ctrl.MaxDischargeW, pr.MaxDischargeW)
-	minSOC := ctrl.MinSOC
-	maxSOC := ctrl.MaxSOC
-	if maxSOC <= 0 || maxSOC > 100 {
-		maxSOC = 100
-	}
-	if minSOC < 0 || minSOC >= maxSOC {
-		minSOC = 0
+	minSOC, maxSOC := socBounds(ctrl)
+	pPV, pDC := p.previewPV(in.Weather, ctrl)
+
+	pLoad := math.Max(0, in.LoadW)
+	pEV := math.Max(0, in.EVW)
+
+	pBatt := batterySetpoint(ctrl, pPV, pLoad, pEV)
+	pBatt = p.clipBattery(pBatt, ctrl)
+
+	pGrid := -pPV - pBatt - pLoad - pEV
+
+	if ctrl.ExportLimitEnable && ctrl.PVLimitW > 0 && pGrid < -ctrl.PVLimitW {
+		wantPV := -(-ctrl.PVLimitW + pBatt + pLoad + pEV)
+		if wantPV > 0 {
+			wantPV = 0
+		}
+		if wantPV < pPV {
+			pPV = wantPV
+		}
+		pGrid = -pPV - pBatt - pLoad - pEV
 	}
 
+	return p.commit(dt, in.Time, in.Weather, pPV, pDC, pBatt, pLoad, pEV, pGrid, ambient, minSOC, maxSOC)
+}
+
+// previewPV is the algebraic PV injection (negative watts) before battery/grid.
+func (p *Plant) previewPV(w Weather, ctrl Control) (pPV, pDC float64) {
+	pr := p.Params
+	ambient := w.AmbientC
+	if ambient == 0 {
+		ambient = pr.AmbientC
+	}
 	cellC := ambient + 5
-	ghi := math.Max(0, in.Weather.GHIWm2)
-	pAvailDC := (ghi / 1000.0) * pr.RatedPVW * (1 + pr.TempCoeffPerK*(cellC-25))
-	if pAvailDC < 0 {
-		pAvailDC = 0
+	ghi := math.Max(0, w.GHIWm2)
+	pDC = (ghi / 1000.0) * pr.RatedPVW * (1 + pr.TempCoeffPerK*(cellC-25))
+	if pDC < 0 {
+		pDC = 0
 	}
-
 	eta := pr.InverterEta
 	if eta <= 0 || eta > 1 {
 		eta = 0.97
 	}
-	pAvailAC := pAvailDC * eta
+	pAvailAC := pDC * eta
 	if pAvailAC > pr.RatedACW {
 		pAvailAC = pr.RatedACW
 	}
-
 	cap := pAvailAC
 	if ctrl.ActiveLimitEnable && ctrl.ActiveLimitRatio > 0 {
 		cap = math.Min(cap, pr.RatedACW*ctrl.ActiveLimitRatio)
@@ -236,33 +255,32 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 	if ctrl.PVLimitEnable && ctrl.PVLimitW > 0 {
 		cap = math.Min(cap, ctrl.PVLimitW)
 	}
-	pPV := -cap // generation is negative at the site node
+	return -cap, pDC
+}
 
-	pLoad := math.Max(0, in.LoadW)
-	pEV := math.Max(0, in.EVW)
-
-	pBatt := batterySetpoint(ctrl, pPV, pLoad, pEV)
+func (p *Plant) clipBattery(pBatt float64, ctrl Control) float64 {
+	pr := p.Params
+	maxChg := firstPositive(ctrl.MaxChargeW, pr.MaxChargeW)
+	maxDis := firstPositive(ctrl.MaxDischargeW, pr.MaxDischargeW)
+	minSOC, maxSOC := socBounds(ctrl)
 	pBatt = clip(pBatt, -maxDis, maxChg)
-	pBatt = applySOCLimits(pBatt, p.State.SOC, minSOC, maxSOC)
+	return applySOCLimits(pBatt, p.State.SOC, minSOC, maxSOC)
+}
 
-	pGrid := -pPV - pBatt - pLoad - pEV
-
-	if ctrl.ExportLimitEnable && ctrl.PVLimitW > 0 && pGrid < -ctrl.PVLimitW {
-		// Curtail PV to honour a feed-in cap. Battery already committed.
-		// P_grid_target = -PVLimitW (max export)
-		// -pPV = pGrid_target + pBatt + pLoad + pEV
-		wantPV := -(-ctrl.PVLimitW + pBatt + pLoad + pEV)
-		if wantPV > 0 {
-			wantPV = 0
-		}
-		if wantPV < pPV { // pPV is more negative than allowed
-			pPV = wantPV
-		}
-		pGrid = -pPV - pBatt - pLoad - pEV
+func socBounds(ctrl Control) (minSOC, maxSOC float64) {
+	maxSOC = ctrl.MaxSOC
+	minSOC = ctrl.MinSOC
+	if maxSOC <= 0 || maxSOC > 100 {
+		maxSOC = 100
 	}
+	if minSOC < 0 || minSOC >= maxSOC {
+		minSOC = 0
+	}
+	return minSOC, maxSOC
+}
 
-	// Integrate SoC. Charging: bus power enters the pack through eta_c.
-	// Discharging: pack energy leaves through 1/eta_d to deliver pBatt.
+func (p *Plant) commit(dt float64, t time.Time, w Weather, pPV, pDC, pBatt, pLoad, pEV, pGrid, ambient, minSOC, maxSOC float64) Outputs {
+	pr := p.Params
 	hours := dt / 3600.0
 	capWh := pr.BatteryCapacityWh
 	if capWh <= 0 {
@@ -274,7 +292,7 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 			dWh = pBatt * hours * clamp01(pr.ChargeEfficiency)
 			p.State.TotalChargeWh += pBatt * hours
 		} else {
-			dWh = pBatt * hours / clamp01(pr.DischargeEfficiency) // pBatt negative
+			dWh = pBatt * hours / clamp01(pr.DischargeEfficiency)
 			p.State.TotalDischargeWh += -pBatt * hours
 		}
 		p.State.SOC = clip(p.State.SOC+(dWh/capWh)*100.0, minSOC, maxSOC)
@@ -289,8 +307,7 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 		}
 	}
 
-	// First-order inverter temperature from conversion losses.
-	lossW := pAvailDC - (-pPV)
+	lossW := pDC - (-pPV)
 	if lossW < 0 {
 		lossW = 0
 	}
@@ -312,22 +329,20 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 	if pBatt != 0 {
 		aBatt = math.Abs(pBatt) / vBatt
 	}
-
-	mppts := splitMPPT(-pPV, ghi)
-
+	ghi := math.Max(0, w.GHIWm2)
 	hz := 50.0
-	if !in.Time.IsZero() {
-		hz = 50.0 + 0.04*math.Sin(float64(in.Time.Second())*0.1)
+	if !t.IsZero() {
+		hz = 50.0 + 0.04*math.Sin(float64(t.Second())*0.1)
 	}
 
-	out := Outputs{
+	return Outputs{
 		GridW:            pGrid,
 		PVW:              pPV,
 		BatteryW:         pBatt,
 		LoadW:            pLoad,
 		EVW:              pEV,
-		PVDCW:            pAvailDC,
-		MPPTs:            mppts,
+		PVDCW:            pDC,
+		MPPTs:            splitMPPT(-pPV, ghi),
 		BatteryV:         vBatt,
 		BatteryA:         aBatt,
 		SOC:              p.State.SOC,
@@ -341,7 +356,6 @@ func (p *Plant) step(dt float64, in Inputs) Outputs {
 		TotalImportWh:    p.State.TotalImportWh,
 		TotalExportWh:    p.State.TotalExportWh,
 	}
-	return out
 }
 
 func batterySetpoint(ctrl Control, pPV, pLoad, pEV float64) float64 {

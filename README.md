@@ -63,7 +63,7 @@ docker compose up --build
 - **Site Management** - Group simulators into sites with energy meters
 - **Device Profiles** - Sungrow, SolarEdge, Fronius, Huawei, and more
 - **Time Acceleration** - Compress 24 hours into minutes for testing
-- **Physical plant** - Conserved site power balance and battery SoC (Modelica-style DAE) for closed-loop Lua driver tests — see [docs/LUA_DRIVER_PLANT.md](docs/LUA_DRIVER_PLANT.md)
+- **Physical plant** - Site AC bus with conserved power and battery SoC; Modelica source in `modelica/SiteEnergy.mo` (Go native backend today, FMU plug later) — [docs/LUA_DRIVER_PLANT.md](docs/LUA_DRIVER_PLANT.md)
 - **Real-time Logging** - See every protocol operation as it happens
 
 ## Supported Profiles
