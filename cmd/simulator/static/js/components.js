@@ -248,7 +248,9 @@ document.addEventListener('alpine:init', () => {
             'overcast': '☁️ Overcast',
             'rainy': '🌧️ Rainy',
             'night': '🌙 Night',
-            'peak_load': '⚡ Peak Load'
+            'peak_load': '⚡ Peak Load',
+            'battery_test': '🔋 Battery Cycle',
+            'physical': '🌿 Physical plant'
         },
 
         get connectedSiteId() {
@@ -320,7 +322,8 @@ document.addEventListener('alpine:init', () => {
             { value: 'rainy', label: '🌧️ Rainy Day' },
             { value: 'night', label: '🌙 Night Mode' },
             { value: 'peak_load', label: '⚡ Peak Load' },
-            { value: 'battery_test', label: '🔋 Battery Cycle' }
+            { value: 'battery_test', label: '🔋 Battery Cycle' },
+            { value: 'physical', label: '🌿 Physical plant' }
         ],
 
         speeds: [
@@ -861,7 +864,8 @@ document.addEventListener('alpine:init', () => {
             { value: 'overcast', label: '☁️ Overcast' },
             { value: 'rainy', label: '🌧️ Rainy' },
             { value: 'night', label: '🌙 Night' },
-            { value: 'peak_load', label: '⚡ Peak Load' }
+            { value: 'peak_load', label: '⚡ Peak Load' },
+            { value: 'physical', label: '🌿 Physical plant' }
         ],
 
         init() {

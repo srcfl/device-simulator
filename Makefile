@@ -1,6 +1,6 @@
 .PHONY: up down restart build logs clean test env \
 	build-macos build-linux build-linux-server build-windows \
-	run-macos package help
+	run-macos package help fmu fmu-clean
 
 # Auto-detect host IP for Mac (en0 = WiFi, en1 = Ethernet)
 HOST_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "")
@@ -31,6 +31,17 @@ clean:
 
 test:
 	go test ./...
+
+# Compile modelica/SiteEnergy.Site4 to an FMI 2.0 co-simulation FMU.
+# Requires OpenModelica (`omc`). The simulator loads it via siteplant.Open.
+fmu:
+	@command -v omc >/dev/null || (echo "omc not found. Install OpenModelica: https://openmodelica.org" && exit 1)
+	cd modelica && omc export.mos
+
+fmu-clean:
+	cd modelica && rm -f Site4.fmu Site4_*.c Site4_*.h Site4_*.o Site4_*.json \
+		Site4_*.libs Site4_*.makefile Site4_*.log Site4.inst.mo index.html \
+		Site4_FMU.* 2>/dev/null || true
 
 # Build macOS desktop app (native, requires macOS)
 build-macos:
@@ -126,5 +137,6 @@ help:
 	@echo ""
 	@echo "Other:"
 	@echo "  make test         - Run Go tests"
+	@echo "  make fmu          - Compile SiteEnergy.Site4 to FMI 2.0 CS (needs omc)"
 	@echo "  make package      - Create release packages"
 	@echo "  make clean        - Remove build artifacts"

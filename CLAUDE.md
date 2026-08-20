@@ -99,6 +99,7 @@ The app supports two modes controlled by the `--desktop` flag:
 - Pixii PowerShaper
 - FerroAmp EnergyHub
 - SDM630 Energy Meter
+- Generic SG Ready heat pump (site plant)
 
 ## API Endpoints
 
@@ -107,7 +108,7 @@ HTTP API (port 80 in Docker, 8762 in desktop mode):
 ```
 GET  /                                    # Dashboard UI
 GET  /api/simulators                      # List all simulators
-POST /api/simulators                      # Create simulator {type: "inverter"|"energy_meter"|"v2x_charger"|"ocpp_charger"}
+POST /api/simulators                      # Create simulator {type: "inverter"|"energy_meter"|"heat_pump"|"v2x_charger"|"ocpp_charger"}
 DELETE /api/simulators/{id}               # Delete simulator
 GET  /api/simulators/{id}                 # Get simulator details
 POST /api/simulators/{id}/config          # Update serial/slave ID
@@ -119,6 +120,10 @@ POST /api/simulators/{id}/automation/stop  # Stop data generation
 POST /api/simulators/{id}/reset           # Reset to defaults
 GET  /api/sites                           # List all sites
 POST /api/sites                           # Create site
+GET  /api/facilities                      # List facility presets
+GET  /api/sites/{id}/facility             # Get site facility
+POST /api/sites/{id}/facility             # Apply facility preset (plant + devices)
+GET  /api/sites/{id}/plant                # Live electrical + thermal snapshot
 GET  /api/system                          # Get system info (local IP)
 GET  /api/version                         # Get app version
 GET  /api/update/check                    # Check for updates

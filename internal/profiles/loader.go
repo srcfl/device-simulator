@@ -45,8 +45,8 @@ type Profile struct {
 	Description     string   `json:"description"`
 	Protocol        string   `json:"protocol"` // modbus, mqtt, ocpp
 	DeviceType      string   `json:"device_type"`
-	Categories      []string `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
-	EVCCRef         string   `json:"evcc_ref,omitempty"`   // Link to EVCC template
+	Categories      []string `json:"categories,omitempty"`        // pv, battery, meter, grid, control, ev, v2x, charger
+	EVCCRef         string   `json:"evcc_ref,omitempty"`          // Link to EVCC template
 	ZapVerified     bool     `json:"zap_verified,omitempty"`      // True if register map is synced with zap-x firmware
 	RegisterSetName string   `json:"register_set_name,omitempty"` // Maps to devices.GetRegisterSet() for native register addresses
 
@@ -273,6 +273,24 @@ func (m *Manager) GetActiveName() string {
 
 // EmbeddedProfiles contains built-in profiles for common device types
 var EmbeddedProfiles = map[string]*Profile{
+	"heat-pump": {
+		Name:            "heat-pump",
+		Description:     "Generic heat pump (SG Ready + Modbus). Indoor/DHW temperatures and COP come from the site plant.",
+		Protocol:        "modbus",
+		DeviceType:      "heatpump",
+		Categories:      []string{"heat"},
+		RegisterSetName: "heat-pump",
+		Defaults: map[uint16]float64{
+			1000: 19,
+			1001: 6,
+			1002: 45,
+			1005: 3.2,
+			1100: 1,
+			1101: 0,
+			1102: 0,
+			1103: 0,
+		},
+	},
 	"sungrow-hybrid": {
 		Name:            "sungrow-hybrid",
 		Description:     "Sungrow SH Series Hybrid Inverter",
@@ -370,10 +388,10 @@ var EmbeddedProfiles = map[string]*Profile{
 		ZapVerified:     true,
 		RegisterSetName: "sma",
 		Defaults: map[uint16]float64{
-			30775: 0,    // PV Power
-			30845: 70,   // Battery SoC
-			30847: 0,    // Battery Power
-			30865: 0,    // Meter Power
+			30775: 0,  // PV Power
+			30845: 70, // Battery SoC
+			30847: 0,  // Battery Power
+			30865: 0,  // Meter Power
 			30803: 50, // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
@@ -387,8 +405,8 @@ var EmbeddedProfiles = map[string]*Profile{
 		ZapVerified:     true,
 		RegisterSetName: "huawei",
 		Defaults: map[uint16]float64{
-			32064: 0,    // PV Power
-			37001: 0,    // Battery Power
+			32064: 0,   // PV Power
+			37001: 0,   // Battery Power
 			37004: 65,  // Battery SoC (65.0%, scale 0.1)
 			37113: 0,   // Meter Power
 			32089: 700, // Load Power
@@ -421,12 +439,12 @@ var EmbeddedProfiles = map[string]*Profile{
 		ZapVerified:     true,
 		RegisterSetName: "deye",
 		Defaults: map[uint16]float64{
-			672: 0,    // PV Power
-			590: 0,    // Battery Power
-			588: 80,   // Battery SoC
-			619: 0,    // Meter Power
-			653: 450,  // Load Power
-			79:  50, // Grid Frequency (50.00 Hz, scale 0.01)
+			672: 0,   // PV Power
+			590: 0,   // Battery Power
+			588: 80,  // Battery SoC
+			619: 0,   // Meter Power
+			653: 450, // Load Power
+			79:  50,  // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
 	"pixii-powershaper": {

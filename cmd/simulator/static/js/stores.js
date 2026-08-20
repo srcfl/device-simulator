@@ -626,6 +626,50 @@ const siteApi = {
             throw new Error(text);
         }
         return resp.json();
+    },
+
+    async getFacilities() {
+        if (isWails && window.go?.main?.App?.GetFacilities) {
+            const data = await window.go.main.App.GetFacilities();
+            return Array.isArray(data) ? data : [];
+        }
+        const resp = await fetch('/api/facilities');
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        const data = await resp.json();
+        if (Array.isArray(data)) return data;
+        if (Array.isArray(data.facilities)) return data.facilities;
+        return [];
+    },
+
+    async applyFacility(siteId, preset) {
+        if (isWails && window.go?.main?.App?.ApplySiteFacility) {
+            return await window.go.main.App.ApplySiteFacility(siteId, preset);
+        }
+        const resp = await fetch(`/api/sites/${siteId}/facility`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preset, start: true })
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        return resp.json();
+    },
+
+    async getSitePlant(siteId) {
+        if (isWails && window.go?.main?.App?.GetSitePlant) {
+            return await window.go.main.App.GetSitePlant(siteId);
+        }
+        const resp = await fetch(`/api/sites/${siteId}/plant`);
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(text);
+        }
+        return resp.json();
     }
 };
 
@@ -857,6 +901,7 @@ const storage = {
 const categories = {
     inverter: { name: 'Inverters', icon: '⚡', collapsed: false },
     energy_meter: { name: 'Energy Meters', icon: '📊', collapsed: false },
+    heat_pump: { name: 'Heat Pumps', icon: '🔥', collapsed: false },
     v2x_charger: { name: 'V2X Chargers', icon: '🔋', collapsed: false },
     ocpp_charger: { name: 'OCPP Chargers', icon: '🔌', collapsed: false }
 };
@@ -1115,7 +1160,7 @@ document.addEventListener('alpine:init', () => {
 
         // Get simulators for selected site, sorted flat by category priority then port
         getSiteSortedSimulators() {
-            const priority = { energy_meter: 1, inverter: 2, v2x_charger: 3, ocpp_charger: 4 };
+            const priority = { energy_meter: 1, inverter: 2, heat_pump: 3, v2x_charger: 4, ocpp_charger: 5 };
             return this.getSiteSimulators().slice().sort((a, b) => {
                 const pa = priority[a.category] || 99;
                 const pb = priority[b.category] || 99;

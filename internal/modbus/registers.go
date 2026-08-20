@@ -14,9 +14,9 @@ const (
 	I16
 	U32
 	I32
-	F32  // IEEE 754 single-precision float
-	STR  // Multi-word ASCII string
-	U64  // Unsigned 64-bit integer (4 words)
+	F32 // IEEE 754 single-precision float
+	STR // Multi-word ASCII string
+	U64 // Unsigned 64-bit integer (4 words)
 )
 
 func (d DataType) String() string {
@@ -55,9 +55,9 @@ type RegisterDef struct {
 type RegisterSet struct {
 	Name        string
 	Definitions []RegisterDef
-	Lookup      map[uint16]*RegisterDef  // by address
-	Semantic    map[string]*RegisterDef  // by semantic name
-	Defaults    map[uint16]int64         // default register values
+	Lookup      map[uint16]*RegisterDef // by address
+	Semantic    map[string]*RegisterDef // by semantic name
+	Defaults    map[uint16]int64        // default register values
 }
 
 // NewRegisterSet creates a RegisterSet from a slice of definitions and defaults.
@@ -84,6 +84,8 @@ func NewRegisterSet(name string, defs []RegisterDef, defaults map[uint16]int64) 
 // Categories: pv, battery, meter, grid, control
 var RegisterDefinitions = []RegisterDef{
 	// PV Registers (Sungrow SH Hybrid - Input Registers)
+	{Address: 4990, Name: "Serial Number (Lua)", SemanticName: "serial_number_lua", Description: "Sungrow serial as addressed by srcfl/device-drivers (host 4990)", Unit: "", Category: "pv", DataType: STR, Scale: 1.0, Words: 10, Endianness: Big, UseHolding: false},
+	{Address: 4999, Name: "Device Type", SemanticName: "device_type", Description: "Sungrow device type (0x0E0E = SH8.0RT-V112)", Unit: "", Category: "pv", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 5000, Name: "Nominal Output Power", SemanticName: "nominal_power", Description: "Nominal output power of the inverter", Unit: "kW", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 5007, Name: "Inside Temperature", SemanticName: "", Description: "Internal temperature of the inverter", Unit: "°C", Category: "pv", DataType: I16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 5010, Name: "MPPT 1 Voltage", SemanticName: "", Description: "Maximum Power Point Tracker 1 Voltage", Unit: "V", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
@@ -93,8 +95,11 @@ var RegisterDefinitions = []RegisterDef{
 	{Address: 5016, Name: "PV Power", SemanticName: "pv_power", Description: "Total DC power", Unit: "W", Category: "pv", DataType: U32, Scale: 1.0, Words: 2, Endianness: Little, UseHolding: false},
 	{Address: 13002, Name: "Total PV Generation", SemanticName: "total_pv_gen", Description: "Total photovoltaic generation", Unit: "Wh", Category: "pv", DataType: U32, Scale: 100.0, Words: 2, Endianness: Little, UseHolding: false},
 	{Address: 13073, Name: "PV Command", SemanticName: "pv_cmd", Description: "PV power limit", Unit: "W", Category: "pv", DataType: U16, Scale: 1.0, Words: 2, Endianness: Big, UseHolding: true},
+	{Address: 13088, Name: "Active Power Limit Enable", SemanticName: "pv_limit_enable", Description: "170=on; 85=off (Lua host address, documented 13089)", Unit: "", Category: "pv", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: true},
+	{Address: 13089, Name: "Active Power Limit Ratio", SemanticName: "pv_limit_ratio", Description: "Active power limit in 0.1% units (1000=100%)", Unit: "%", Category: "pv", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: true},
 
 	// Battery Registers (Sungrow SH Hybrid - Input Registers)
+	{Address: 12999, Name: "Running State", SemanticName: "running_state", Description: "Sungrow documented running state (host address 12999)", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 13000, Name: "System State Flags", SemanticName: "battery_flags", Description: "Bitmask of inverter running states", Unit: "", Category: "battery", DataType: U16, Scale: 1.0, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 13019, Name: "Battery Voltage", SemanticName: "", Description: "Battery voltage", Unit: "V", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
 	{Address: 13020, Name: "Battery Current", SemanticName: "", Description: "Battery current", Unit: "A", Category: "battery", DataType: U16, Scale: 0.1, Words: 1, Endianness: Big, UseHolding: false},
@@ -215,11 +220,15 @@ var DefaultValues = map[uint16]int64{
 	13050: 204,   // Charge/Discharge Command (204=Stop)
 	13051: 0,     // Battery Setpoint
 	13073: 10000, // PV Command Power
+	13088: 85,    // Active power limit off
+	13089: 100,   // 100%
 	13086: 170,   // Export Limit Enable (170=Enabled)
-	33046: 500,   // Max Charge Power (5kW)
-	33047: 500,   // Max Discharge Power (5kW)
+	4999:  0x0E0E,
+	12999: 1,
+	33046: 500, // Max Charge Power (5kW)
+	33047: 500, // Max Discharge Power (5kW)
 	13057: 100, // Battery Max SoC (100.0%)
-	13058: 0,     // Battery Min SoC (0.0%)
+	13058: 0,   // Battery Min SoC (0.0%)
 
 	// Energy totals will be randomized at startup
 	13036: 150000, // Total Import Energy (Wh)
@@ -443,6 +452,8 @@ func SetSerialNumber(serial string, setFunc func(addr uint16, values []uint16)) 
 	}
 
 	setFunc(4989, registers)
+	// srcfl/device-drivers Sungrow Lua reads serial at host address 4990.
+	setFunc(4990, registers)
 
 	// SDM630: Write numeric serial to register 64512/0xFC00 (U32, Big Endian)
 	// If serial is numeric, use it directly; otherwise hash the string

@@ -359,8 +359,8 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Description: "Create a simulator",
 				InputSchema: schemaObject(map[string]interface{}{
 					"type": map[string]interface{}{
-						"type": "string",
-						"description": "Simulator type (inverter, energy_meter, v2x_charger, ocpp_charger)",
+						"type":        "string",
+						"description": "Simulator type (inverter, energy_meter, heat_pump, v2x_charger, ocpp_charger)",
 					},
 				}, []string{"type"}),
 			},
@@ -397,10 +397,10 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Name:        "simulators.update_config",
 				Description: "Update simulator config",
 				InputSchema: schemaObject(map[string]interface{}{
-					"id":                    schemaInteger("Simulator ID"),
-					"slave_id":              schemaInteger("Modbus slave ID"),
-					"serial":                schemaString("Simulator serial"),
-					"ocpp_url":              schemaString("OCPP URL"),
+					"id":                   schemaInteger("Simulator ID"),
+					"slave_id":             schemaInteger("Modbus slave ID"),
+					"serial":               schemaString("Simulator serial"),
+					"ocpp_url":             schemaString("OCPP URL"),
 					"battery_capacity_kwh": schemaNumber("Battery capacity in kWh"),
 				}, []string{"id"}),
 			},
@@ -519,10 +519,10 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Name:        "simulators.automation.config",
 				Description: "Configure simulator automation",
 				InputSchema: schemaObject(map[string]interface{}{
-					"id":                schemaInteger("Simulator ID"),
-					"time_multiplier":   schemaNumber("Time multiplier"),
-					"scenario":          schemaString("Scenario"),
-					"profile":           schemaString("Profile"),
+					"id":                 schemaInteger("Simulator ID"),
+					"time_multiplier":    schemaNumber("Time multiplier"),
+					"scenario":           schemaString("Scenario"),
+					"profile":            schemaString("Profile"),
 					"update_interval_ms": schemaInteger("Update interval ms"),
 				}, []string{"id"}),
 			},
@@ -686,11 +686,11 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 				Name:        "sites.update_config",
 				Description: "Update site config",
 				InputSchema: schemaObject(map[string]interface{}{
-					"id":           schemaInteger("Site ID"),
-					"name":         schemaString("Site name"),
-					"base_load_w":  schemaNumber("Base load in watts"),
-					"fuse_size":    schemaInteger("Fuse size"),
-					"fuse_profile": schemaString("Fuse profile"),
+					"id":            schemaInteger("Site ID"),
+					"name":          schemaString("Site name"),
+					"base_load_w":   schemaNumber("Base load in watts"),
+					"fuse_size":     schemaInteger("Fuse size"),
+					"fuse_profile":  schemaString("Fuse profile"),
 					"phase_factors": schemaObject(nil, nil),
 					"fuse_blown":    schemaObject(nil, nil),
 				}, []string{"id"}),
@@ -895,6 +895,50 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 		},
 		{
 			Tool: Tool{
+				Name:        "facilities.list",
+				Description: "List facility presets (house ASHP/GSHP, apartment, PV+battery)",
+				InputSchema: schemaObject(nil, nil),
+			},
+			Method:       http.MethodGet,
+			PathTemplate: "/api/facilities",
+		},
+		{
+			Tool: Tool{
+				Name:        "sites.facility.get",
+				Description: "Get the facility preset applied to a site",
+				InputSchema: schemaObject(map[string]interface{}{"id": schemaInteger("Site ID")}, []string{"id"}),
+			},
+			Method:       http.MethodGet,
+			PathTemplate: "/api/sites/{id}/facility",
+			PathParams:   []string{"id"},
+		},
+		{
+			Tool: Tool{
+				Name:        "sites.facility.apply",
+				Description: "Apply a facility preset: plant physics plus inverter and heat-pump Modbus facades",
+				InputSchema: schemaObject(map[string]interface{}{
+					"id":     schemaInteger("Site ID"),
+					"preset": schemaString("Preset id: house-ashp, house-gshp, apartment-ashp, pv-battery"),
+					"start":  schemaBoolean("Start site simulation (default true)"),
+				}, []string{"id", "preset"}),
+			},
+			Method:       http.MethodPost,
+			PathTemplate: "/api/sites/{id}/facility",
+			PathParams:   []string{"id"},
+			BodyParams:   []string{"preset", "start"},
+		},
+		{
+			Tool: Tool{
+				Name:        "sites.plant.get",
+				Description: "Get the live site-plant snapshot (electrical + thermal + schematic flows)",
+				InputSchema: schemaObject(map[string]interface{}{"id": schemaInteger("Site ID")}, []string{"id"}),
+			},
+			Method:       http.MethodGet,
+			PathTemplate: "/api/sites/{id}/plant",
+			PathParams:   []string{"id"},
+		},
+		{
+			Tool: Tool{
 				Name:        "system.info",
 				Description: "Get system info",
 				InputSchema: schemaObject(nil, nil),
@@ -1055,7 +1099,7 @@ func schemaBoolean(description string) map[string]interface{} {
 
 func schemaArray(description string, itemType string) map[string]interface{} {
 	schema := map[string]interface{}{
-		"type": "array",
+		"type":  "array",
 		"items": map[string]interface{}{"type": itemType},
 	}
 	if description != "" {

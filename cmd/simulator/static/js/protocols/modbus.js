@@ -13,7 +13,8 @@ export function modbusControls() {
             { value: 'rainy', label: '🌧️ Rainy Day' },
             { value: 'night', label: '🌙 Night Mode' },
             { value: 'peak_load', label: '⚡ Peak Load' },
-            { value: 'battery_test', label: '🔋 Battery Cycle' }
+            { value: 'battery_test', label: '🔋 Battery Cycle' },
+            { value: 'physical', label: '🌿 Physical plant' }
         ],
 
         speeds: [

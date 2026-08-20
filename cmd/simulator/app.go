@@ -9,6 +9,7 @@ import (
 
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/modbus/devices"
+	"github.com/srcfl/device-simulator/internal/plant"
 	"github.com/srcfl/device-simulator/internal/settings"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -732,6 +733,7 @@ func (a *App) GetSites() []map[string]interface{} {
 			"time_multiplier": site.TimeMultiplier,
 			"sim_running":     site.SimRunning,
 			"scenario":        site.Scenario,
+			"facility_id":     site.FacilityID,
 		}
 		p1Mode := P1ModeDirect
 		if site.P1Buffer != nil {
@@ -818,6 +820,8 @@ func (a *App) GetSite(id int) (map[string]interface{}, error) {
 		"phase_loads":     site.SitePhaseLoads,
 		"load_scenario":   site.LoadScenario,
 		"load_linked":     site.LoadLinked,
+		"facility_id":     site.FacilityID,
+		"plant":           site.lastPlant,
 	}
 
 	meterID := site.MeterID
@@ -1181,15 +1185,15 @@ func (a *App) CreateSimulatorInSite(siteId int, simType string) (map[string]inte
 	a.emitSiteUpdate()
 
 	return map[string]interface{}{
-		"id":             sim.ID,
-		"serial":         sim.Serial,
-		"protocol":       sim.Protocol,
-		"category":       sim.Category,
-		"port":           sim.Port,
-		"running":        sim.Running,
-		"site_id":        siteId,
-		"device_on":      sim.DeviceOn,
-		"mdns_hostname":  mdnsAdvertiser.ActiveHostname(sim.ID),
+		"id":            sim.ID,
+		"serial":        sim.Serial,
+		"protocol":      sim.Protocol,
+		"category":      sim.Category,
+		"port":          sim.Port,
+		"running":       sim.Running,
+		"site_id":       siteId,
+		"device_on":     sim.DeviceOn,
+		"mdns_hostname": mdnsAdvertiser.ActiveHostname(sim.ID),
 	}, nil
 }
 
@@ -1546,4 +1550,36 @@ func (a *App) SetSiteLoadScenario(id int, scenario string) (map[string]interface
 	a.emitSiteUpdate()
 
 	return result, nil
+}
+
+// GetFacilities returns site physics templates (heat pumps, loads, envelope).
+func (a *App) GetFacilities() []plant.Facility {
+	return plant.Presets()
+}
+
+// ApplySiteFacility instantiates a facility preset on a site (devices + plant).
+func (a *App) ApplySiteFacility(id int, preset string) (map[string]interface{}, error) {
+	site := getSite(id)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", id)
+	}
+	if err := applyFacilityPreset(site, preset); err != nil {
+		return nil, err
+	}
+	if err := startSiteSimulationWithServers(site); err != nil {
+		log.Printf("[Site %d] start after facility: %v", id, err)
+	}
+	markStateDirty()
+	a.emitSimulatorUpdate()
+	a.emitSiteUpdate()
+	return sitePlantJSON(site), nil
+}
+
+// GetSitePlant returns the live physics snapshot for the schematic.
+func (a *App) GetSitePlant(id int) (map[string]interface{}, error) {
+	site := getSite(id)
+	if site == nil {
+		return nil, fmt.Errorf("site %d not found", id)
+	}
+	return sitePlantJSON(site), nil
 }

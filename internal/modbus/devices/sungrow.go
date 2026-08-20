@@ -7,6 +7,8 @@ import "github.com/srcfl/device-simulator/internal/modbus"
 func SungrowRegisters() *modbus.RegisterSet {
 	return modbus.NewRegisterSet("sungrow", []modbus.RegisterDef{
 		// PV Registers (Input Registers)
+		{Address: 4990, Name: "Serial Number (Lua)", SemanticName: "serial_number_lua", Description: "Serial as addressed by srcfl/device-drivers Sungrow Lua", Unit: "", Category: "pv", DataType: modbus.STR, Scale: 1.0, Words: 10, Endianness: modbus.Big},
+		{Address: 4999, Name: "Device Type", SemanticName: "device_type", Description: "Sungrow device type (0x0E0E = SH8.0RT-V112)", Unit: "", Category: "pv", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
 		{Address: 5000, Name: "Nominal Output Power", SemanticName: "nominal_power", Description: "Nominal output power", Unit: "kW", Category: "pv", DataType: modbus.U16, Scale: 0.1, Words: 1, Endianness: modbus.Big},
 		{Address: 5007, Name: "Inside Temperature", SemanticName: "inverter_temperature", Description: "Internal temperature", Unit: "°C", Category: "pv", DataType: modbus.I16, Scale: 0.1, Words: 1, Endianness: modbus.Big},
 		{Address: 5010, Name: "MPPT 1 Voltage", SemanticName: "pv1_voltage", Description: "MPPT 1 Voltage", Unit: "V", Category: "pv", DataType: modbus.U16, Scale: 0.1, Words: 1, Endianness: modbus.Big},
@@ -16,8 +18,11 @@ func SungrowRegisters() *modbus.RegisterSet {
 		{Address: 5016, Name: "PV Power", SemanticName: "pv_power", Description: "Total DC power", Unit: "W", Category: "pv", DataType: modbus.U32, Scale: 1.0, Words: 2, Endianness: modbus.Little},
 		{Address: 13002, Name: "Total PV Generation", SemanticName: "total_pv_gen", Description: "Total PV generation", Unit: "Wh", Category: "pv", DataType: modbus.U32, Scale: 100.0, Words: 2, Endianness: modbus.Little},
 		{Address: 13073, Name: "PV Command", SemanticName: "pv_cmd", Description: "PV power limit", Unit: "W", Category: "pv", DataType: modbus.U16, Scale: 1.0, Words: 2, Endianness: modbus.Big, UseHolding: true},
+		{Address: 13088, Name: "Active Power Limit Enable", SemanticName: "pv_limit_enable", Description: "170=on; 85=off", Unit: "", Category: "pv", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+		{Address: 13089, Name: "Active Power Limit Ratio", SemanticName: "pv_limit_ratio", Description: "Active power limit (0.1% units)", Unit: "%", Category: "pv", DataType: modbus.U16, Scale: 0.1, Words: 1, Endianness: modbus.Big, UseHolding: true},
 
 		// Battery Registers
+		{Address: 12999, Name: "Running State", SemanticName: "running_state", Description: "Sungrow running state (Lua host address 12999)", Unit: "", Category: "battery", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
 		{Address: 13000, Name: "System State Flags", SemanticName: "battery_flags", Description: "Inverter running states", Unit: "", Category: "battery", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
 		{Address: 13019, Name: "Battery Voltage", SemanticName: "battery_voltage", Description: "Battery voltage", Unit: "V", Category: "battery", DataType: modbus.U16, Scale: 0.1, Words: 1, Endianness: modbus.Big},
 		{Address: 13020, Name: "Battery Current", SemanticName: "battery_current", Description: "Battery current", Unit: "A", Category: "battery", DataType: modbus.U16, Scale: 0.1, Words: 1, Endianness: modbus.Big},
@@ -58,6 +63,7 @@ func SungrowRegisters() *modbus.RegisterSet {
 		// Serial Number (STR at address 4989, 10 registers = 20 chars)
 		{Address: 4989, Name: "Serial Number", SemanticName: "serial_number", Description: "Device serial number", Unit: "", Category: "pv", DataType: modbus.STR, Scale: 1.0, Words: 10, Endianness: modbus.Big},
 	}, map[uint16]int64{
+		4999:  0x0E0E, // SH8.0RT-V112, the type the Lua driver fingerprints
 		5000:  100,
 		5241:  50,
 		5016:  0,
@@ -65,11 +71,14 @@ func SungrowRegisters() *modbus.RegisterSet {
 		13022: 78,
 		5600:  0,
 		13052: 0,
+		12999: 1, // running
 		13000: 0,
 		13049: 0,
 		13050: 204,
 		13051: 0,
 		13073: 10000,
+		13088: 85,  // active power limit off
+		13089: 100, // 100% (scale 0.1 → raw 1000)
 		13086: 170,
 		33046: 500,
 		33047: 500,

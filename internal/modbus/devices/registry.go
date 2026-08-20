@@ -26,6 +26,8 @@ func GetRegisterSet(name string) *modbus.RegisterSet {
 		return SolarEdgeRegisters()
 	case "pixii", "pixii-powershaper":
 		return PixiiRegisters()
+	case "heat-pump", "heatpump", "generic-heat-pump":
+		return HeatPumpRegisters()
 	default:
 		return nil
 	}
@@ -44,5 +46,6 @@ func AllDeviceNames() []string {
 		"deye",
 		"solaredge",
 		"pixii",
+		"heat-pump",
 	}
 }
