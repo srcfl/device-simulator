@@ -6,15 +6,31 @@ import "math"
 // equations as modelica/SiteEnergy.mo so the simulator runs without OpenModelica.
 // Swap it for a compiled FMU via siteplant.Open.
 type NativeSite struct {
-	units map[string]*Plant
-	order []string
+	units   map[string]*Plant
+	order   []string
+	fac     Facility
+	indoorC float64
+	dhwC    float64
 }
 
 func NewNativeSite() *NativeSite {
-	return &NativeSite{units: make(map[string]*Plant)}
+	return &NativeSite{units: make(map[string]*Plant), indoorC: 19, dhwC: 45}
 }
 
 func (s *NativeSite) Backend() string { return "native" }
+
+// SetFacility attaches envelope / HP / DHW parameters. Empty ID is electrical-only.
+func (s *NativeSite) SetFacility(f Facility) {
+	s.fac = f
+	if s.indoorC == 0 {
+		s.indoorC = 19
+	}
+	if s.dhwC == 0 {
+		s.dhwC = 45
+	}
+}
+
+func (s *NativeSite) Facility() Facility { return s.fac }
 
 // Attach adds or replaces a member unit. The key should be stable (simulator id).
 func (s *NativeSite) Attach(key string, unit *Plant) {
@@ -33,7 +49,13 @@ func (s *NativeSite) StepSite(dt float64, in SiteStep) (SiteResult, error) {
 	if dt > 6*3600 {
 		dt = 6 * 3600
 	}
-	pLoad := math.Max(0, in.LoadW)
+	pHouse := math.Max(0, in.LoadW)
+	if s.fac.ID != "" {
+		pHouse += occupancyPlugW(in.Time, s.fac.Building.FloorM2)
+	}
+	th := s.stepThermal(dt, in, in.HeatPump)
+	pHP := math.Max(0, th.ElectricalW+th.BackupW)
+	pLoad := pHouse + pHP
 	pEV := math.Max(0, in.EVW)
 
 	type row struct {
@@ -141,7 +163,10 @@ func (s *NativeSite) StepSite(dt float64, in SiteStep) (SiteResult, error) {
 	out := SiteResult{
 		GridW:   pGrid,
 		LoadW:   pLoad,
+		HouseW:  pHouse,
+		HPW:     pHP,
 		EVW:     pEV,
+		Thermal: th,
 		Members: make([]MemberResult, 0, len(rows)),
 	}
 	var check float64

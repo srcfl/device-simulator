@@ -5,6 +5,9 @@ package SiteEnergy
    (see export.mos). The Go module siteplant loads that FMU, or falls
    back to a native backend that implements the same equations.
 
+   Building, HeatPump, DHWTank, HouseFacility are the thermal modules.
+   Native Go (internal/plant) is the live thermal when a facility is applied.
+
    Connector flow P is positive INTO the component.
    Lua meter (positive import) is -grid.ac.P."
 
@@ -198,4 +201,91 @@ package SiteEnergy
     end for;
     P_meter = -(sum(P_pv) + sum(P_batt) + noEvent(max(0.0, P_load)) + noEvent(max(0.0, P_ev)));
   end Site4;
+
+  model Building
+    "Lumped RC envelope. C in J/K, Q in W, T in degC."
+    parameter Real UA = 140;
+    parameter Real C = 18e6;
+    parameter Real solar_m2 = 8;
+    input Temperature T_amb;
+    input Irradiance ghi;
+    input Power Q_hp;
+    input Power Q_int;
+    output Temperature T_in(start = 19);
+    output Power Q_loss;
+    output Power Q_solar;
+  equation
+    Q_loss = UA * (T_in - T_amb);
+    Q_solar = noEvent(max(0.0, ghi)) * solar_m2 * 0.55;
+    C * der(T_in) = Q_hp + Q_int + Q_solar - Q_loss;
+  end Building;
+
+  model HeatPump
+    "ASHP uses T_amb as source. GSHP uses a constant ground temperature."
+    parameter Boolean ground = false;
+    parameter Power Q_rated = 8000;
+    parameter Real COP0 = 3.4;
+    parameter Temperature T_ground = 8;
+    input Temperature T_amb;
+    input Power Q_cmd;
+    output Power Q;
+    output Power P_el;
+    output Real COP;
+  protected
+    Temperature T_src;
+  equation
+    T_src = if ground then T_ground else T_amb;
+    COP = noEvent(min(5.8, max(1.5, COP0 + (if ground then 0.02 else 0.07) * (T_src - 7.0))));
+    Q = noEvent(min(Q_rated, max(0.0, Q_cmd)));
+    P_el = if Q > 1.0 then Q / COP else 0.0;
+  end HeatPump;
+
+  model DHWTank
+    parameter Real volume_l = 200;
+    parameter Real UA = 8;
+    input Temperature T_room;
+    input Power Q_hp;
+    input Power Q_backup;
+    input Power Q_draw;
+    output Temperature T(start = 45);
+  protected
+    Real C;
+  equation
+    C = volume_l * 4186.0;
+    C * der(T) = Q_hp + Q_backup - UA * (T - T_room) - Q_draw;
+  end DHWTank;
+
+  model HouseFacility
+    "Causal house: one HP + building + DHW. Electrical P_el is a load on the AC bus."
+    input Temperature T_amb;
+    input Irradiance ghi;
+    input Power Q_cmd;
+    input Power Q_int;
+    input Power Q_draw;
+    parameter Boolean ground = false;
+    Building bld;
+    HeatPump hp(ground = ground);
+    DHWTank tank;
+    output Temperature T_in;
+    output Temperature T_dhw;
+    output Power P_el;
+    output Power Q_hp;
+    output Real COP;
+  equation
+    hp.T_amb = T_amb;
+    hp.Q_cmd = Q_cmd;
+    bld.T_amb = T_amb;
+    bld.ghi = ghi;
+    bld.Q_hp = hp.Q * 0.75;
+    bld.Q_int = Q_int;
+    tank.T_room = bld.T_in;
+    tank.Q_hp = hp.Q * 0.25;
+    tank.Q_backup = 0;
+    tank.Q_draw = Q_draw;
+    T_in = bld.T_in;
+    T_dhw = tank.T;
+    P_el = hp.P_el;
+    Q_hp = hp.Q;
+    COP = hp.COP;
+  end HouseFacility;
 end SiteEnergy;

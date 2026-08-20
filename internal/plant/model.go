@@ -20,6 +20,7 @@ type SiteStep struct {
 	EVW               float64
 	ExportLimitW      float64
 	ExportLimitEnable bool
+	HeatPump          HeatPumpCommand
 	Members           []MemberStep
 }
 
@@ -39,7 +40,10 @@ type MemberResult struct {
 type SiteResult struct {
 	GridW     float64
 	LoadW     float64
+	HouseW    float64
+	HPW       float64
 	EVW       float64
 	ResidualW float64
+	Thermal   Thermal
 	Members   []MemberResult
 }

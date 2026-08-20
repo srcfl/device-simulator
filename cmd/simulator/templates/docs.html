@@ -39,6 +39,12 @@
                     <code>/openapi.json</code>, the MCP tools, and these docs together.
                 </p>
                 <div class="docs-callout">
+                    <div><strong>Site simulator:</strong> <code>GET /api/facilities</code>,
+                    <code>POST /api/sites/{id}/facility</code>, <code>GET /api/sites/{id}/plant</code>.
+                    Apply a facility preset (house ASHP/GSHP, apartment, PV+battery) and the site clock
+                    drives inverter + heat-pump Modbus facades from the physics plant.</div>
+                </div>
+                <div class="docs-callout">
                     <div><strong>Base URL:</strong> <code data-base-url>http://localhost:8762</code></div>
                     <div class="docs-muted">Use this as the root for API requests (e.g. <code data-base-url></code><code>/api/simulators</code>).</div>
                 </div>

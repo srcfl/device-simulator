@@ -71,6 +71,7 @@ type SiteState struct {
 	LoadScenario   string       `json:"load_scenario"`
 	LoadLinked     bool         `json:"load_linked"`
 	P1Mode         string       `json:"p1_mode"`
+	FacilityID     string       `json:"facility_id,omitempty"`
 }
 
 type AppState struct {

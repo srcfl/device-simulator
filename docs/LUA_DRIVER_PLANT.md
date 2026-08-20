@@ -147,10 +147,13 @@ Next couplings, in order:
 
 | Path | Responsibility |
 |------|----------------|
-| `modelica/SiteEnergy.mo` | Modelica site (ACBus, hybrids, grid slack, Site4 FMU) |
+| `modelica/SiteEnergy.mo` | Modelica site (ACBus, hybrids, thermal modules, Site4 FMU) |
 | `siteplant` | Plug: compile FMU or native Go |
 | `internal/plant` | NativeSite + semantic projection |
 | `internal/modbus/devices` | Vendor addresses and encoding |
 | `internal/modbus/server.go` | Modbus TCP (what Lua actually hits) |
-| `cmd/simulator/main.go` | site clock → `runSitePlantAndApply` when scenario is `physical` |
+| `cmd/simulator/main.go` | site clock → `runSitePlantAndApply` when scenario is `physical` or a facility is applied |
 | `srcfl/device-drivers` | Lua, host API, emit schema — **not copied here** |
+
+Site-level facilities, occupancy, and the dashboard schematic:
+[SITE_SIMULATOR.md](SITE_SIMULATOR.md).

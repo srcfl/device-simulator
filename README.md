@@ -64,6 +64,7 @@ docker compose up --build
 - **Device Profiles** - Sungrow, SolarEdge, Fronius, Huawei, and more
 - **Time Acceleration** - Compress 24 hours into minutes for testing
 - **Physical plant** - Site AC bus with conserved power and battery SoC. Modelica in `modelica/SiteEnergy.mo`; compile with `make fmu` and plug in via `siteplant`. Sketch: [docs/SITE_PLANT_SKETCH.md](docs/SITE_PLANT_SKETCH.md)
+- **Site simulator** - Facility presets (ASHP/GSHP, occupancy, DHW) behind Modbus facades so an EMS can treat the process as a real site. [docs/SITE_SIMULATOR.md](docs/SITE_SIMULATOR.md)
 - **Real-time Logging** - See every protocol operation as it happens
 
 ## Supported Profiles
@@ -80,6 +81,7 @@ docker compose up --build
 | deye | Deye hybrid inverter |
 | pixii-powershaper | Pixii PowerShaper |
 | ferroamp | FerroAmp EnergyHub |
+| heat-pump | Generic SG Ready heat pump (site plant) |
 | sdm630 | SDM630 Energy Meter |
 
 > **Disclaimer:** Device Simulator is an independent testing tool and is **not affiliated with, endorsed by, or sponsored by** any of the manufacturers listed above. Product and company names are trademarks of their respective owners and are used only to identify the device behavior being simulated.

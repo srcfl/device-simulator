@@ -48,7 +48,16 @@ func (m *mux) Attach(key string, unit *plant.Plant) {
 	m.native.Attach(key, unit)
 }
 
+// SetFacility attaches envelope / HP / DHW. Thermal is native Go; Site4.fmu
+// is electrical-only, so a facility forces the native StepSite path.
+func (m *mux) SetFacility(f plant.Facility) {
+	m.native.SetFacility(f)
+}
+
 func (m *mux) StepSite(dt float64, in plant.SiteStep) (plant.SiteResult, error) {
+	if m.native.Facility().ID != "" {
+		return m.native.StepSite(dt, in)
+	}
 	if m.fmu != nil && len(in.Members) <= MaxUnits {
 		return m.fmu.StepSite(dt, in)
 	}

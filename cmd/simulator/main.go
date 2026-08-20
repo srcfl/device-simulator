@@ -164,6 +164,8 @@ type Site struct {
 	stopChan    chan struct{}
 	simStopChan chan struct{} // Stop channel for simulation loop
 	sitePlant   plant.Model
+	lastPlant   plant.Snapshot
+	FacilityID  string `json:"facility_id"`
 }
 
 var (
@@ -468,6 +470,9 @@ func createSimulator(simType string) (*Simulator, error) {
 	case "ocpp_charger":
 		protocol = "ocpp"
 		category = "ocpp_charger"
+	case "heat_pump":
+		protocol = "modbus"
+		category = "heat_pump"
 	default:
 		return nil, fmt.Errorf("unknown simulator type: %s", simType)
 	}
@@ -488,8 +493,11 @@ func createSimulator(simType string) (*Simulator, error) {
 
 	// Set default profile based on device type
 	if category == "energy_meter" {
-		// Energy meters use the sdm630 profile (native gateway support)
 		pm.SetActive("sdm630")
+	} else if category == "heat_pump" {
+		pm.SetActive("heat-pump")
+	} else if category == "inverter" && pm.Get("sungrow-hybrid") != nil {
+		pm.SetActive("sungrow-hybrid")
 	} else if len(availableProfiles) > 0 {
 		pm.SetActive(availableProfiles[0].Name)
 	}
@@ -518,6 +526,8 @@ func createSimulator(simType string) (*Simulator, error) {
 		if category == "energy_meter" {
 			// Use numeric serial for meters (fits in SDM630's U32 register at 0xFC00)
 			serial = fmt.Sprintf("%d", 1000000+id)
+		} else if category == "heat_pump" {
+			serial = fmt.Sprintf("HPSIM%02d", id)
 		} else {
 			serial = fmt.Sprintf("INVSIM%02d", id)
 		}
@@ -696,6 +706,10 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 		pm.SetActive(saved.Profile)
 	} else if category == "energy_meter" {
 		pm.SetActive("sdm630")
+	} else if category == "heat_pump" {
+		pm.SetActive("heat-pump")
+	} else if category == "inverter" && pm.Get("sungrow-hybrid") != nil {
+		pm.SetActive("sungrow-hybrid")
 	} else if len(availableProfiles) > 0 {
 		pm.SetActive(availableProfiles[0].Name)
 	}
@@ -917,6 +931,7 @@ func restoreSite(saved state.SiteState) (*Site, error) {
 		SitePhaseLoads: phaseLoads,
 		LoadScenario:   saved.LoadScenario,
 		LoadLinked:     saved.LoadLinked,
+		FacilityID:     saved.FacilityID,
 		P1Buffer:       newP1IntervalBuffer(),
 	}
 	if site.FuseSize == 0 {
@@ -1199,6 +1214,7 @@ func buildHTTPMux() *http.ServeMux {
 
 	// Load scenarios endpoint
 	mux.HandleFunc("/api/load-scenarios", handleLoadScenarios)
+	mux.HandleFunc("/api/facilities", handleFacilitiesList)
 
 	// MCP endpoints
 	mcpServer := mcp.NewServer(mux)
@@ -1892,8 +1908,9 @@ func handleProfiles(w http.ResponseWriter, r *http.Request, sim *Simulator) {
 	// Filter profiles by the simulator's protocol and category
 	var list []profiles.ProfileInfo
 	if sim.Category == "energy_meter" {
-		// Energy meters only show meter-specific profiles
 		list = sim.ProfilesManager.ListByProtocolAndCategory(sim.Protocol, "meter")
+	} else if sim.Category == "heat_pump" {
+		list = sim.ProfilesManager.ListByProtocolAndCategory(sim.Protocol, "heat")
 	} else {
 		list = sim.ProfilesManager.ListByProtocol(sim.Protocol)
 	}
@@ -2348,6 +2365,7 @@ func handleSitesListGet(w http.ResponseWriter, r *http.Request) {
 			"time_multiplier": site.TimeMultiplier,
 			"sim_running":     site.SimRunning,
 			"scenario":        site.Scenario,
+			"facility_id":     site.FacilityID,
 		}
 
 		// Add current meter reading if meter is valid
@@ -2477,6 +2495,10 @@ func handleSiteAPI(w http.ResponseWriter, r *http.Request) {
 		handleSitePhaseLoads(w, r, site)
 	case action == "load-scenario":
 		handleSiteLoadScenario(w, r, site)
+	case action == "facility":
+		handleSiteFacility(w, r, site)
+	case action == "plant":
+		handleSitePlant(w, r, site)
 	default:
 		http.Error(w, "Unknown action", http.StatusNotFound)
 	}
@@ -2510,6 +2532,8 @@ func handleSiteStatus(w http.ResponseWriter, r *http.Request, site *Site) {
 		"phase_loads":     site.SitePhaseLoads,
 		"load_scenario":   site.LoadScenario,
 		"load_linked":     site.LoadLinked,
+		"facility_id":     site.FacilityID,
+		"plant":           site.lastPlant,
 	}
 
 	// Add current meter reading if meter is valid
@@ -2924,7 +2948,7 @@ func startSiteSimulationWithServers(site *Site) error {
 				}
 			}
 			// Only stop automation for inverters controlled by site simulation
-			if sim.Category == "inverter" {
+			if sim.Category == "inverter" || sim.Category == "heat_pump" {
 				stopSimulatorAutomation(sim)
 			}
 		}
@@ -3537,20 +3561,28 @@ func siteUsesPhysicalPlant(site *Site) bool {
 	}
 	site.mu.RLock()
 	defer site.mu.RUnlock()
-	return site.Scenario == "physical"
+	return site.Scenario == "physical" || site.FacilityID != ""
 }
 
 func ensureSitePlant(site *Site) plant.Model {
 	site.mu.Lock()
 	defer site.mu.Unlock()
 	if site.sitePlant == nil {
-		m, err := siteplant.Open(siteplant.Options{})
+		opts := siteplant.Options{Native: site.FacilityID != ""}
+		m, err := siteplant.Open(opts)
 		if err != nil {
 			log.Printf("[Site %d] siteplant: %v; using native Go plant", site.ID, err)
 			m = plant.NewNativeSite()
 		}
+		if site.FacilityID != "" {
+			if f, ok := plant.Preset(site.FacilityID); ok {
+				if host, ok := m.(interface{ SetFacility(plant.Facility) }); ok {
+					host.SetFacility(f)
+				}
+			}
+		}
 		site.sitePlant = m
-		log.Printf("[Site %d] plant backend %s", site.ID, m.Backend())
+		log.Printf("[Site %d] plant backend %s facility %s", site.ID, m.Backend(), site.FacilityID)
 	}
 	return site.sitePlant
 }
@@ -3596,9 +3628,6 @@ func runSitePlantAndApply(site *Site, simDelta time.Duration) (gridW float64, ok
 		return 0, false
 	}
 	inverters := collectSiteInverters(site)
-	if len(inverters) == 0 {
-		return 0, false
-	}
 	site.mu.RLock()
 	simTime := site.SimulatedTime
 	loadW := site.SitePhaseLoads.Total()
@@ -3606,7 +3635,11 @@ func runSitePlantAndApply(site *Site, simDelta time.Duration) (gridW float64, ok
 		loadW = site.BaseLoadW
 	}
 	scenario := site.Scenario
+	facilityID := site.FacilityID
 	site.mu.RUnlock()
+	if len(inverters) == 0 && facilityID == "" {
+		return 0, false
+	}
 	if simTime.IsZero() {
 		simTime = time.Now()
 	}
@@ -3643,6 +3676,7 @@ func runSitePlantAndApply(site *Site, simDelta time.Duration) (gridW float64, ok
 		LoadW:             loadW,
 		ExportLimitEnable: exportLimit,
 		ExportLimitW:      exportW,
+		HeatPump:          heatPumpCommandFromSite(site),
 		Members:           members,
 	})
 	if err != nil {
@@ -3660,6 +3694,13 @@ func runSitePlantAndApply(site *Site, simDelta time.Duration) (gridW float64, ok
 		}
 		applyPlantOutputs(sim, m.Out)
 	}
+	for _, hp := range collectSiteHeatPumps(site) {
+		applyHeatPumpOutputs(hp, res.Thermal)
+	}
+	snap := plant.BuildSnapshot(model.Backend(), facilityID, simTime, res)
+	site.mu.Lock()
+	site.lastPlant = snap
+	site.mu.Unlock()
 	return res.GridW, true
 }
 
@@ -3678,8 +3719,8 @@ func generateValues(sim *Simulator, simTime time.Time) {
 		return
 	}
 
-	// Energy meters don't generate their own values - they are controlled by site aggregation
-	if sim.Category == "energy_meter" {
+	// Energy meters and heat pumps are driven by the site plant, not local sine waves.
+	if sim.Category == "energy_meter" || sim.Category == "heat_pump" {
 		return
 	}
 
@@ -3996,6 +4037,7 @@ func buildStateSnapshot() *state.AppState {
 			LoadScenario:   site.LoadScenario,
 			LoadLinked:     site.LoadLinked,
 			P1Mode:         string(p1Mode),
+			FacilityID:     site.FacilityID,
 		})
 		site.mu.RUnlock()
 
@@ -4251,6 +4293,9 @@ func getPowerContribution(sim *Simulator) float64 {
 			pv := getSemanticValue(sim, "pv_power")
 			batteryPower := getBatterySignedPower(sim)
 			return -pv + batteryPower
+		}
+		if sim.Category == "heat_pump" {
+			return getSemanticValue(sim, "hp_power")
 		}
 		// For other devices (meters, etc.): load - pv + battery
 		load := getSemanticValue(sim, "load_power")

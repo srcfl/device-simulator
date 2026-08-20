@@ -5,7 +5,8 @@
 // Sign convention matches srcfl/device-drivers Lua drivers:
 // positive watts flow INTO the site electrical node.
 //
-//	P_grid + P_pv + P_batt + P_load + P_ev = 0
+//	P_grid + P_pv + P_batt + P_house + P_hp + P_ev = 0
+//	P_load = P_house + P_hp (+ backup)
 //
 //	grid     positive = importing, negative = exporting
 //	pv       always ≤ 0 (generation)
@@ -463,7 +464,31 @@ func WeatherForScenario(t time.Time, scenario string) Weather {
 	case "physical", "sunny", "battery_test", "":
 		// clear sky
 	}
-	return Weather{GHIWm2: math.Max(0, ghi), AmbientC: 20}
+	amb := OutdoorTemp(t, "nordic")
+	switch scenario {
+	case "night":
+		amb -= 3
+	case "rainy", "overcast":
+		amb -= 2
+	}
+	return Weather{GHIWm2: math.Max(0, ghi), AmbientC: amb}
+}
+
+// OutdoorTemp is a coarse Nordic (or generic) outdoor temperature, °C.
+func OutdoorTemp(t time.Time, climate string) float64 {
+	if t.IsZero() {
+		return 6
+	}
+	doy := float64(t.YearDay())
+	hour := hourAngle(t)
+	mean, amp, diurnal := 6.0, 11.0, 4.0
+	switch climate {
+	case "mild":
+		mean, amp = 12, 8
+	case "nordic", "":
+	}
+	seasonal := mean + amp*math.Sin(2*math.Pi*(doy-110)/365)
+	return seasonal + diurnal*math.Sin(2*math.Pi*(hour-9)/24)
 }
 
 func hourAngle(t time.Time) float64 {

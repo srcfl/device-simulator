@@ -3,7 +3,7 @@
   "info": {
     "title": "Device Simulator API",
     "version": "dev",
-    "description": "HTTP API for the Device Simulator."
+    "description": "HTTP API for the Device Simulator and site plant (electrical + thermal physics behind Modbus facades)."
   },
   "servers": [
     { "url": "/" }
@@ -418,6 +418,52 @@
     "/api/load-scenarios": {
       "get": {
         "summary": "List load scenarios",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/facilities": {
+      "get": {
+        "summary": "List facility presets (heat pumps, loads, envelope)",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } }
+        }
+      }
+    },
+    "/api/sites/{id}/facility": {
+      "get": {
+        "summary": "Get the site's facility preset",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "summary": "Apply a facility preset (plant + inverter + heat pump facades)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "preset": { "type": "string", "description": "house-ashp | house-gshp | apartment-ashp | pv-battery" },
+                  "start": { "type": "boolean", "description": "Start site simulation (default true)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Applied" } }
+      }
+    },
+    "/api/sites/{id}/plant": {
+      "get": {
+        "summary": "Get live site-plant snapshot (electrical + thermal + flows)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
         "responses": { "200": { "description": "OK" } }
       }
     },

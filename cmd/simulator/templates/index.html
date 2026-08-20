@@ -14,10 +14,12 @@
     <link rel="stylesheet" href="/static/css/protocols/modbus.css">
     <link rel="stylesheet" href="/static/css/protocols/mqtt.css">
     <link rel="stylesheet" href="/static/css/protocols/ocpp.css">
+    <link rel="stylesheet" href="/static/css/plant-viz.css">
 
     <!-- Application Scripts (must load before Alpine) -->
     <script src="/static/js/stores.js"></script>
     <script src="/static/js/components.js"></script>
+    <script src="/static/js/plant-viz.js"></script>
 
     <!-- Alpine.js (bundled locally for offline/desktop support) -->
     <script defer src="/static/js/alpine.min.js"></script>
@@ -394,6 +396,121 @@
             </div>
         </template>
 
+        <template x-if="$store.site.selectedId && $store.site.data">
+            <div class="site-plant-band" x-data="sitePlantViz()">
+                <div class="site-plant-header">
+                    <span class="site-plant-title">Site plant</span>
+                    <select class="site-plant-select" x-model="selected">
+                        <option value="">Choose a facility…</option>
+                        <template x-for="f in facilities" :key="f.id">
+                            <option :value="f.id" x-text="f.name"></option>
+                        </template>
+                    </select>
+                    <button class="site-plant-apply" :disabled="applying || !selected" @click="applyFacility()">
+                        <span x-show="!applying">Apply</span>
+                        <span x-show="applying">Applying…</span>
+                    </button>
+                    <span class="site-plant-hint" x-text="hint()"></span>
+                </div>
+                <p class="site-plant-desc" x-show="preset()?.description" x-text="preset()?.description"></p>
+                <div class="site-plant-layout">
+                    <svg class="site-plant-svg" viewBox="0 0 760 196" role="img" aria-label="Site electrical and thermal flows">
+                        <defs>
+                            <marker id="plant-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#00FF84"/>
+                            </marker>
+                            <marker id="plant-arr-heat" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ff9f43"/>
+                            </marker>
+                        </defs>
+                        <path class="site-plant-flow" :style="stroke('pv','bus','elec')" d="M 230 44 L 370 90"/>
+                        <path class="site-plant-flow reverse" :style="stroke('batt','bus','elec')" d="M 230 152 L 370 102"/>
+                        <path class="site-plant-flow" :style="stroke('bus','batt','elec')" d="M 370 102 L 230 152"/>
+                        <path class="site-plant-flow" :style="stroke('grid','bus','elec')" d="M 106 98 L 334 98"/>
+                        <path class="site-plant-flow reverse" :style="stroke('bus','grid','elec')" d="M 334 98 L 106 98"/>
+                        <path class="site-plant-flow" :style="stroke('bus','house','elec')" d="M 406 82 L 500 42"/>
+                        <path class="site-plant-flow" :style="stroke('bus','hp','elec')" d="M 406 110 L 500 124"/>
+                        <path class="site-plant-flow heat" :style="stroke('hp','building','heat')" d="M 600 118 L 652 70"/>
+                        <path class="site-plant-flow heat" :style="stroke('hp','dhw','heat')" d="M 600 132 L 652 150"/>
+                        <path class="site-plant-flow heat" :style="stroke('sun','building','heat')" d="M 256 40 L 652 48"/>
+                        <path class="site-plant-flow heat reverse" :style="stroke('building','outdoor','heat')" d="M 748 60 L 748 22"/>
+
+                        <g>
+                            <rect :class="nodeClass('grid')" x="18" y="70" width="88" height="56" rx="10"/>
+                            <text class="site-plant-label" x="62" y="90" text-anchor="middle">Grid</text>
+                            <text class="site-plant-value" x="62" y="108" text-anchor="middle" x-text="fmtW(el().grid_w) + ' ' + gridLabel()"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('pv')" x="168" y="16" width="88" height="48" rx="10"/>
+                            <text class="site-plant-label" x="212" y="34" text-anchor="middle">PV</text>
+                            <text class="site-plant-value" x="212" y="50" text-anchor="middle" x-text="fmtW(el().pv_w)"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('batt')" x="168" y="132" width="88" height="48" rx="10"/>
+                            <text class="site-plant-label" x="212" y="150" text-anchor="middle">Battery</text>
+                            <text class="site-plant-value" x="212" y="166" text-anchor="middle" x-text="fmtW(el().battery_w)"></text>
+                        </g>
+                        <g>
+                            <circle :class="nodeClass('grid')" cx="370" cy="98" r="36"/>
+                            <text class="site-plant-label" x="370" y="94" text-anchor="middle">AC bus</text>
+                            <text class="site-plant-value" x="370" y="110" text-anchor="middle" x-text="'Σ ' + fmtW(el().residual_w)"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('house')" x="500" y="18" width="100" height="48" rx="10"/>
+                            <text class="site-plant-label" x="550" y="36" text-anchor="middle">Plug loads</text>
+                            <text class="site-plant-value" x="550" y="52" text-anchor="middle" x-text="fmtW(el().house_w)"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('hp')" x="500" y="98" width="100" height="52" rx="10"/>
+                            <text class="site-plant-label" x="550" y="116" text-anchor="middle">Heat pump</text>
+                            <text class="site-plant-value" x="550" y="134" text-anchor="middle" x-text="fmtW(el().hp_w) + copLabel()"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('building')" x="652" y="28" width="96" height="64" rx="10"/>
+                            <text class="site-plant-label" x="700" y="46" text-anchor="middle">Building</text>
+                            <text class="site-plant-value" x="700" y="64" text-anchor="middle" x-text="fmtC(th().indoor_c)"></text>
+                            <text class="site-plant-label" x="700" y="80" text-anchor="middle" x-text="th().setpoint_c ? ('set ' + Number(th().setpoint_c).toFixed(1) + '°') : ''"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('dhw')" x="652" y="128" width="96" height="48" rx="10"/>
+                            <text class="site-plant-label" x="700" y="146" text-anchor="middle">DHW</text>
+                            <text class="site-plant-value" x="700" y="162" text-anchor="middle" x-text="fmtC(th().dhw_c)"></text>
+                        </g>
+                        <g>
+                            <rect :class="nodeClass('outdoor')" x="708" y="2" width="48" height="22" rx="6"/>
+                            <text class="site-plant-label" x="732" y="17" text-anchor="middle">out</text>
+                        </g>
+                    </svg>
+                    <div class="site-plant-stats">
+                        <div class="site-plant-stat">
+                            <div class="site-plant-stat-k">Outdoor</div>
+                            <div class="site-plant-stat-v" x-text="fmtC(th().ambient_c)"></div>
+                        </div>
+                        <div class="site-plant-stat">
+                            <div class="site-plant-stat-k">Heat to house</div>
+                            <div class="site-plant-stat-v heat" x-text="fmtW(th().q_space_w)"></div>
+                        </div>
+                        <div class="site-plant-stat">
+                            <div class="site-plant-stat-k">Envelope loss</div>
+                            <div class="site-plant-stat-v heat" x-text="fmtW(th().q_loss_w)"></div>
+                        </div>
+                        <div class="site-plant-stat">
+                            <div class="site-plant-stat-k">Solar gain</div>
+                            <div class="site-plant-stat-v heat" x-text="fmtW(th().q_solar_w)"></div>
+                        </div>
+                        <div class="site-plant-stat">
+                            <div class="site-plant-stat-k">Occupied</div>
+                            <div class="site-plant-stat-v teal" x-text="th().occupied ? 'yes' : (th().night_setback ? 'night' : 'no')"></div>
+                        </div>
+                        <div class="site-plant-stat">
+                            <div class="site-plant-stat-k">SG Ready</div>
+                            <div class="site-plant-stat-v" x-text="th().hp_type ? (th().hp_type + ' · ' + sgLabel()) : '—'"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
         <div class="app-body">
         <!-- Sidebar -->
         <aside class="sidebar">
@@ -437,6 +554,16 @@
                                  stroke-linecap="round" stroke-linejoin="round">
                                 <path d="m12 14 4-4" />
                                 <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+                            </svg>
+                        </template>
+                        <template x-if="sim.category === 'heat_pump'">
+                            <svg class="sim-category-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 3c-1.2 2.4-2 4.2-2 6a2 2 0 0 0 4 0c0-1.8-.8-3.6-2-6"/>
+                                <path d="M8 11a4 4 0 0 0 8 0"/>
+                                <path d="M6 21h12"/>
+                                <path d="M8 21v-2a4 4 0 0 1 8 0v2"/>
                             </svg>
                         </template>
                         <template x-if="sim.category === 'v2x_charger' || sim.category === 'ocpp_charger'">
@@ -2264,6 +2391,20 @@
                             <div class="add-device-option-name">Energy Meter</div>
                             <span class="protocol-badge modbus">modbus</span>
                             <div class="add-device-option-desc">3-phase energy meter with per-phase power and totals</div>
+                        </button>
+                        <button class="add-device-option" @click="$store.app.addSimulatorToSite('heat_pump')">
+                            <div class="add-device-option-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"
+                                     fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 3c-1.2 2.4-2 4.2-2 6a2 2 0 0 0 4 0c0-1.8-.8-3.6-2-6"/>
+                                    <path d="M8 11a4 4 0 0 0 8 0"/>
+                                    <path d="M6 21h12"/>
+                                    <path d="M8 21v-2a4 4 0 0 1 8 0v2"/>
+                                </svg>
+                            </div>
+                            <div class="add-device-option-name">Heat Pump</div>
+                            <span class="protocol-badge modbus">modbus</span>
+                            <div class="add-device-option-desc">SG Ready heat pump facade. Indoor, DHW and COP come from the site plant.</div>
                         </button>
                         <button class="add-device-option" @click="$store.app.addSimulatorToSite('v2x_charger')">
                             <div class="add-device-option-icon">

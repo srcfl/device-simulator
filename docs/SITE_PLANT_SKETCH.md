@@ -83,7 +83,10 @@ site tick (dt includes time acceleration)
 ## Out of scope for this sketch
 
 - Full 3-phase electrical (only power split by `phase_factors`)
-- Thermal networks, MPPT tracking dynamics, transformer impedance
+- MPPT tracking dynamics, transformer impedance
 - FMU parameterisation of rated power (Site4 is fixed at 8 kW / 10 kWh per slot)
 
-Those can grow **inside** `SiteEnergy.mo` without changing Lua.
+Thermal networks (lumped building + ASHP/GSHP + DHW) live in `NativeSite` and
+in `modelica/SiteEnergy.mo` (`Building`, `HeatPump`, `DHWTank`). See
+[SITE_SIMULATOR.md](SITE_SIMULATOR.md).
+
