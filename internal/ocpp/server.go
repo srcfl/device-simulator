@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -202,7 +203,7 @@ func (s *Server) Start() error {
 		// Client mode: connect to Central System
 		go s.clientLoop()
 		s.running = true
-		log.Printf("[%s] OCPP client connecting to %s", s.serialNumber, s.ocppURL)
+		log.Printf("[%s] OCPP client connecting to %s", s.serialNumber, RedactURL(s.ocppURL))
 		return nil
 	}
 
@@ -250,11 +251,14 @@ func (s *Server) clientLoop() {
 
 		// Build the full WebSocket URL with charge point identity
 		// OCPP 1.6 expects: ws://host/path/ChargePointId
-		wsURL := url
-		if !strings.HasSuffix(wsURL, "/") {
-			wsURL += "/"
+		wsURL, header, err := dialTarget(url, serial)
+		if err != nil {
+			s.addLog("connect_error", map[string]interface{}{
+				"error": err.Error(),
+			})
+			log.Printf("[%s] Bad OCPP URL: %v", serial, err)
+			return
 		}
-		wsURL += serial
 
 		s.addLog("connecting", map[string]interface{}{
 			"url": wsURL,
@@ -264,7 +268,7 @@ func (s *Server) clientLoop() {
 			Subprotocols: []string{"ocpp1.6"},
 		}
 
-		conn, _, err := dialer.Dial(wsURL, nil)
+		conn, _, err := dialer.Dial(wsURL, header)
 		if err != nil {
 			s.addLog("connect_error", map[string]interface{}{
 				"error": err.Error(),
@@ -315,6 +319,39 @@ func (s *Server) clientLoop() {
 			log.Printf("[%s] Reconnecting to Central System...", serial)
 		}
 	}
+}
+
+// dialTarget appends the charge point identity to the Central System URL and
+// moves any user:password in it to a Basic auth header (OCPP 1.6 security
+// profile 1). The WebSocket dialer refuses credentials inside the URL, and
+// they must not reach the logs either.
+func dialTarget(raw, identity string) (string, http.Header, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", nil, err
+	}
+	var header http.Header
+	if u.User != nil {
+		pass, _ := u.User.Password()
+		req := http.Request{Header: http.Header{}}
+		req.SetBasicAuth(u.User.Username(), pass)
+		header = req.Header
+		u.User = nil
+	}
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
+	}
+	u.Path += identity
+	return u.String(), header, nil
+}
+
+// RedactURL hides the password in a Central System URL for logs.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	return u.Redacted()
 }
 
 // readLoop reads messages from the WebSocket connection

@@ -1744,7 +1744,7 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 	if config.OCPPURL != nil && sim.Protocol == "ocpp" {
 		if sim.OCPPServer != nil {
 			sim.OCPPServer.SetOCPPURL(*config.OCPPURL)
-			log.Printf("[%s] OCPP URL set to %s", sim.Serial, *config.OCPPURL)
+			log.Printf("[%s] OCPP URL set to %s", sim.Serial, ocpp.RedactURL(*config.OCPPURL))
 		}
 	}
 	if config.BatteryCapacityKWh != nil && *config.BatteryCapacityKWh > 0 {
