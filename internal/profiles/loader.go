@@ -291,8 +291,8 @@ var EmbeddedProfiles = map[string]*Profile{
 			13049: 0,     // Grid Mode (Self-consumption)
 			13050: 204,   // Stop command
 			13073: 10000, // PV Command
-			33046: 500,   // Max Charge (5kW)
-			33047: 500,   // Max Discharge (5kW)
+			33046: 5,     // Max Charge (5kW)
+			33047: 5,     // Max Discharge (5kW)
 			5740:  230,   // Meter L1 Voltage (230V)
 			5741:  230,   // Meter L2 Voltage (230V)
 			5742:  230,   // Meter L3 Voltage (230V)
@@ -524,8 +524,8 @@ var EmbeddedProfiles = map[string]*Profile{
 			13022: 50,
 			5600:  0,
 			13052: 500,
-			33046: 500,
-			33047: 500,
+			33046: 5,
+			33047: 5,
 		},
 		Generators: map[string]GeneratorConfig{
 			"solar_radiance": {
