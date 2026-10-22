@@ -335,6 +335,17 @@ func (s *Server) clientLoop() {
 			return
 		}
 
+		// An outage asked for while a retry was already waiting ends at its
+		// own deadline, not the retry's.
+		if wait := s.untilRedial(); wait > 0 {
+			select {
+			case <-s.stopChan:
+				return
+			case <-time.After(wait):
+				continue
+			}
+		}
+
 		// Build the full WebSocket URL with charge point identity
 		// OCPP 1.6 expects: ws://host/path/ChargePointId
 		wsURL, header, err := dialTarget(url, serial)
@@ -439,6 +450,13 @@ func (s *Server) DropConnection(d time.Duration) {
 	if conn != nil {
 		conn.Close()
 	}
+}
+
+// untilRedial is how long DropConnection still keeps the charger away.
+func (s *Server) untilRedial() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return time.Until(s.redialAt)
 }
 
 // redialWait is how long the client waits before it dials again.

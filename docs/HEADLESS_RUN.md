@@ -49,7 +49,8 @@ output directory says where each device is.
 - A hybrid inverter's battery follows its EMS registers (`ems_control`, on by
   default in a run).
 - The site meter is an SDM630 behind a fuse per phase (`fuse_a`,
-  `fuse_profile` from package `fuse`).
+  `fuse_profile` from package `fuse`). Its id is `meter`, which no device
+  may take.
 - A charger dials `ocpp_url`; `user:password@` goes out as Basic auth.
   `car_max_a` and `car_phases` are what the car takes.
 

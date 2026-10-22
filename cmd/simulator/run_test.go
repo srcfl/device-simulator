@@ -105,6 +105,16 @@ func waitStop(t *testing.T, r *headlessRun, within time.Duration) {
 	}
 }
 
+// "meter" names the site meter in ports.json, so no device may take it.
+func TestRunRefusesTheMeterID(t *testing.T) {
+	spec := runSpec{Name: "meter-id", Site: runSiteSpec{FuseA: 25},
+		Devices: []runDeviceSpec{{ID: "meter", Driver: "sungrow", BatteryKWh: 10}}}
+	if r, err := startRun(spec, freeBase(t), t.TempDir()); err == nil {
+		r.end()
+		t.Fatal("a device called meter was accepted")
+	}
+}
+
 // A run builds its house from the spec, applies its timeline, records a
 // sample a second and says where each device listens.
 func TestRunRecordsTheHouse(t *testing.T) {

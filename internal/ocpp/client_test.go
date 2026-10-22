@@ -273,6 +273,28 @@ func TestOnePhaseDrawIsCappedAtRatedCurrent(t *testing.T) {
 // A dropped connection keeps the charger away for the time asked, the car
 // keeps charging through it, and after it comes back the charger sends one
 // heartbeat per interval, not one per connection it ever had.
+// An outage that starts while the charger is already retrying lasts its
+// full length.
+func TestDropConnectionWhileRetrying(t *testing.T) {
+	csms := ocpptest.New(t)
+	csms.SetClosed(true)
+	s := newTestServer()
+	s.reconnectDelay = 50 * time.Millisecond
+	s.SetOCPPURL(csms.URL(""))
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop() })
+	time.Sleep(20 * time.Millisecond) // the first dial fails; a retry waits
+	before := time.Now()
+	s.DropConnection(600 * time.Millisecond)
+	csms.SetClosed(false)
+	waitFor(t, "BootNotification", 5*time.Second, func() bool { return csms.Sent(ActionBootNotification) == 1 })
+	if away := time.Since(before); away < 600*time.Millisecond {
+		t.Fatalf("back after %v, want at least 600 ms", away)
+	}
+}
+
 func TestDropConnectionKeepsTheSessionAndOneLoopSet(t *testing.T) {
 	csms := ocpptest.New(t)
 	csms.SetHeartbeatInterval(1)

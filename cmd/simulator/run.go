@@ -220,6 +220,9 @@ func (r *headlessRun) build() error {
 		if d.ID == "" || r.devs[d.ID] != nil {
 			return fmt.Errorf("device %q: every device needs its own id", d.ID)
 		}
+		if d.ID == "meter" {
+			return fmt.Errorf(`device "meter": that id is the site meter's`)
+		}
 		var sim *Simulator
 		var err error
 		if d.Driver == "ocpp" {
