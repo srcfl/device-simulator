@@ -30,6 +30,8 @@ type SimulatorState struct {
 	Profile            string          `json:"profile"`
 	OCPPURL            string          `json:"ocpp_url"`
 	ProfileDelayS      float64         `json:"profile_delay_s,omitempty"`
+	EMSControl         bool            `json:"ems_control,omitempty"`
+	EMSResponseMs      *int            `json:"ems_response_ms,omitempty"`
 	Automation         AutomationState `json:"automation"`
 }
 

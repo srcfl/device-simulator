@@ -113,7 +113,7 @@ GET  /api/simulators                      # List all simulators
 POST /api/simulators                      # Create simulator {type: "inverter"|"energy_meter"|"v2x_charger"|"ocpp_charger"}
 DELETE /api/simulators/{id}               # Delete simulator
 GET  /api/simulators/{id}                 # Get simulator details
-POST /api/simulators/{id}/config          # Update serial/slave ID
+POST /api/simulators/{id}/config          # Serial, slave ID, OCPP URL, ems_control, profile_delay_s
 GET  /api/simulators/{id}/registers       # Get all registers
 POST /api/simulators/{id}/registers/{addr} # Write register value
 GET  /api/simulators/{id}/logs            # Get protocol operation logs

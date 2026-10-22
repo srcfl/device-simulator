@@ -53,7 +53,15 @@
         "parameters": [
           { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
         ],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": {
+          "slave_id": { "type": "integer", "description": "Modbus slave ID" },
+          "serial": { "type": "string" },
+          "ocpp_url": { "type": "string", "description": "OCPP charger: Central System URL to dial. user:password in it is sent as Basic auth." },
+          "battery_capacity_kwh": { "type": "number" },
+          "profile_delay_s": { "type": "number", "description": "OCPP charger: accept a charging profile at once and apply it this many seconds later, like a cloud charger" },
+          "ems_control": { "type": "boolean", "description": "Modbus inverter: the battery follows the EMS registers (13049-13051 on Sungrow) like a real hybrid; self-consumption outside forced mode" },
+          "ems_response_ms": { "type": "integer", "description": "Modbus inverter: milliseconds the battery takes to follow the EMS registers (default 2000)" }
+        } } } } },
         "responses": { "200": { "description": "Updated" } }
       }
     },
