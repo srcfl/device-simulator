@@ -124,6 +124,8 @@ type Server struct {
 	ocppURL        string // Central System URL to connect to (client mode)
 	clientMode     bool   // true = connect to URL, false = listen for connections
 	reconnectDelay time.Duration
+	redialAt       time.Time // DropConnection keeps the charger away until then
+	frameLog       func(dir string, frame []byte)
 
 	// 3-phase metering
 	voltageL1 float64
@@ -252,6 +254,10 @@ func (s *Server) Start() error {
 	// Recreate stop channel (may have been closed by previous Stop)
 	s.stopChan = make(chan struct{})
 
+	// The charger's power follows its profiles whether or not a Central
+	// System is connected.
+	go s.simulationLoop(s.stopChan)
+
 	if s.clientMode && s.ocppURL != "" {
 		// Client mode: connect to Central System
 		go s.clientLoop()
@@ -331,7 +337,7 @@ func (s *Server) clientLoop() {
 			select {
 			case <-s.stopChan:
 				return
-			case <-time.After(s.reconnectDelay):
+			case <-time.After(s.redialWait()):
 				continue
 			}
 		}
@@ -348,17 +354,14 @@ func (s *Server) clientLoop() {
 		// Send BootNotification
 		go s.sendBootNotification()
 
-		// Start heartbeat loop
-		go s.heartbeatLoop()
-
-		// Start meter values loop
-		go s.meterValuesLoop()
-
-		// Start simulation loop to update values
-		go s.simulationLoop()
+		// Heartbeats and meter values belong to this connection.
+		done := make(chan struct{})
+		go s.heartbeatLoop(done)
+		go s.meterValuesLoop(done)
 
 		// Read messages until disconnected
 		s.readLoop(conn)
+		close(done)
 
 		s.mu.Lock()
 		s.wsConn = nil
@@ -368,7 +371,7 @@ func (s *Server) clientLoop() {
 		select {
 		case <-s.stopChan:
 			return
-		case <-time.After(s.reconnectDelay):
+		case <-time.After(s.redialWait()):
 			log.Printf("[%s] Reconnecting to Central System...", serial)
 		}
 	}
@@ -396,6 +399,46 @@ func dialTarget(raw, identity string) (string, http.Header, error) {
 	}
 	u.Path += identity
 	return u.String(), header, nil
+}
+
+// DropConnection closes the connection to the Central System, as a lost
+// network does, and keeps the charger from dialling again for d. A session
+// in progress goes on: the car keeps charging.
+func (s *Server) DropConnection(d time.Duration) {
+	s.mu.Lock()
+	s.redialAt = time.Now().Add(d)
+	conn := s.wsConn
+	s.mu.Unlock()
+	if conn != nil {
+		conn.Close()
+	}
+}
+
+// redialWait is how long the client waits before it dials again.
+func (s *Server) redialWait() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if until := time.Until(s.redialAt); until > s.reconnectDelay {
+		return until
+	}
+	return s.reconnectDelay
+}
+
+// SetFrameLog makes the charger report every OCPP-J frame it reads
+// ("cs->cp") or writes ("cp->cs"). Nil turns it off.
+func (s *Server) SetFrameLog(fn func(dir string, frame []byte)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frameLog = fn
+}
+
+func (s *Server) logFrame(dir string, frame []byte) {
+	s.mu.RLock()
+	fn := s.frameLog
+	s.mu.RUnlock()
+	if fn != nil {
+		fn(dir, frame)
+	}
 }
 
 // RedactURL hides the password in a Central System URL for logs.
@@ -429,7 +472,7 @@ func (s *Server) readLoop(conn *websocket.Conn) {
 }
 
 // meterValuesLoop periodically sends meter values during active transactions
-func (s *Server) meterValuesLoop() {
+func (s *Server) meterValuesLoop(done <-chan struct{}) {
 	for {
 		intervalSeconds := s.getMeterValueSampleInterval()
 		if intervalSeconds <= 0 {
@@ -438,6 +481,8 @@ func (s *Server) meterValuesLoop() {
 
 		select {
 		case <-s.stopChan:
+			return
+		case <-done:
 			return
 		case <-time.After(time.Duration(intervalSeconds) * time.Second):
 			s.sendMeterValuesForActiveTransactions()
@@ -560,14 +605,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Send BootNotification
 	go s.sendBootNotification()
 
-	// Start heartbeat loop
-	go s.heartbeatLoop()
-
-	// Start meter values loop
-	go s.meterValuesLoop()
-
-	// Start simulation loop to update values
-	go s.simulationLoop()
+	// Heartbeats and meter values belong to this connection.
+	done := make(chan struct{})
+	defer close(done)
+	go s.heartbeatLoop(done)
+	go s.meterValuesLoop(done)
 
 	// Read messages
 	for {
@@ -588,6 +630,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMessage(data []byte) {
+	s.logFrame("cs->cp", data)
 	messageType, messageId, action, payload, err := ParseOCPPMessage(data)
 	if err != nil {
 		log.Printf("[%s] Failed to parse message: %v", s.serialNumber, err)
@@ -1600,7 +1643,7 @@ func (s *Server) getHeartbeatInterval() int {
 	return 60
 }
 
-func (s *Server) heartbeatLoop() {
+func (s *Server) heartbeatLoop(done <-chan struct{}) {
 	interval := s.getHeartbeatInterval()
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
@@ -1608,6 +1651,8 @@ func (s *Server) heartbeatLoop() {
 	for {
 		select {
 		case <-s.stopChan:
+			return
+		case <-done:
 			return
 		case <-ticker.C:
 			s.sendRequest(ActionHeartbeat, HeartbeatRequest{})
@@ -1621,14 +1666,15 @@ func (s *Server) heartbeatLoop() {
 	}
 }
 
-// simulationLoop updates simulation values every second
-func (s *Server) simulationLoop() {
+// simulationLoop updates simulation values every second for as long as the
+// charger runs, connected or not: a car charges through a network outage.
+func (s *Server) simulationLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.stopChan:
+		case <-stop:
 			return
 		case <-ticker.C:
 			s.GenerateValues(time.Now())
@@ -1785,6 +1831,7 @@ func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessag
 
 	// Serialize WebSocket writes to prevent concurrent write panic
 	s.writeMu.Lock()
+	s.logFrame("cp->cs", msg)
 	err = conn.WriteMessage(websocket.TextMessage, msg)
 	s.writeMu.Unlock()
 
@@ -1831,6 +1878,7 @@ func (s *Server) sendResponse(messageId string, payload interface{}) {
 
 	// Serialize WebSocket writes
 	s.writeMu.Lock()
+	s.logFrame("cp->cs", msg)
 	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 		log.Printf("[%s] Failed to send response: %v", s.serialNumber, err)
 	}
@@ -1853,6 +1901,7 @@ func (s *Server) sendError(messageId, errorCode, errorDescription string, errorD
 
 	// Serialize WebSocket writes
 	s.writeMu.Lock()
+	s.logFrame("cp->cs", msg)
 	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 		log.Printf("[%s] Failed to send error response: %v", s.serialNumber, err)
 	}

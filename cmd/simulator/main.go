@@ -1953,46 +1953,7 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 			return
 		}
 
-		// Apply profile based on protocol
-		switch sim.Protocol {
-		case "modbus":
-			// Update RegisterSet if the profile specifies one
-			if profile.RegisterSetName != "" {
-				if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
-					sim.RegisterSet = rs
-					sim.Server.RegisterSet = rs
-					sim.Server.InitDefaultsFromSet(rs)
-				}
-			}
-			// Apply profile-specific defaults
-			for addr, value := range profile.Defaults {
-				var def *modbus.RegisterDef
-				if sim.RegisterSet != nil {
-					def = sim.RegisterSet.Lookup[addr]
-				}
-				if def == nil {
-					def = modbus.RegisterLookup[addr]
-				}
-				if def != nil {
-					if err := sim.Server.WriteRegisterValue(def, value); err != nil {
-						log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
-					}
-				}
-			}
-			sim.mu.Lock()
-			sim.EMSResponse = commandResponse(profile)
-			sim.mu.Unlock()
-		case "ocpp":
-			if profile.OCPPConfig != nil && sim.OCPPServer != nil {
-				sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
-				sim.OCPPServer.ApplyConfiguration(profile.OCPPConfig.Configuration)
-				sim.mu.Lock()
-				sim.EMSResponse = commandResponse(profile)
-				sim.mu.Unlock()
-				sim.OCPPServer.SetProfileDelay(commandResponse(profile))
-				log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
-			}
-		}
+		applyProfile(sim, profile)
 
 		sim.ProfilesManager.SetActive(name)
 
@@ -2008,6 +1969,50 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(profile)
+}
+
+// applyProfile puts a profile's register set, defaults, OCPP configuration
+// and model parameters on a simulator.
+func applyProfile(sim *Simulator, profile *profiles.Profile) {
+	switch sim.Protocol {
+	case "modbus":
+		// Update RegisterSet if the profile specifies one
+		if profile.RegisterSetName != "" {
+			if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
+				sim.RegisterSet = rs
+				sim.Server.RegisterSet = rs
+				sim.Server.InitDefaultsFromSet(rs)
+			}
+		}
+		// Apply profile-specific defaults
+		for addr, value := range profile.Defaults {
+			var def *modbus.RegisterDef
+			if sim.RegisterSet != nil {
+				def = sim.RegisterSet.Lookup[addr]
+			}
+			if def == nil {
+				def = modbus.RegisterLookup[addr]
+			}
+			if def != nil {
+				if err := sim.Server.WriteRegisterValue(def, value); err != nil {
+					log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
+				}
+			}
+		}
+		sim.mu.Lock()
+		sim.EMSResponse = commandResponse(profile)
+		sim.mu.Unlock()
+	case "ocpp":
+		if profile.OCPPConfig != nil && sim.OCPPServer != nil {
+			sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
+			sim.OCPPServer.ApplyConfiguration(profile.OCPPConfig.Configuration)
+			sim.mu.Lock()
+			sim.EMSResponse = commandResponse(profile)
+			sim.mu.Unlock()
+			sim.OCPPServer.SetProfileDelay(commandResponse(profile))
+			log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
+		}
+	}
 }
 
 func handleAutomation(w http.ResponseWriter, r *http.Request, sim *Simulator) {

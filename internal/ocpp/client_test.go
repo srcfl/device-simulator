@@ -3,6 +3,7 @@ package ocpp
 import (
 	"encoding/json"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -266,5 +267,62 @@ func TestOnePhaseDrawIsCappedAtRatedCurrent(t *testing.T) {
 	s := charging(t, 11.04, true, txProfileA(24, 1)) // a 16 A charger
 	if got := s.PhasePowers(); got != [3]float64{3680, 0, 0} {
 		t.Fatalf("phase powers %v, want 16 A (3680 W) on L1", got)
+	}
+}
+
+// A dropped connection keeps the charger away for the time asked, the car
+// keeps charging through it, and after it comes back the charger sends one
+// heartbeat per interval, not one per connection it ever had.
+func TestDropConnectionKeepsTheSessionAndOneLoopSet(t *testing.T) {
+	csms := ocpptest.New(t)
+	csms.SetHeartbeatInterval(1)
+	s := newTestServer()
+	s.reconnectDelay = 50 * time.Millisecond
+	var mu sync.Mutex
+	frames := map[string]int{}
+	s.SetFrameLog(func(dir string, _ []byte) { mu.Lock(); frames[dir]++; mu.Unlock() })
+	s.SetOCPPURL(csms.URL(""))
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop() })
+	waitFor(t, "BootNotification", 5*time.Second, func() bool { return csms.Sent(ActionBootNotification) == 1 })
+	if err := s.SetValue("evConnected", true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "StartTransaction", 5*time.Second, func() bool { return csms.Sent(ActionStartTransaction) == 1 })
+
+	for i := 0; i < 2; i++ {
+		before := time.Now()
+		s.DropConnection(300 * time.Millisecond)
+		waitFor(t, "reconnect", 5*time.Second, func() bool { return csms.Connections() == i+2 })
+		if away := time.Since(before); away < 300*time.Millisecond {
+			t.Fatalf("back after %v, want at least 300 ms", away)
+		}
+	}
+	waitFor(t, "BootNotification after the drops", 5*time.Second, func() bool { return csms.Sent(ActionBootNotification) == 3 })
+
+	beats := csms.Sent(ActionHeartbeat)
+	s.mu.RLock()
+	energy0 := s.connectors[1].EnergyWh
+	s.mu.RUnlock()
+	time.Sleep(3500 * time.Millisecond)
+	if n := csms.Sent(ActionHeartbeat) - beats; n < 2 || n > 4 {
+		t.Errorf("%d heartbeats in 3.5 s at a 1 s interval after two drops, want 3", n)
+	}
+	s.mu.RLock()
+	gained, txs, power := s.connectors[1].EnergyWh-energy0, len(s.transactions), s.connectors[1].CurrentPower
+	s.mu.RUnlock()
+	if txs != 1 || power <= 0 {
+		t.Fatalf("after the drops: %d transactions, %v W", txs, power)
+	}
+	// About 3.5 s at the charger's power, not a multiple of it.
+	if want := power * 3.5 / 3600; gained > 1.5*want {
+		t.Errorf("energy grew %.2f Wh in 3.5 s at %.0f W, want about %.2f Wh", gained, power, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if frames["cs->cp"] == 0 || frames["cp->cs"] == 0 {
+		t.Errorf("frame log %v, want both directions", frames)
 	}
 }
