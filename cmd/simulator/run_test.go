@@ -239,4 +239,90 @@ func TestRunChargerReconnects(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
+func randomSpec(seed int64) runSpec {
+	return runSpec{Name: "r", Site: runSiteSpec{FuseA: 20, HouseW: [3]float64{690, 690, 690}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", PVW: 3000},
+			{ID: "garage", Driver: "ocpp", OCPPURL: "ws://127.0.0.1:1/"}},
+		Random: &runRandom{Seed: seed, DurationS: 1800}}
+}
+
+// A seed gives the same timeline every time, within the house's bounds.
+func TestRandomTimelinesAreSeededAndBounded(t *testing.T) {
+	a, b, c := randomSpec(7), randomSpec(7), randomSpec(8)
+	ea, eb, ec := randomize(&a), randomize(&b), randomize(&c)
+	ja, _ := json.Marshal(ea)
+	jb, _ := json.Marshal(eb)
+	jc, _ := json.Marshal(ec)
+	if !bytes.Equal(ja, jb) || bytes.Equal(ja, jc) {
+		t.Fatal("seed 7 twice differs, or seed 8 is the same")
+	}
+	if *a.Devices[1].CommandResponseS != *b.Devices[1].CommandResponseS || a.Site.SignedPhaseCurrents == nil {
+		t.Fatal("the seed did not fix the devices' timing")
+	}
+	if len(ea) < 20 {
+		t.Fatalf("%d events in 30 min", len(ea))
+	}
+	kinds := map[string]int{}
+	for seed := int64(1); seed <= 20; seed++ {
+		s := randomSpec(seed)
+		for _, ev := range randomize(&s) {
+			kinds[ev.Do]++
+			if ev.AtS < 30 || ev.AtS > 1800 {
+				t.Fatalf("seed %d: event at %.0f s outside the run", seed, ev.AtS)
+			}
+			if ev.A != nil {
+				for _, x := range ev.A {
+					if x < 0.3 || x > 18 {
+						t.Fatalf("seed %d: house %.1f A on a 20 A fuse", seed, x)
+					}
+				}
+			}
+		}
+	}
+	for _, k := range []string{"loads", "pv", "soc", "car", "silence", "offline", "reconnect", "meter_late", "meter_glitch", "signed_currents", "load_balancer"} {
+		if kinds[k] == 0 {
+			t.Errorf("20 seeds never drew %s", k)
+		}
+	}
+	only := randomSpec(1)
+	only.Random.Kinds = []string{"meter_glitch"}
+	for _, ev := range randomize(&only) {
+		if ev.Do != "meter_glitch" {
+			t.Fatalf("kinds filter let %s through", ev.Do)
+		}
+	}
+}
+
+// The meter's faults reach what an EMS reads: a late meter stands still,
+// a glitch puts 0 W in the total once, and signed currents carry the sign.
+func TestRunMeterFaults(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{690, 690, 690}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", PVW: 5000, EMSControl: ptr(false)}}}
+	r, _ := runFor(t, spec)
+	meterW := func() float64 { return getSemanticValue(r.meter, "meter_power") }
+	l1A := func() float64 { return getSemanticValue(r.meter, "meter_l1_current") }
+	ocpptest.WaitFor(t, "export on the meter", 5*time.Second, func() bool { return meterW() < -2000 })
+	if l1A() < 0 {
+		t.Fatalf("an SDM630 reports magnitudes, got %v A", l1A())
+	}
+	if err := r.apply(runEvent{Do: "signed_currents", On: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	ocpptest.WaitFor(t, "a signed current", 3*time.Second, func() bool { return l1A() < 0 })
+
+	if err := r.apply(runEvent{Do: "meter_late", ForS: 2}); err != nil {
+		t.Fatal(err)
+	}
+	r.setLoads([3]float64{3000, 3000, 3000})
+	time.Sleep(1200 * time.Millisecond)
+	if w := meterW(); w > -2000 {
+		t.Fatalf("a late meter moved to %v W", w)
+	}
+	ocpptest.WaitFor(t, "the meter again", 5*time.Second, func() bool { return meterW() > 0 })
+
+	if err := r.apply(runEvent{Do: "meter_glitch"}); err != nil {
+		t.Fatal(err)
+	}
+	ocpptest.WaitFor(t, "a 0 W total", 3*time.Second, func() bool { return meterW() == 0 && getSemanticValue(r.meter, "meter_l1_power") > 0 })
+	ocpptest.WaitFor(t, "the total again", 3*time.Second, func() bool { return meterW() > 0 })
+}

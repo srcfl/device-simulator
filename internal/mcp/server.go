@@ -907,7 +907,7 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 		{
 			Tool: Tool{
 				Name:        "run.event",
-				Description: "Headless run only: change the house now (do: mark, loads, pv, soc, plug, car, offline, online, reconnect, stop)",
+				Description: "Headless run only: change the house now (do: mark, loads, pv, soc, plug, car, offline, online, reconnect, silence, meter_late, meter_glitch, signed_currents, load_balancer, stop)",
 				InputSchema: schemaObject(map[string]interface{}{
 					"do":     schemaString("Event kind"),
 					"device": schemaString("Device id from the run's spec"),

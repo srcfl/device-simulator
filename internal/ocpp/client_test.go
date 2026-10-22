@@ -372,3 +372,40 @@ func TestCarTakesWhatItCan(t *testing.T) {
 		t.Fatalf("car without limits: %v, want the 16 A offer", got)
 	}
 }
+
+// The charger's own load balancer caps the draw per phase below the offer.
+func TestLoadBalancerCapsTheDraw(t *testing.T) {
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetLoadBalancer(10)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); got[0]/229 > 10.2 || got[0]/229 < 9.8 {
+		t.Fatalf("load balancer at 10 A: %v", got)
+	}
+	s.mu.RLock()
+	offer := s.computeEffectivePowerLocked(1, time.Now())
+	s.mu.RUnlock()
+	if offer < 10900 {
+		t.Fatalf("the offer itself is %v W, want the profile's 16 A", offer)
+	}
+}
+
+// After an offer rises from zero the car waits the start delay, while the
+// charger says Charging.
+func TestStartupDelay(t *testing.T) {
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetStartupDelay(time.Minute)
+	s.connectors[1].offerSince = time.Time{}
+	t0 := time.Now()
+	s.GenerateValues(t0)
+	if got := s.connectors[1].CurrentPower; got != 0 || s.connectors[1].Status != StatusCharging {
+		t.Fatalf("at the offer: %v W, %s", got, s.connectors[1].Status)
+	}
+	s.GenerateValues(t0.Add(30 * time.Second))
+	if got := s.connectors[1].CurrentPower; got != 0 {
+		t.Fatalf("after 30 s: %v W", got)
+	}
+	s.GenerateValues(t0.Add(61 * time.Second))
+	if got := s.connectors[1].CurrentPower; got < 11000 {
+		t.Fatalf("after the delay: %v W", got)
+	}
+}

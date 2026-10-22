@@ -73,7 +73,40 @@ apply it now, or `{"label": "..."}` to `/api/run/mark`.
 | `offline` | `device`, `for_s` | the device stops answering and drops out of the site; back after `for_s` if given |
 | `online` | `device` | back again |
 | `reconnect` | `device`, `for_s` | a charger loses its connection for `for_s`; the car keeps charging |
+| `silence` | `device`, `for_s` | a Modbus device keeps its connections but answers nothing (timeouts, not refusals); 0 until `online` |
+| `meter_late` | `for_s` | the site meter's readings stand still; the house goes on |
+| `meter_glitch` | | the next reading's total reads 0 W while its phases are right |
+| `signed_currents` | `on` | the meter's phase currents carry the sign of their power (an SDM630 reports magnitudes) |
+| `load_balancer` | `device`, `max_a` | the charger's own cap per phase, whatever it is offered; 0 none |
 | `stop` | | end the run |
+
+## Model parameters
+
+Each model's timing and quirks sit in its profile's `model` block and can
+be overridden per device in the spec:
+
+| Parameter | Device | Meaning |
+|---|---|---|
+| `command_response_s` | hybrid, OCPP charger | the battery follows an EMS write, or the charger applies an accepted profile, this much later |
+| `startup_delay_s` | OCPP charger | the car draws this long after an offer rises from zero; the charger says Charging meanwhile |
+| `load_balancer_a` | OCPP charger | the charger's own cap per phase |
+| `signed_phase_currents` | meter | currents carry a sign (`site.signed_phase_currents` in a spec) |
+
+## Random timelines
+
+```json
+"random": {"seed": 42, "duration_s": 1800, "gap_s": 40, "kinds": ["loads_step", "meter_late"]}
+```
+
+draws events between 30 s and `duration_s` − 30 s, on average `gap_s`
+apart: house load steps, drift and one-phase spikes (each phase stays under
+the fuse less 2 A), PV cloud edges, the battery near its floor, the car
+taking less than offered, device silence and outages, charger reconnects,
+a late or glitched meter, signed currents and a load-balancer cap. It also
+picks each charger's `command_response_s` (0, 5, 40 or 60 s) and
+`startup_delay_s`, a one-phase car now and then, and the meter's sign,
+where the spec leaves them open. `kinds` limits the draw. The run writes
+`timeline.json`: the spec with the drawn timeline, which replays it.
 
 ## Output
 

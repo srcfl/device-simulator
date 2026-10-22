@@ -1,6 +1,7 @@
 package modbus
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -201,5 +202,42 @@ func TestServerBoundaryConditions(t *testing.T) {
 	regs = server.GetHoldingRegisters(95, 10)
 	if len(regs) != 10 {
 		t.Errorf("Boundary read: got length %d", len(regs))
+	}
+}
+
+// A silent server keeps the connection and answers nothing until it speaks
+// again.
+func TestSilentServerAnswersNothing(t *testing.T) {
+	s := NewServer(65536)
+	if err := s.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve()
+	defer s.Close()
+	conn, err := net.Dial("tcp", s.listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	ask := func() bool {
+		req := []byte{0, 1, 0, 0, 0, 6, 1, 0x03, 0x13, 0x89, 0, 1} // read holding 5001
+		if _, err := conn.Write(req); err != nil {
+			t.Fatal(err)
+		}
+		conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		buf := make([]byte, 64)
+		n, err := conn.Read(buf)
+		return err == nil && n > 0
+	}
+	if !ask() {
+		t.Fatal("no answer before silence")
+	}
+	s.SetSilent(true)
+	if ask() {
+		t.Fatal("answered while silent")
+	}
+	s.SetSilent(false)
+	if !ask() {
+		t.Fatal("no answer after silence")
 	}
 }

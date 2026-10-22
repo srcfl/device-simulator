@@ -150,6 +150,11 @@ type Site struct {
 	FuseHeat     [3]fuse.Phase     `json:"-"`           // each phase's thermal state (L1, L2, L3)
 	FuseAmbientC *float64          `json:"-"`           // the fuse cabinet's air; nil is 25 °C
 	lastPhaseW   PhasePowers       // what flowed through each phase's fuse on the last tick
+
+	// What the site meter reports, beside the truth (headless runs).
+	meterFrozenUntil time.Time // a late meter: its registers stand still until then
+	meterGlitch      bool      // the next reading's total disagrees with its phases
+	signedCurrents   bool      // phase currents carry the sign of their power
 	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -4757,19 +4762,30 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		}
 	}
 
+	// A late meter keeps its last reading; a glitch shows once.
+	site.mu.Lock()
+	frozen := time.Now().Before(site.meterFrozenUntil)
+	q := meterQuirks{signedCurrents: site.signedCurrents, glitch: site.meterGlitch && !frozen}
+	if q.glitch {
+		site.meterGlitch = false
+	}
+	site.mu.Unlock()
+
 	// Handle P1 interval mode
-	if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
+	if frozen {
+		// The meter stands still; the physics above went on.
+	} else if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
 		// Direct mode: write immediately to all meters
 		for _, mID := range meterIDs {
 			mSim := getSimulator(mID)
 			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && isRunning(mSim) {
-				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown)
+				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown, q)
 				updateMeterEnergy(mSim, totalPower, energyDeltaKWh, energyDeltaWh)
 			}
 		}
 		// Also write to primary meter if not in meterIDs (backward compat)
 		if len(meterIDs) == 0 {
-			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown)
+			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown, q)
 			updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
 		}
 		// Propagate meter values to inverter sims that have built-in meter registers
@@ -4779,7 +4795,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 				continue
 			}
 			if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {
-				writeMeterRegisters(sim, totalPower, phasePowers, fuseBlown)
+				writeMeterRegisters(sim, totalPower, phasePowers, fuseBlown, q)
 			}
 		}
 	} else {
@@ -4844,7 +4860,17 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 // writeMeterRegisters writes power values to meter registers.
 // Writes to semantic names on the meter's RegisterSet, and also to global-lookup
 // addresses for dual-format support (SDM630 + Sungrow on same meter).
-func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, fuseBlown PhaseFuses) {
+// meterQuirks are what a meter reports beside the truth.
+type meterQuirks struct {
+	signedCurrents bool // currents carry the sign of their phase's power
+	glitch         bool // the total reads 0 W while the phases are right
+}
+
+func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, fuseBlown PhaseFuses, quirks ...meterQuirks) {
+	var q meterQuirks
+	if len(quirks) > 0 {
+		q = quirks[0]
+	}
 	if fuseBlown.L1 {
 		phasePowers.L1 = 0
 	}
@@ -4855,6 +4881,9 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 		phasePowers.L3 = 0
 	}
 	totalPower = phasePowers.L1 + phasePowers.L2 + phasePowers.L3
+	if q.glitch {
+		totalPower = 0
+	}
 
 	// Write total power via semantic name (hits the correct address for any device)
 	setSemanticValue(meterSim, "meter_power", totalPower)
@@ -4868,6 +4897,11 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 	l1Current := math.Abs(phasePowers.L1) / 230.0
 	l2Current := math.Abs(phasePowers.L2) / 230.0
 	l3Current := math.Abs(phasePowers.L3) / 230.0
+	if q.signedCurrents {
+		l1Current = math.Copysign(l1Current, phasePowers.L1)
+		l2Current = math.Copysign(l2Current, phasePowers.L2)
+		l3Current = math.Copysign(l3Current, phasePowers.L3)
+	}
 
 	setSemanticValue(meterSim, "meter_l1_current", l1Current)
 	setSemanticValue(meterSim, "meter_l2_current", l2Current)

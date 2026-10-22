@@ -47,6 +47,9 @@ type runSpec struct {
 	Site      runSiteSpec     `json:"site"`
 	Devices   []runDeviceSpec `json:"devices"`
 	Timeline  []runEvent      `json:"timeline"`
+	// Random adds a timeline drawn from a seed (run_random.go). The run
+	// writes the result to timeline.json, a spec that replays it.
+	Random *runRandom `json:"random,omitempty"`
 }
 
 type runSiteSpec struct {
@@ -59,6 +62,9 @@ type runSiteSpec struct {
 	// enough to settle, so the run starts warm, as a house does in the
 	// evening; omitted starts cold.
 	FusePreheatA *[3]float64 `json:"fuse_preheat_a,omitempty"`
+	// SignedPhaseCurrents overrides the SDM630 model's: the meter's phase
+	// currents carry the sign of their power.
+	SignedPhaseCurrents *bool `json:"signed_phase_currents,omitempty"`
 }
 
 // runDeviceSpec is one device, by the device-drivers driver it emulates.
@@ -69,6 +75,8 @@ type runDeviceSpec struct {
 
 	// Overrides of the model's parameters.
 	CommandResponseS *float64 `json:"command_response_s,omitempty"`
+	StartupDelayS    *float64 `json:"startup_delay_s,omitempty"`
+	LoadBalancerA    *float64 `json:"load_balancer_a,omitempty"`
 
 	// A hybrid inverter.
 	EMSControl *bool    `json:"ems_control,omitempty"` // default on
@@ -104,6 +112,13 @@ type runDeviceSpec struct {
 //	online    device                 back again
 //	reconnect device, for_s          a charger loses its connection for for_s;
 //	                                 the car keeps charging
+//	silence   device, for_s          a Modbus device keeps its connections but
+//	                                 answers nothing for for_s (0: until online)
+//	meter_late for_s                 the site meter's readings stand still
+//	meter_glitch                     the next reading's total reads 0 W while
+//	                                 its phases are right
+//	signed_currents on               the meter's phase currents carry a sign
+//	load_balancer device, max_a      the charger's own cap per phase; 0 none
 //	stop                             end the run
 type runEvent struct {
 	AtS    float64     `json:"at_s,omitempty"`
@@ -185,6 +200,18 @@ func startRun(spec runSpec, base int, out string) (*headlessRun, error) {
 	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return nil, err
+	}
+	if spec.Random != nil {
+		evs := randomize(&spec)
+		log.Printf("run: %s", describeRandom(spec.Random, len(evs)))
+		spec.Timeline = append(spec.Timeline, evs...)
+		sort.SliceStable(spec.Timeline, func(i, j int) bool { return spec.Timeline[i].AtS < spec.Timeline[j].AtS })
+		replay := spec
+		replay.Random = nil
+		b, _ := json.MarshalIndent(replay, "", "  ")
+		if err := os.WriteFile(filepath.Join(out, "timeline.json"), b, 0o644); err != nil {
+			return nil, err
+		}
 	}
 	r := &headlessRun{spec: spec, out: out, base: base, devs: map[string]*Simulator{},
 		frames: map[string]*os.File{}, stop: make(chan struct{})}
@@ -287,6 +314,12 @@ func (r *headlessRun) build() error {
 	}
 	site.PhaseFactors = PhaseFactors{L1: 1.0 / 3, L2: 1.0 / 3, L3: 1.0 / 3}
 	site.LoadScenario = "static"
+	if r.meter != nil {
+		site.signedCurrents = r.meter.ProfilesManager.Get("sdm630").Params().SignedPhaseCurrents
+	}
+	if v := r.spec.Site.SignedPhaseCurrents; v != nil {
+		site.signedCurrents = *v
+	}
 	site.mu.Unlock()
 	r.setLoads(r.spec.Site.HouseW)
 	for _, d := range r.spec.Devices {
@@ -361,11 +394,21 @@ func (r *headlessRun) buildCharger(d runDeviceSpec) (*Simulator, error) {
 	}
 	srv.ApplyConfiguration(cfg)
 	srv.SetOCPPURL(d.OCPPURL)
-	delay := commandResponse(sim.ProfilesManager.ForDriver("ocpp"))
+	params := sim.ProfilesManager.ForDriver("ocpp").Params()
+	delay := seconds(params.CommandResponseS)
 	if d.CommandResponseS != nil {
 		delay = seconds(*d.CommandResponseS)
 	}
 	srv.SetProfileDelay(delay)
+	startup, lb := params.StartupDelayS, params.LoadBalancerA
+	if d.StartupDelayS != nil {
+		startup = *d.StartupDelayS
+	}
+	if d.LoadBalancerA != nil {
+		lb = *d.LoadBalancerA
+	}
+	srv.SetStartupDelay(seconds(startup))
+	srv.SetLoadBalancer(lb)
 	srv.SetCar(d.CarMaxA, d.CarPhases)
 	frames, err := os.Create(filepath.Join(r.out, "ocpp-"+d.ID+".jsonl"))
 	if err != nil {
@@ -522,12 +565,47 @@ func (r *headlessRun) apply(ev runEvent) error {
 	case "online":
 		var sim *Simulator
 		if sim, err = r.device(ev.Device, false); err == nil {
+			if sim.Server != nil {
+				sim.Server.SetSilent(false)
+			}
 			err = startSimulatorServer(sim)
 		}
 	case "reconnect":
 		var sim *Simulator
 		if sim, err = r.device(ev.Device, true); err == nil {
 			sim.OCPPServer.DropConnection(time.Duration(ev.ForS * float64(time.Second)))
+		}
+	case "silence":
+		var sim *Simulator
+		if sim, err = r.device(ev.Device, false); err == nil && sim.Server == nil {
+			err = fmt.Errorf("%s is not a Modbus device", ev.Device)
+		}
+		if err == nil {
+			sim.Server.SetSilent(true)
+			if ev.ForS > 0 {
+				time.AfterFunc(time.Duration(ev.ForS*float64(time.Second)), func() { sim.Server.SetSilent(false) })
+			}
+		}
+	case "meter_late":
+		r.site.mu.Lock()
+		r.site.meterFrozenUntil = time.Now().Add(time.Duration(ev.ForS * float64(time.Second)))
+		r.site.mu.Unlock()
+	case "meter_glitch":
+		r.site.mu.Lock()
+		r.site.meterGlitch = true
+		r.site.mu.Unlock()
+	case "signed_currents":
+		r.site.mu.Lock()
+		r.site.signedCurrents = ev.On == nil || *ev.On
+		r.site.mu.Unlock()
+	case "load_balancer":
+		var sim *Simulator
+		if sim, err = r.device(ev.Device, true); err == nil {
+			a := 0.0
+			if ev.MaxA != nil {
+				a = *ev.MaxA
+			}
+			sim.OCPPServer.SetLoadBalancer(a)
 		}
 	case "stop":
 		defer r.finish()
