@@ -137,6 +137,8 @@ type Server struct {
 	phaseW    [3]float64 // what the chargers draw on L1, L2, L3
 
 	// Simulation control
+	carMaxA      float64 // most the car draws per phase; 0 = whatever is offered
+	carPhases    int     // phases the car charges on; 0 = as many as offered
 	evConnected  bool    // Whether an EV is plugged in
 	nextTxId     int     // Counter for local transaction IDs
 }
@@ -210,6 +212,31 @@ func (s *Server) ProfileDelay() time.Duration {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.profileDelay
+}
+
+// SetCar describes the car on the charger: the most it draws per phase and
+// on how many phases it charges. A one-phase car draws on L1 whatever the
+// charger offers. Zeros mean the car takes what it is offered.
+func (s *Server) SetCar(maxA float64, phases int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.carMaxA, s.carPhases = maxA, phases
+}
+
+// carDrawLocked is what the car takes of an offer of w watts on phases.
+func (s *Server) carDrawLocked(w float64, phases int) (float64, int) {
+	if w <= 0 || (s.carMaxA <= 0 && (s.carPhases <= 0 || s.carPhases >= phases)) {
+		return w, phases
+	}
+	v := s.averagePhaseVoltageLocked()
+	a := w / (float64(phases) * v)
+	if s.carMaxA > 0 {
+		a = math.Min(a, s.carMaxA)
+	}
+	if s.carPhases > 0 && s.carPhases < phases {
+		phases = s.carPhases
+	}
+	return a * float64(phases) * v, phases
 }
 
 // GetOCPPURL returns the configured Central System URL
@@ -2429,7 +2456,7 @@ func (s *Server) GenerateValues(simTime time.Time) {
 	for _, tx := range s.transactions {
 		conn := s.connectors[tx.ConnectorID]
 		if conn.Status == StatusCharging || conn.Status == StatusSuspendedEVSE {
-			powerW, phases := s.computeEffectiveLocked(tx.ConnectorID, simTime)
+			powerW, phases := s.carDrawLocked(s.computeEffectiveLocked(tx.ConnectorID, simTime))
 			conn.Phases = phases
 
 			if powerW <= 0 && conn.Status == StatusCharging {

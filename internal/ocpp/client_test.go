@@ -326,3 +326,27 @@ func TestDropConnectionKeepsTheSessionAndOneLoopSet(t *testing.T) {
 		t.Errorf("frame log %v, want both directions", frames)
 	}
 }
+
+// The car decides too: a one-phase car under a three-phase order draws on
+// L1 only, and a car that takes 10 A takes 10 A of a 16 A offer.
+func TestCarTakesWhatItCan(t *testing.T) {
+	// Amps per phase at the 227-230 V the simulator varies over.
+	amps := func(w float64) float64 { return w / 229 }
+	near := func(w, a float64) bool { return math.Abs(amps(w)-a) < 0.2 }
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetCar(0, 1)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); !near(got[0], 16) || got[1] != 0 || got[2] != 0 {
+		t.Fatalf("one-phase car: %v, want 16 A on L1 only", got)
+	}
+	s.SetCar(10, 0)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); !near(got[0], 10) || !near(got[2], 10) {
+		t.Fatalf("10 A car: %v, want 10 A on each phase", got)
+	}
+	s.SetCar(0, 0)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); !near(got[1], 16) {
+		t.Fatalf("car without limits: %v, want the 16 A offer", got)
+	}
+}
