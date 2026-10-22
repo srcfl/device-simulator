@@ -295,6 +295,52 @@ func TestRandomTimelinesAreSeededAndBounded(t *testing.T) {
 
 // The meter's faults reach what an EMS reads: a late meter stands still,
 // a glitch puts 0 W in the total once, and signed currents carry the sign.
+// A later silence or outage is not ended by an earlier one's timer.
+func TestOverlappingFaultsKeepTheLatest(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", EMSControl: ptr(false)}}}
+	r, _ := runFor(t, spec)
+	inv := r.devs["inv"]
+	for _, ev := range []runEvent{{Do: "silence", Device: "inv", ForS: 0.3}, {Do: "silence", Device: "inv"}} {
+		if err := r.apply(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(600 * time.Millisecond)
+	if !inv.Server.Silent() {
+		t.Fatal("an indefinite silence ended at the earlier silence's deadline")
+	}
+	for _, ev := range []runEvent{{Do: "online", Device: "inv"}, {Do: "offline", Device: "inv", ForS: 0.3}, {Do: "offline", Device: "inv", ForS: 5}} {
+		if err := r.apply(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(600 * time.Millisecond)
+	if isRunning(inv) {
+		t.Fatal("a 5 s outage ended at the earlier outage's deadline")
+	}
+}
+
+// Energy that flows while the meter's readings stand still shows on its
+// counters once they move again.
+func TestLateMeterKeepsTheEnergy(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{3000, 3000, 3000}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", EMSControl: ptr(false)}}}
+	r, _ := runFor(t, spec)
+	kwh := func() float64 { return getSemanticValue(r.meter, "total_import") }
+	ocpptest.WaitFor(t, "import on the meter", 5*time.Second, func() bool { return getSemanticValue(r.meter, "meter_power") > 8000 })
+	t0, e0 := time.Now(), kwh()
+	if err := r.apply(runEvent{Do: "meter_late", ForS: 2}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Second)
+	w := getSemanticValue(r.meter, "meter_power")
+	got, want := kwh()-e0, w/1000*time.Since(t0).Hours()
+	if got < 0.8*want || got > 1.2*want {
+		t.Fatalf("%.5f kWh counted over %v at %.0f W, want about %.5f", got, time.Since(t0).Round(time.Millisecond), w, want)
+	}
+}
+
 func TestRunMeterFaults(t *testing.T) {
 	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{690, 690, 690}},
 		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", PVW: 5000, EMSControl: ptr(false)}}}

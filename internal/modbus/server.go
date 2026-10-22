@@ -59,7 +59,8 @@ func (s *Server) SetSilent(on bool) {
 	s.silent = on
 }
 
-func (s *Server) isSilent() bool {
+// Silent says whether the server is ignoring requests.
+func (s *Server) Silent() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.silent
@@ -391,7 +392,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			response = s.makeException(transactionID, unitID, functionCode, 0x01)
 		}
 
-		if response != nil && !s.isSilent() {
+		if response != nil && !s.Silent() {
 			conn.Write(response)
 		}
 	}

@@ -391,6 +391,31 @@ func TestLoadBalancerCapsTheDraw(t *testing.T) {
 
 // After an offer rises from zero the car waits the start delay, while the
 // charger says Charging.
+// Every session waits out the delay, not only the first.
+func TestStartupDelayEachSession(t *testing.T) {
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetStartupDelay(time.Minute)
+	s.connectors[1].offerSince = time.Time{}
+	t0 := time.Now()
+	s.GenerateValues(t0)
+	s.GenerateValues(t0.Add(61 * time.Second))
+	if got := s.connectors[1].CurrentPower; got < 11000 {
+		t.Fatalf("first session after the delay: %v W", got)
+	}
+	delete(s.transactions, 1)
+	s.GenerateValues(t0.Add(62 * time.Second))
+	s.transactions[2] = &Transaction{ID: 2, ConnectorID: 1, StartTime: t0.Add(63 * time.Second)}
+	s.connectors[1].Status = StatusCharging
+	s.GenerateValues(t0.Add(63 * time.Second))
+	if got := s.connectors[1].CurrentPower; got != 0 {
+		t.Fatalf("second session at once: %v W, want 0 until the delay passes", got)
+	}
+	s.GenerateValues(t0.Add(124 * time.Second))
+	if got := s.connectors[1].CurrentPower; got < 11000 {
+		t.Fatalf("second session after the delay: %v W", got)
+	}
+}
+
 func TestStartupDelay(t *testing.T) {
 	s := charging(t, 22.08, false, txProfileA(16, 3))
 	s.SetStartupDelay(time.Minute)

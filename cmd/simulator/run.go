@@ -155,6 +155,28 @@ type headlessRun struct {
 
 	stop     chan struct{}
 	stopOnce sync.Once
+
+	// faultGen counts the outages and silences applied to each device, so
+	// the timer of an earlier one cannot end a later one.
+	faultMu  sync.Mutex
+	faultGen map[string]int
+}
+
+// fault starts an outage or silence of a device and returns a check that
+// holds while it is still the latest one.
+func (r *headlessRun) fault(id string) func() bool {
+	r.faultMu.Lock()
+	defer r.faultMu.Unlock()
+	if r.faultGen == nil {
+		r.faultGen = map[string]int{}
+	}
+	r.faultGen[id]++
+	gen := r.faultGen[id]
+	return func() bool {
+		r.faultMu.Lock()
+		defer r.faultMu.Unlock()
+		return r.faultGen[id] == gen
+	}
 }
 
 // runHeadless is `simulator run`. It returns the process exit code.
@@ -557,14 +579,20 @@ func (r *headlessRun) apply(ev runEvent) error {
 		var sim *Simulator
 		if sim, err = r.device(ev.Device, false); err == nil {
 			stopSimulatorServer(sim)
+			latest := r.fault(ev.Device)
 			if ev.ForS > 0 {
 				id := ev.Device
-				time.AfterFunc(time.Duration(ev.ForS*float64(time.Second)), func() { r.apply(runEvent{Do: "online", Device: id}) })
+				time.AfterFunc(time.Duration(ev.ForS*float64(time.Second)), func() {
+					if latest() {
+						r.apply(runEvent{Do: "online", Device: id})
+					}
+				})
 			}
 		}
 	case "online":
 		var sim *Simulator
 		if sim, err = r.device(ev.Device, false); err == nil {
+			r.fault(ev.Device)
 			if sim.Server != nil {
 				sim.Server.SetSilent(false)
 			}
@@ -582,8 +610,13 @@ func (r *headlessRun) apply(ev runEvent) error {
 		}
 		if err == nil {
 			sim.Server.SetSilent(true)
+			latest := r.fault(ev.Device)
 			if ev.ForS > 0 {
-				time.AfterFunc(time.Duration(ev.ForS*float64(time.Second)), func() { sim.Server.SetSilent(false) })
+				time.AfterFunc(time.Duration(ev.ForS*float64(time.Second)), func() {
+					if latest() {
+						sim.Server.SetSilent(false)
+					}
+				})
 			}
 		}
 	case "meter_late":

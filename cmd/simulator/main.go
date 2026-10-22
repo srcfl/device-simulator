@@ -152,9 +152,10 @@ type Site struct {
 	lastPhaseW   PhasePowers       // what flowed through each phase's fuse on the last tick
 
 	// What the site meter reports, beside the truth (headless runs).
-	meterFrozenUntil time.Time // a late meter: its registers stand still until then
-	meterGlitch      bool      // the next reading's total disagrees with its phases
-	signedCurrents   bool      // phase currents carry the sign of their power
+	meterFrozenUntil time.Time         // a late meter: its registers stand still until then
+	meterHeldKWh     [2]float64        // import, export that flowed while they stood still
+	meterGlitch      bool              // the next reading's total disagrees with its phases
+	signedCurrents   bool              // phase currents carry the sign of their power
 	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -4769,6 +4770,18 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 	if q.glitch {
 		site.meterGlitch = false
 	}
+	// The energy goes on while the readings stand still, and shows when
+	// they move again.
+	var held [2]float64
+	if frozen {
+		if totalPower > 0 {
+			site.meterHeldKWh[0] += energyDeltaKWh
+		} else if totalPower < 0 {
+			site.meterHeldKWh[1] += energyDeltaKWh
+		}
+	} else {
+		held, site.meterHeldKWh = site.meterHeldKWh, [2]float64{}
+	}
 	site.mu.Unlock()
 
 	// Handle P1 interval mode
@@ -4780,12 +4793,14 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 			mSim := getSimulator(mID)
 			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && isRunning(mSim) {
 				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown, q)
+				accumulateMeterEnergy(mSim, held[0], held[1])
 				updateMeterEnergy(mSim, totalPower, energyDeltaKWh, energyDeltaWh)
 			}
 		}
 		// Also write to primary meter if not in meterIDs (backward compat)
 		if len(meterIDs) == 0 {
 			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown, q)
+			accumulateMeterEnergy(meterSim, held[0], held[1])
 			updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
 		}
 		// Propagate meter values to inverter sims that have built-in meter registers
@@ -4812,6 +4827,8 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		} else if totalPower < 0 {
 			p1Buffer.ExportEnergyDelta += energyDeltaKWh
 		}
+		p1Buffer.ImportEnergyDelta += held[0]
+		p1Buffer.ExportEnergyDelta += held[1]
 
 		// Check if interval has elapsed
 		intervalDuration := getP1IntervalDuration(p1Buffer.Mode)

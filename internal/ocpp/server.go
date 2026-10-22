@@ -2499,9 +2499,11 @@ func (s *Server) GenerateValues(simTime time.Time) {
 	// Simulate power consumption for active transactions
 	var totalPower float64
 	var phaseW [3]float64
+	offered := map[int]bool{} // connectors in a session that may draw
 	for _, tx := range s.transactions {
 		conn := s.connectors[tx.ConnectorID]
 		if conn.Status == StatusCharging || conn.Status == StatusSuspendedEVSE {
+			offered[tx.ConnectorID] = true
 			offerW, offerPhases := s.computeEffectiveLocked(tx.ConnectorID, simTime)
 			offerW = s.loadBalancedLocked(offerW, offerPhases)
 			powerW, phases := s.carDrawLocked(offerW, offerPhases)
@@ -2546,6 +2548,13 @@ func (s *Server) GenerateValues(simTime time.Time) {
 			energyDelta := conn.CurrentPower / 3600.0
 			conn.EnergyWh += energyDelta
 			tx.MeterNow = int(conn.EnergyWh)
+		}
+	}
+	// A connector out of session waits out the startup delay again on its
+	// next offer.
+	for id, conn := range s.connectors {
+		if !offered[id] && conn != nil {
+			conn.offerSince = time.Time{}
 		}
 	}
 
