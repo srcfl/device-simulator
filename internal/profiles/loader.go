@@ -39,16 +39,33 @@ type OCPPConfig struct {
 	DefaultStatus string            `json:"default_status,omitempty"`
 }
 
+// ModelParams are a device model's timing and quirks. They live with the
+// model, which names the device-drivers driver it emulates, so they can
+// later come from that driver's field evidence. One simulator may override
+// them through its config.
+type ModelParams struct {
+	// CommandResponseS is how long the device takes to act on an accepted
+	// command: a hybrid's battery after an EMS write, an OCPP charger's
+	// output after a charging profile.
+	CommandResponseS float64 `json:"command_response_s,omitempty"`
+}
+
 // Profile defines a device simulation profile
 type Profile struct {
 	Name            string   `json:"name"`
 	Description     string   `json:"description"`
 	Protocol        string   `json:"protocol"` // modbus, mqtt, ocpp
 	DeviceType      string   `json:"device_type"`
-	Categories      []string `json:"categories,omitempty"` // pv, battery, meter, grid, control, ev, v2x, charger
-	EVCCRef         string   `json:"evcc_ref,omitempty"`   // Link to EVCC template
+	Categories      []string `json:"categories,omitempty"`        // pv, battery, meter, grid, control, ev, v2x, charger
+	EVCCRef         string   `json:"evcc_ref,omitempty"`          // Link to EVCC template
 	ZapVerified     bool     `json:"zap_verified,omitempty"`      // True if register map is synced with zap-x firmware
 	RegisterSetName string   `json:"register_set_name,omitempty"` // Maps to devices.GetRegisterSet() for native register addresses
+
+	// DriverID is the srcfl/device-drivers driver this model emulates, by
+	// its file name without .lua (sungrow, sdm630), or ocpp for FTW's OCPP
+	// Central System. Empty for generic models.
+	DriverID string       `json:"driver_id,omitempty"`
+	Model    *ModelParams `json:"model,omitempty"`
 
 	// Modbus-specific
 	Defaults map[uint16]float64 `json:"defaults,omitempty"`
@@ -117,6 +134,14 @@ func (m *Manager) loadFile(path string) (*Profile, error) {
 	return &profile, nil
 }
 
+// Params returns the profile's model parameters, zero when it has none.
+func (p *Profile) Params() ModelParams {
+	if p == nil || p.Model == nil {
+		return ModelParams{}
+	}
+	return *p.Model
+}
+
 // Get returns a profile by name
 func (m *Manager) Get(name string) *Profile {
 	m.mu.RLock()
@@ -137,6 +162,7 @@ func (m *Manager) List() []ProfileInfo {
 			Protocol:    p.Protocol,
 			DeviceType:  p.DeviceType,
 			ZapVerified: p.ZapVerified,
+			DriverID:    p.DriverID,
 		})
 	}
 
@@ -203,6 +229,7 @@ func (m *Manager) ListByProtocolAndCategory(protocol string, category string) []
 			Protocol:    p.Protocol,
 			DeviceType:  p.DeviceType,
 			ZapVerified: p.ZapVerified,
+			DriverID:    p.DriverID,
 		})
 	}
 
@@ -215,6 +242,7 @@ func (m *Manager) ListByProtocolAndCategory(protocol string, category string) []
 
 // ProfileInfo is a summary of a profile
 type ProfileInfo struct {
+	DriverID    string `json:"driver_id,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Protocol    string `json:"protocol"`
@@ -275,6 +303,8 @@ func (m *Manager) GetActiveName() string {
 var EmbeddedProfiles = map[string]*Profile{
 	"sungrow-hybrid": {
 		Name:            "sungrow-hybrid",
+		DriverID:        "sungrow",
+		Model:           &ModelParams{CommandResponseS: 2}, // the battery follows an EMS write about 2 s later
 		Description:     "Sungrow SH Series Hybrid Inverter",
 		Protocol:        "modbus",
 		DeviceType:      "sungrow",
@@ -323,6 +353,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"solis-hybrid": {
 		Name:            "solis-hybrid",
+		DriverID:        "solis",
 		Description:     "Solis Hybrid Inverter",
 		Protocol:        "modbus",
 		DeviceType:      "solis",
@@ -345,6 +376,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"solaredge": {
 		Name:            "solaredge",
+		DriverID:        "solaredge",
 		Description:     "SolarEdge Inverter with StorEdge",
 		Protocol:        "modbus",
 		DeviceType:      "solaredge",
@@ -362,6 +394,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"sma-tripower": {
 		Name:            "sma-tripower",
+		DriverID:        "sma",
 		Description:     "SMA Sunny Tripower Inverter",
 		Protocol:        "modbus",
 		DeviceType:      "sma",
@@ -370,15 +403,16 @@ var EmbeddedProfiles = map[string]*Profile{
 		ZapVerified:     true,
 		RegisterSetName: "sma",
 		Defaults: map[uint16]float64{
-			30775: 0,    // PV Power
-			30845: 70,   // Battery SoC
-			30847: 0,    // Battery Power
-			30865: 0,    // Meter Power
+			30775: 0,  // PV Power
+			30845: 70, // Battery SoC
+			30847: 0,  // Battery Power
+			30865: 0,  // Meter Power
 			30803: 50, // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
 	"huawei-sun2000": {
 		Name:            "huawei-sun2000",
+		DriverID:        "huawei",
 		Description:     "Huawei SUN2000 Hybrid Inverter",
 		Protocol:        "modbus",
 		DeviceType:      "huawei",
@@ -387,8 +421,8 @@ var EmbeddedProfiles = map[string]*Profile{
 		ZapVerified:     true,
 		RegisterSetName: "huawei",
 		Defaults: map[uint16]float64{
-			32064: 0,    // PV Power
-			37001: 0,    // Battery Power
+			32064: 0,   // PV Power
+			37001: 0,   // Battery Power
 			37004: 65,  // Battery SoC (65.0%, scale 0.1)
 			37113: 0,   // Meter Power
 			32089: 700, // Load Power
@@ -397,6 +431,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"fronius-gen24": {
 		Name:            "fronius-gen24",
+		DriverID:        "fronius",
 		Description:     "Fronius GEN24 Plus Hybrid",
 		Protocol:        "modbus",
 		DeviceType:      "fronius",
@@ -414,6 +449,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"deye-hybrid": {
 		Name:            "deye-hybrid",
+		DriverID:        "deye",
 		Description:     "Deye Hybrid Inverter",
 		Protocol:        "modbus",
 		DeviceType:      "deye",
@@ -421,16 +457,17 @@ var EmbeddedProfiles = map[string]*Profile{
 		ZapVerified:     true,
 		RegisterSetName: "deye",
 		Defaults: map[uint16]float64{
-			672: 0,    // PV Power
-			590: 0,    // Battery Power
-			588: 80,   // Battery SoC
-			619: 0,    // Meter Power
-			653: 450,  // Load Power
-			79:  50, // Grid Frequency (50.00 Hz, scale 0.01)
+			672: 0,   // PV Power
+			590: 0,   // Battery Power
+			588: 80,  // Battery SoC
+			619: 0,   // Meter Power
+			653: 450, // Load Power
+			79:  50,  // Grid Frequency (50.00 Hz, scale 0.01)
 		},
 	},
 	"pixii-powershaper": {
 		Name:            "pixii-powershaper",
+		DriverID:        "pixii",
 		Description:     "Pixii PowerShaper 2 (Battery Only)",
 		Protocol:        "modbus",
 		DeviceType:      "pixii",
@@ -446,6 +483,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"ferroamp-energyhub": {
 		Name:        "ferroamp-energyhub",
+		DriverID:    "ferroamp_modbus",
 		Description: "FerroAmp EnergyHub",
 		Protocol:    "modbus",
 		DeviceType:  "ferroamp",
@@ -459,6 +497,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"sdm630": {
 		Name:            "sdm630",
+		DriverID:        "sdm630",
 		Description:     "Eastron SDM630 Energy Meter (Meter Only)",
 		Protocol:        "modbus",
 		DeviceType:      "sdm630",
@@ -495,6 +534,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	},
 	"fronius-smart-meter": {
 		Name:            "fronius-smart-meter",
+		DriverID:        "fronius_smart_meter",
 		Description:     "Fronius Smart Meter TS 65A-3 (SunSpec)",
 		Protocol:        "modbus",
 		DeviceType:      "fronius",
@@ -596,6 +636,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	// V2X Charger profiles (MQTT)
 	"ambibox": {
 		Name:        "ambibox",
+		DriverID:    "ambibox_v2x",
 		Description: "Ambibox V2X Bidirectional Charger",
 		Protocol:    "mqtt",
 		DeviceType:  "ambibox",
@@ -636,6 +677,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	// OCPP Charger profiles
 	"ocpp-charger": {
 		Name:        "ocpp-charger",
+		DriverID:    "ocpp",
 		Description: "Generic OCPP 1.6 EV Charger",
 		Protocol:    "ocpp",
 		DeviceType:  "ocpp-charger",
@@ -658,6 +700,7 @@ var EmbeddedProfiles = map[string]*Profile{
 	// Charge Amps DAWN
 	"chargeamps-dawn": {
 		Name:        "chargeamps-dawn",
+		DriverID:    "ocpp",
 		Description: "Charge Amps DAWN (7.7kW, 3-phase)",
 		Protocol:    "ocpp",
 		DeviceType:  "chargeamps",

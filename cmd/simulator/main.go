@@ -63,7 +63,7 @@ type Simulator struct {
 	internalSOC        float64                           // High-precision SOC accumulator (avoids register truncation)
 	socInitialized     bool                              // Whether internalSOC has been initialized from register
 	EMSControl         bool                   `json:"ems_control"` // Battery follows the EMS registers (see ems.go)
-	EMSResponse        time.Duration          `json:"-"`           // How long the battery takes to follow them
+	EMSResponse        time.Duration          `json:"-"`           // How long it takes to act on a command (command_response_s)
 	ems                emsBattery
 	mu                 sync.RWMutex
 }
@@ -505,7 +505,6 @@ func createSimulator(simType string) (*Simulator, error) {
 		SiteID:             0,    // Orphan until assigned to a site
 		DeviceOn:           true, // Devices are "on" by default when added to site
 		BatteryCapacityKWh: defaultBatteryCapacityKWh,
-		EMSResponse:        defaultEMSResponse,
 		ProfilesManager:    pm,
 		Automation: &AutomationState{
 			TimeMultiplier: 1.0,
@@ -547,6 +546,7 @@ func createSimulator(simType string) (*Simulator, error) {
 
 		// Apply profile defaults (overwrites RegisterSet defaults with profile-specific values)
 		if profile := pm.GetActive(); profile != nil {
+			sim.EMSResponse = commandResponse(profile)
 			for addr, value := range profile.Defaults {
 				// Look up in the device's RegisterSet first, then fall back to global
 				var def *modbus.RegisterDef
@@ -586,6 +586,7 @@ func createSimulator(simType string) (*Simulator, error) {
 				numConnectors = profile.OCPPConfig.NumConnectors
 				maxPowerKW = profile.OCPPConfig.MaxPowerKW
 				profileConfig = profile.OCPPConfig.Configuration
+				sim.EMSResponse = commandResponse(profile)
 			}
 		}
 
@@ -593,6 +594,7 @@ func createSimulator(simType string) (*Simulator, error) {
 		if profileConfig != nil {
 			ocppServer.ApplyConfiguration(profileConfig)
 		}
+		ocppServer.SetProfileDelay(sim.EMSResponse)
 		sim.Serial = ocppServer.SerialNumber()
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
@@ -713,7 +715,7 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 		DeviceOn:           saved.DeviceOn,
 		BatteryCapacityKWh: saved.BatteryCapacityKWh,
 		EMSControl:         saved.EMSControl,
-		EMSResponse:        defaultEMSResponse,
+		EMSResponse:        commandResponse(pm.GetActive()),
 		ProfilesManager:    pm,
 		Automation: &AutomationState{
 			Enabled:        saved.Automation.Enabled,
@@ -724,8 +726,8 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 	if sim.BatteryCapacityKWh <= 0 {
 		sim.BatteryCapacityKWh = defaultBatteryCapacityKWh
 	}
-	if saved.EMSResponseMs != nil && *saved.EMSResponseMs >= 0 {
-		sim.EMSResponse = time.Duration(*saved.EMSResponseMs) * time.Millisecond
+	if saved.CommandResponseS != nil && *saved.CommandResponseS >= 0 {
+		sim.EMSResponse = seconds(*saved.CommandResponseS)
 	}
 	if sim.Automation.TimeMultiplier == 0 {
 		sim.Automation.TimeMultiplier = 1.0
@@ -830,7 +832,7 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 		if saved.OCPPURL != "" {
 			ocppServer.SetOCPPURL(saved.OCPPURL)
 		}
-		ocppServer.SetProfileDelay(time.Duration(saved.ProfileDelayS * float64(time.Second)))
+		ocppServer.SetProfileDelay(sim.EMSResponse)
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
 		if sim.Automation.Scenario == "" {
@@ -1690,7 +1692,7 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 		status["slave_id"] = sim.SlaveID
 		status["battery_capacity_kwh"] = sim.BatteryCapacityKWh
 		status["ems_control"] = sim.EMSControl
-		status["ems_response_ms"] = sim.EMSResponse.Milliseconds()
+		status["command_response_s"] = sim.EMSResponse.Seconds()
 		status["pv_power"] = getSemanticValue(sim, "pv_power")
 		status["soc"] = getSemanticValue(sim, "battery_soc")
 		status["load"] = getSemanticValue(sim, "battery_power")
@@ -1702,7 +1704,7 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 		state := sim.OCPPServer.GetState()
 		status["state"] = state
 		status["ocpp_url"] = sim.OCPPServer.GetOCPPURL()
-		status["profile_delay_s"] = sim.OCPPServer.ProfileDelay().Seconds()
+		status["command_response_s"] = sim.OCPPServer.ProfileDelay().Seconds()
 	}
 	sim.mu.RUnlock()
 
@@ -1722,12 +1724,12 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 		OCPPURL            *string  `json:"ocpp_url"`
 		BatteryCapacityKWh *float64 `json:"battery_capacity_kwh"`
 		// EMSControl: a Modbus inverter's battery follows its EMS
-		// registers as a real Sungrow SH does, EMSResponseMs later.
-		EMSControl    *bool `json:"ems_control"`
-		EMSResponseMs *int  `json:"ems_response_ms"`
-		// ProfileDelayS: an OCPP charger accepts a charging profile at
-		// once and applies it this many seconds later (a cloud charger).
-		ProfileDelayS *float64 `json:"profile_delay_s"`
+		// registers as a real Sungrow SH does.
+		EMSControl *bool `json:"ems_control"`
+		// CommandResponseS overrides the model's command_response_s: the
+		// battery follows an EMS write, or an OCPP charger applies an
+		// accepted charging profile, this many seconds later.
+		CommandResponseS *float64 `json:"command_response_s"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -1770,16 +1772,16 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 	if config.BatteryCapacityKWh != nil && *config.BatteryCapacityKWh > 0 {
 		sim.BatteryCapacityKWh = *config.BatteryCapacityKWh
 	}
-	if config.EMSResponseMs != nil && *config.EMSResponseMs >= 0 {
-		sim.EMSResponse = time.Duration(*config.EMSResponseMs) * time.Millisecond
+	if config.CommandResponseS != nil && *config.CommandResponseS >= 0 {
+		sim.EMSResponse = seconds(*config.CommandResponseS)
+		if sim.OCPPServer != nil {
+			sim.OCPPServer.SetProfileDelay(sim.EMSResponse)
+		}
 	}
 	if config.EMSControl != nil && sim.Protocol == "modbus" && *config.EMSControl != sim.EMSControl {
 		sim.EMSControl = *config.EMSControl
 		// Start from what the battery is doing now.
 		sim.ems = emsBattery{appliedW: getBatterySignedPower(sim)}
-	}
-	if config.ProfileDelayS != nil && sim.OCPPServer != nil {
-		sim.OCPPServer.SetProfileDelay(time.Duration(*config.ProfileDelayS * float64(time.Second)))
 	}
 	sim.mu.Unlock()
 
@@ -1977,10 +1979,17 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 					}
 				}
 			}
+			sim.mu.Lock()
+			sim.EMSResponse = commandResponse(profile)
+			sim.mu.Unlock()
 		case "ocpp":
 			if profile.OCPPConfig != nil && sim.OCPPServer != nil {
 				sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
 				sim.OCPPServer.ApplyConfiguration(profile.OCPPConfig.Configuration)
+				sim.mu.Lock()
+				sim.EMSResponse = commandResponse(profile)
+				sim.mu.Unlock()
+				sim.OCPPServer.SetProfileDelay(commandResponse(profile))
 				log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
 			}
 		}
@@ -3772,13 +3781,10 @@ func buildStateSnapshot() *state.AppState {
 		}
 		if sim.OCPPServer != nil {
 			sState.OCPPURL = sim.OCPPServer.GetOCPPURL()
-			sState.ProfileDelayS = sim.OCPPServer.ProfileDelay().Seconds()
 		}
-		if sim.Protocol == "modbus" {
-			sState.EMSControl = sim.EMSControl
-			ms := int(sim.EMSResponse.Milliseconds())
-			sState.EMSResponseMs = &ms
-		}
+		sState.EMSControl = sim.EMSControl
+		cr := sim.EMSResponse.Seconds()
+		sState.CommandResponseS = &cr
 		sim.mu.RUnlock()
 
 		appState.Simulators = append(appState.Simulators, sState)

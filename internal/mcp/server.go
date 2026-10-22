@@ -402,15 +402,14 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 					"serial":                schemaString("Simulator serial"),
 					"ocpp_url":              schemaString("OCPP URL"),
 					"battery_capacity_kwh": schemaNumber("Battery capacity in kWh"),
-					"profile_delay_s":      schemaNumber("OCPP charger: seconds between accepting a charging profile and applying it"),
 					"ems_control":          schemaBoolean("Modbus inverter: the battery follows the EMS registers (13049-13051 on Sungrow) like a real hybrid"),
-					"ems_response_ms":      schemaInteger("Modbus inverter: milliseconds the battery takes to follow the EMS registers (default 2000)"),
+					"command_response_s":   schemaNumber("Seconds the device takes to act on an accepted command (battery after an EMS write, OCPP charger after a profile); overrides the model's value"),
 				}, []string{"id"}),
 			},
 			Method:       http.MethodPost,
 			PathTemplate: "/api/simulators/{id}/config",
 			PathParams:   []string{"id"},
-			BodyParams:   []string{"slave_id", "serial", "ocpp_url", "battery_capacity_kwh", "profile_delay_s", "ems_control", "ems_response_ms"},
+			BodyParams:   []string{"slave_id", "serial", "ocpp_url", "battery_capacity_kwh", "ems_control", "command_response_s"},
 		},
 		{
 			Tool: Tool{

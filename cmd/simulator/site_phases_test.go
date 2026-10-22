@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,18 +22,7 @@ func testSite(t *testing.T, houseW float64, members ...*Simulator) (*Site, *Simu
 	for _, m := range members {
 		ids = append(ids, m.ID)
 	}
-	t.Cleanup(func() {
-		// Not deleteSimulator: it expects the servers main() starts.
-		simulatorsMu.Lock()
-		defer simulatorsMu.Unlock()
-		kept := simulators[:0]
-		for _, sim := range simulators {
-			if sim != meter && !containsInt(ids, sim.ID) {
-				kept = append(kept, sim)
-			}
-		}
-		simulators = kept
-	})
+	t.Cleanup(func() { removeTestSimulators(append(ids, meter.ID)...) })
 	site := &Site{
 		ID:             -1,
 		MeterID:        meter.ID,
@@ -95,6 +85,22 @@ func TestSiteMeterPutsOnePhaseChargerOnL1(t *testing.T) {
 		t.Fatalf("meter L1/L2/L3 = %.0f/%.0f/%.0f W, want house 230 W each plus ~2290 W on L1", l1, l2, l3)
 	}
 }
+
+// removeTestSimulators drops simulators a test created. Not
+// deleteSimulator: it expects the servers main() starts.
+func removeTestSimulators(ids ...int) {
+	simulatorsMu.Lock()
+	defer simulatorsMu.Unlock()
+	kept := simulators[:0]
+	for _, sim := range simulators {
+		if !containsInt(ids, sim.ID) {
+			kept = append(kept, sim)
+		}
+	}
+	simulators = kept
+}
+
+func jsonBody(s string) *strings.Reader { return strings.NewReader(s) }
 
 func containsInt(xs []int, x int) bool {
 	for _, v := range xs {

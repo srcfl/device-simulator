@@ -3,6 +3,8 @@ package main
 import (
 	"math"
 	"time"
+
+	"github.com/srcfl/device-simulator/internal/profiles"
 )
 
 // EMS control for a Sungrow hybrid's battery.
@@ -12,13 +14,13 @@ import (
 // 13051 the forced power in watts. In any mode other than forced it runs
 // self-consumption, steering the battery against its own meter. Without
 // ems_control the simulator stores those writes and leaves the battery
-// where the dashboard or a register write put it.
+// where the dashboard or a register write put it. How long the battery takes
+// to follow is the model's command_response_s (2 s for sungrow-hybrid).
 
 const (
-	emsModeForced      = 2
-	emsCmdCharge       = 170
-	emsCmdDischarge    = 187
-	defaultEMSResponse = 2 * time.Second
+	emsModeForced   = 2
+	emsCmdCharge    = 170
+	emsCmdDischarge = 187
 
 	flagCharging    = 0x0002
 	flagDischarging = 0x0004
@@ -91,4 +93,11 @@ func stepEMSBattery(sim *Simulator, now time.Time, siteW float64) {
 		flags = flagDischarging
 	}
 	setSemanticValue(sim, "battery_flags", flags)
+}
+
+func seconds(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
+
+// commandResponse is the model's command_response_s.
+func commandResponse(p *profiles.Profile) time.Duration {
+	return seconds(p.Params().CommandResponseS)
 }
