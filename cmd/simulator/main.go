@@ -4077,6 +4077,20 @@ func getPowerContribution(sim *Simulator) float64 {
 	return 0
 }
 
+// getPhaseContribution returns a charger's draw per phase. A car on a
+// 1-phase profile loads L1 only, which phase factors cannot express.
+func getPhaseContribution(sim *Simulator) ([3]float64, bool) {
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+	if sim.Protocol != "ocpp" || sim.OCPPServer == nil {
+		return [3]float64{}, false
+	}
+	if !sim.Running || !sim.DeviceOn {
+		return [3]float64{}, true
+	}
+	return sim.OCPPServer.PhasePowers(), true
+}
+
 // startSiteAggregation starts the aggregation loop for a site
 func startSiteAggregation(site *Site) {
 	ensureSiteMetersRunning(site)
@@ -4517,7 +4531,8 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		phasePowers.L3 += pvBatteryNet * phaseFactors.L3
 	}
 
-	// Add contributions from other simulators (distributed using phase factors)
+	// Add contributions from other simulators (distributed using phase
+	// factors, except chargers, which say which phases they draw on)
 	var otherPower float64
 	for _, simID := range simIDs {
 		// Skip meter simulator to avoid double-counting its own power
@@ -4526,6 +4541,12 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		}
 		sim := getSimulator(simID)
 		if sim == nil {
+			continue
+		}
+		if p, ok := getPhaseContribution(sim); ok {
+			phasePowers.L1 += p[0]
+			phasePowers.L2 += p[1]
+			phasePowers.L3 += p[2]
 			continue
 		}
 		otherPower += getPowerContribution(sim)

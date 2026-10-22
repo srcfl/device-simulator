@@ -66,6 +66,7 @@ type Connector struct {
 	ErrorCode    string  `json:"errorCode"`
 	CurrentPower float64 `json:"currentPower"`
 	EnergyWh     float64 `json:"energyWh"`
+	Phases       int     `json:"phases"` // 1 or 3: phases the car draws on
 }
 
 // Transaction represents an active charging transaction
@@ -127,6 +128,7 @@ type Server struct {
 	currentL1 float64
 	currentL2 float64
 	currentL3 float64
+	phaseW    [3]float64 // what the chargers draw on L1, L2, L3
 
 	// Simulation control
 	evConnected  bool    // Whether an EV is plugged in
@@ -466,9 +468,13 @@ func (s *Server) sendMeterValues(connectorId, transactionId int) {
 	// IMPORTANT: Use "L1", "L2", "L3" phases (not "L1-N") - matches Ambibox test data format
 	// IMPORTANT: ORDER matters - match Ambibox exactly: Energy, Current.Offered, Current.Import, Voltage
 	// Calculate offered current from power using phase voltage (L-N):
-	// P = 3 × V_phase × I_phase, so I_phase = P / (3 × V_phase)
+	// P = phases × V_phase × I_phase, so I_phase = P / (phases × V_phase)
 	avgVoltage := (s.voltageL1 + s.voltageL2 + s.voltageL3) / 3.0
-	offeredCurrent := conn.CurrentPower / (3.0 * avgVoltage)
+	phases := 3.0
+	if conn.Phases == 1 {
+		phases = 1
+	}
+	offeredCurrent := conn.CurrentPower / (phases * avgVoltage)
 	if offeredCurrent < 0 {
 		offeredCurrent = 0
 	}
@@ -1263,13 +1269,20 @@ func (s *Server) clearChargingProfiles(req ClearChargingProfileRequest) bool {
 // charging profile evaluated at the given time. txStartTime is used for Relative profiles.
 // Returns (limitW, active) — active=false if the profile has no applicable period at this time.
 func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, txStartTime time.Time) (float64, bool) {
+	w, _, active := s.evaluateProfile(profile, now, txStartTime)
+	return w, active
+}
+
+// evaluateProfile is evaluateProfileLimit plus the active period's
+// numberPhases (3 when it names none).
+func (s *Server) evaluateProfile(profile *ChargingProfile, now time.Time, txStartTime time.Time) (float64, int, bool) {
 	if profile == nil {
-		return 0, false
+		return 0, 0, false
 	}
 
 	schedule := profile.ChargingSchedule
 	if len(schedule.ChargingSchedulePeriod) == 0 {
-		return 0, false
+		return 0, 0, false
 	}
 
 	var elapsed float64 // seconds since schedule reference point
@@ -1278,7 +1291,7 @@ func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, t
 	case "Recurring":
 		startSchedule, err := time.Parse(time.RFC3339, schedule.StartSchedule)
 		if err != nil {
-			return 0, false
+			return 0, 0, false
 		}
 		if profile.RecurrencyKind == "Daily" {
 			// Compute seconds since today's occurrence of startSchedule
@@ -1299,23 +1312,23 @@ func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, t
 			}
 			elapsed = now.Sub(weekStart).Seconds()
 		} else {
-			return 0, false
+			return 0, 0, false
 		}
 
 	case "Relative":
 		elapsed = now.Sub(txStartTime).Seconds()
 		if elapsed < 0 {
-			return 0, false
+			return 0, 0, false
 		}
 
 	case "Absolute":
 		startSchedule, err := time.Parse(time.RFC3339, schedule.StartSchedule)
 		if err != nil {
-			return 0, false
+			return 0, 0, false
 		}
 		elapsed = now.Sub(startSchedule).Seconds()
 		if elapsed < 0 {
-			return 0, false
+			return 0, 0, false
 		}
 
 	default:
@@ -1323,11 +1336,11 @@ func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, t
 		if schedule.StartSchedule != "" {
 			startSchedule, err := time.Parse(time.RFC3339, schedule.StartSchedule)
 			if err != nil {
-				return 0, false
+				return 0, 0, false
 			}
 			elapsed = now.Sub(startSchedule).Seconds()
 			if elapsed < 0 {
-				return 0, false
+				return 0, 0, false
 			}
 		} else {
 			elapsed = 0
@@ -1336,7 +1349,7 @@ func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, t
 
 	// Check schedule duration
 	if schedule.Duration != nil && *schedule.Duration > 0 && elapsed >= float64(*schedule.Duration) {
-		return 0, false
+		return 0, 0, false
 	}
 
 	// Find active period: last period where startPeriod <= elapsed
@@ -1351,24 +1364,24 @@ func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, t
 	}
 
 	if activePeriod == nil {
-		return 0, false
+		return 0, 0, false
 	}
 
 	limit := activePeriod.Limit
+	phases := 3
+	if activePeriod.NumberPhases != nil && *activePeriod.NumberPhases > 0 {
+		phases = *activePeriod.NumberPhases
+	}
 	// Convert to watts
 	unit := strings.ToUpper(strings.TrimSpace(schedule.ChargingRateUnit))
 	switch unit {
 	case "A", "AMPERE", "CURRENT":
-		phases := 3
-		if activePeriod.NumberPhases != nil && *activePeriod.NumberPhases > 0 {
-			phases = *activePeriod.NumberPhases
-		}
 		avgVoltage := s.averagePhaseVoltageLocked()
-		return limit * float64(phases) * avgVoltage, true
+		return limit * float64(phases) * avgVoltage, phases, true
 	case "W", "WATT", "POWER":
-		return limit, true
+		return limit, phases, true
 	default:
-		return limit, true
+		return limit, phases, true
 	}
 }
 
@@ -1376,7 +1389,18 @@ func (s *Server) evaluateProfileLimit(profile *ChargingProfile, now time.Time, t
 // Must be called with s.mu held (at least read lock).
 // Priority: TxProfile > TxDefaultProfile, capped by ChargePointMaxProfile on connector 0.
 func (s *Server) computeEffectivePowerLocked(connectorId int, now time.Time) float64 {
+	w, _ := s.computeEffectiveLocked(connectorId, now)
+	return w
+}
+
+// computeEffectiveLocked is computeEffectivePowerLocked plus the phases the
+// car draws on. A charger that can switch phases follows the active Tx or
+// TxDefault profile's numberPhases; on one phase it gives at most its rated
+// current, a third of its three-phase power. Any other charger draws on
+// three phases.
+func (s *Server) computeEffectiveLocked(connectorId int, now time.Time) (float64, int) {
 	maxW := s.maxPowerKW * 1000
+	phases := 3
 
 	// Find the transaction start time for this connector (needed for Relative profiles)
 	var txStartTime time.Time
@@ -1390,6 +1414,7 @@ func (s *Server) computeEffectivePowerLocked(connectorId int, now time.Time) flo
 	// Find highest-stackLevel TxProfile for this connector
 	bestLimit := -1.0
 	bestStack := -1
+	bestPhases := 3
 	for _, sp := range s.chargingProfiles {
 		if sp.ConnectorID != connectorId {
 			continue
@@ -1400,9 +1425,10 @@ func (s *Server) computeEffectivePowerLocked(connectorId int, now time.Time) flo
 		if sp.Profile.StackLevel <= bestStack {
 			continue
 		}
-		if limitW, active := s.evaluateProfileLimit(&sp.Profile, now, txStartTime); active {
+		if limitW, n, active := s.evaluateProfile(&sp.Profile, now, txStartTime); active {
 			bestLimit = limitW
 			bestStack = sp.Profile.StackLevel
+			bestPhases = n
 		}
 	}
 
@@ -1419,9 +1445,10 @@ func (s *Server) computeEffectivePowerLocked(connectorId int, now time.Time) flo
 			if sp.Profile.StackLevel <= bestStack {
 				continue
 			}
-			if limitW, active := s.evaluateProfileLimit(&sp.Profile, now, txStartTime); active {
+			if limitW, n, active := s.evaluateProfile(&sp.Profile, now, txStartTime); active {
 				bestLimit = limitW
 				bestStack = sp.Profile.StackLevel
+				bestPhases = n
 			}
 		}
 	}
@@ -1454,13 +1481,24 @@ func (s *Server) computeEffectivePowerLocked(connectorId int, now time.Time) flo
 		effectiveW = math.Min(effectiveW, capLimit)
 	}
 
+	if bestLimit >= 0 && bestPhases == 1 && s.phaseSwitchingLocked() {
+		phases = 1
+		maxW /= 3
+	}
+
 	// Cap at hardware max
 	effectiveW = math.Min(effectiveW, maxW)
 	if effectiveW < 0 {
 		effectiveW = 0
 	}
 
-	return effectiveW
+	return effectiveW, phases
+}
+
+// phaseSwitchingLocked reports ConnectorSwitch3to1PhaseSupported.
+func (s *Server) phaseSwitchingLocked() bool {
+	ok, _ := strconv.ParseBool(s.configuration["ConnectorSwitch3to1PhaseSupported"])
+	return ok
 }
 
 func (s *Server) averagePhaseVoltageLocked() float64 {
@@ -1837,6 +1875,7 @@ func (s *Server) GetState() map[string]interface{} {
 			"errorCode":    c.ErrorCode,
 			"currentPower": c.CurrentPower,
 			"energyWh":     c.EnergyWh,
+			"phases":       c.Phases,
 		})
 	}
 
@@ -1913,6 +1952,7 @@ func (s *Server) GetState() map[string]interface{} {
 		"currentL2":  s.currentL2,
 		"currentL3":  s.currentL3,
 		"totalPower": totalPower,
+		"phasePowers": map[string]float64{"l1": s.phaseW[0], "l2": s.phaseW[1], "l3": s.phaseW[2]},
 		// Control state
 		"evConnected":              s.evConnected,
 		"effectivePowerW":          s.computeEffectivePowerLocked(1, time.Now()),
@@ -2312,10 +2352,12 @@ func (s *Server) GenerateValues(simTime time.Time) {
 
 	// Simulate power consumption for active transactions
 	var totalPower float64
+	var phaseW [3]float64
 	for _, tx := range s.transactions {
 		conn := s.connectors[tx.ConnectorID]
 		if conn.Status == StatusCharging || conn.Status == StatusSuspendedEVSE {
-			powerW := s.computeEffectivePowerLocked(tx.ConnectorID, simTime)
+			powerW, phases := s.computeEffectiveLocked(tx.ConnectorID, simTime)
+			conn.Phases = phases
 
 			if powerW <= 0 && conn.Status == StatusCharging {
 				// Power dropped to 0 — transition to SuspendedEVSE
@@ -2332,6 +2374,13 @@ func (s *Server) GenerateValues(simTime time.Time) {
 			}
 
 			totalPower += conn.CurrentPower
+			if phases == 1 {
+				phaseW[0] += conn.CurrentPower
+			} else {
+				for k := range phaseW {
+					phaseW[k] += conn.CurrentPower / 3
+				}
+			}
 
 			// Add energy (Wh) for 1 second at this power
 			energyDelta := conn.CurrentPower / 3600.0
@@ -2340,23 +2389,20 @@ func (s *Server) GenerateValues(simTime time.Time) {
 		}
 	}
 
-	// Update 3-phase metering based on total power
-	// Assume balanced 3-phase load
+	// Update 3-phase metering from the power on each phase
+	s.phaseW = phaseW
 	if totalPower > 0 {
 		// Add small random variations to voltages (typical grid variation)
 		s.voltageL1 = 228.0 + (float64(simTime.Second()%10) * 0.2)
 		s.voltageL2 = 227.0 + (float64((simTime.Second()+3)%10) * 0.2)
 		s.voltageL3 = 228.0 + (float64((simTime.Second()+7)%10) * 0.2)
 
-		// Calculate current per phase (balanced load) using phase voltage (L-N)
-		// P = 3 × V_phase × I_phase, so I_phase = P / (3 × V_phase)
+		// Current per phase using phase voltage (L-N): I = P_phase / V_phase,
+		// with small variations
 		avgVoltage := (s.voltageL1 + s.voltageL2 + s.voltageL3) / 3.0
-		totalCurrent := totalPower / (3.0 * avgVoltage)
-
-		// Distribute with small variations
-		s.currentL1 = totalCurrent * (0.98 + (float64(simTime.Second()%5) * 0.01))
-		s.currentL2 = totalCurrent * (0.99 + (float64((simTime.Second()+2)%5) * 0.01))
-		s.currentL3 = totalCurrent * (1.00 + (float64((simTime.Second()+4)%5) * 0.01))
+		s.currentL1 = phaseW[0] / avgVoltage * (0.98 + (float64(simTime.Second()%5) * 0.01))
+		s.currentL2 = phaseW[1] / avgVoltage * (0.99 + (float64((simTime.Second()+2)%5) * 0.01))
+		s.currentL3 = phaseW[2] / avgVoltage * (1.00 + (float64((simTime.Second()+4)%5) * 0.01))
 	} else {
 		// No charging - idle state
 		s.voltageL1 = 230.0
@@ -2373,6 +2419,14 @@ func (s *Server) GenerateValues(simTime time.Time) {
 	for _, sc := range statusChanges {
 		s.sendStatusNotification(sc.connectorId, sc.status)
 	}
+}
+
+// PhasePowers returns what the chargers draw on L1, L2 and L3, in watts.
+// A site meter adds these to its phases.
+func (s *Server) PhasePowers() [3]float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.phaseW
 }
 
 // GetConnectors returns all connectors
