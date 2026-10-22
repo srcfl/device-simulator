@@ -22,13 +22,14 @@ type CSMS struct {
 	t   testing.TB
 	srv *httptest.Server
 
-	mu      sync.Mutex
-	closed  bool
-	paths   []string
-	auths   []string
-	actions []string
-	conn    *websocket.Conn
-	seq     int
+	mu       sync.Mutex
+	closed   bool
+	paths    []string
+	auths    []string
+	actions  []string
+	payloads []json.RawMessage
+	conn     *websocket.Conn
+	seq      int
 }
 
 // New starts a Central System that stops with the test.
@@ -77,8 +78,13 @@ func New(t testing.TB) *CSMS {
 				result = map[string]interface{}{"transactionId": 42, "idTagInfo": map[string]string{"status": "Accepted"}}
 			}
 			out, _ := json.Marshal([]interface{}{3, id, result})
+			var payload json.RawMessage
+			if len(frame) > 3 {
+				payload = frame[3]
+			}
 			f.mu.Lock()
 			f.actions = append(f.actions, action)
+			f.payloads = append(f.payloads, payload)
 			c.WriteMessage(websocket.TextMessage, out)
 			f.mu.Unlock()
 		}
@@ -129,6 +135,19 @@ func (f *CSMS) Sent(action string) int {
 		}
 	}
 	return n
+}
+
+// Payloads lists the payloads of one action's CALLs, in order.
+func (f *CSMS) Payloads(action string) []json.RawMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []json.RawMessage
+	for i, a := range f.actions {
+		if a == action {
+			out = append(out, f.payloads[i])
+		}
+	}
+	return out
 }
 
 // Actions lists the charge point's CALLs in the order they arrived.

@@ -1,6 +1,7 @@
 package ocpp
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 	"time"
@@ -96,6 +97,47 @@ func TestStartTransactionWaitsForTheConnection(t *testing.T) {
 	}
 	if start < boot {
 		t.Errorf("StartTransaction sent before BootNotification: %v", actions)
+	}
+}
+
+// A session that starts and ends offline is stopped under the transaction
+// id the Central System gives its start, not the charger's local one.
+func TestQueuedStopNamesTheAssignedTransaction(t *testing.T) {
+	csms := ocpptest.New(t)
+	csms.SetClosed(true)
+	s := newTestServer()
+	s.reconnectDelay = 50 * time.Millisecond
+	s.SetOCPPURL(csms.URL(""))
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop() })
+
+	if err := s.SetValue("evConnected", true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "local transaction", 5*time.Second, func() bool {
+		s.txQueueMu.Lock()
+		defer s.txQueueMu.Unlock()
+		return len(s.txQueue) == 1
+	})
+	if err := s.SetValue("evConnected", false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "queued stop", 5*time.Second, func() bool {
+		s.txQueueMu.Lock()
+		defer s.txQueueMu.Unlock()
+		return len(s.txQueue) == 2
+	})
+
+	csms.SetClosed(false)
+	waitFor(t, "StopTransaction", 5*time.Second, func() bool { return csms.Sent(ActionStopTransaction) == 1 })
+	var stop StopTransactionRequest
+	if err := json.Unmarshal(csms.Payloads(ActionStopTransaction)[0], &stop); err != nil {
+		t.Fatal(err)
+	}
+	if stop.TransactionId != 42 {
+		t.Fatalf("StopTransaction names transaction %d, want 42 from the start's answer", stop.TransactionId)
 	}
 }
 
@@ -198,6 +240,24 @@ func TestOnePhaseProfileDrawsOnL1(t *testing.T) {
 	s = charging(t, 22.08, true, txProfileA(16, 3))
 	if got := s.PhasePowers(); got != [3]float64{3680, 3680, 3680} {
 		t.Fatalf("3-phase profile: %v, want 3680 W per phase", got)
+	}
+}
+
+// The composite schedule reports what the charger draws: 16 A on one phase,
+// not a third of it on three.
+func TestCompositeScheduleKeepsThePhases(t *testing.T) {
+	s := charging(t, 22.08, true, txProfileA(16, 1))
+	r := s.handleGetCompositeSchedule(GetCompositeScheduleRequest{ConnectorId: 1, Duration: 60, ChargingRateUnit: "A"})
+	if r.Status != "Accepted" {
+		t.Fatalf("status %s", r.Status)
+	}
+	p := r.ChargingSchedule.ChargingSchedulePeriod
+	if len(p) != 1 || math.Abs(p[0].Limit-16) > 0.5 || p[0].NumberPhases == nil || *p[0].NumberPhases != 1 {
+		t.Fatalf("periods %+v, want one of 16 A on 1 phase", p)
+	}
+	r = s.handleGetCompositeSchedule(GetCompositeScheduleRequest{ConnectorId: 1, Duration: 60, ChargingRateUnit: "W"})
+	if p := r.ChargingSchedule.ChargingSchedulePeriod; len(p) != 1 || math.Abs(p[0].Limit-3680) > 60 || *p[0].NumberPhases != 1 {
+		t.Fatalf("periods %+v, want one of 3680 W on 1 phase", p)
 	}
 }
 

@@ -72,6 +72,21 @@ func TestEMSForcedModeDrivesTheBattery(t *testing.T) {
 	}
 }
 
+// A limit register holding 0 allows no power that way.
+func TestEMSKeepsZeroPowerLimits(t *testing.T) {
+	inv, site, meter := sungrowInSite(t, 1000, 50, true)
+	setSemanticValue(inv, "max_charge_power", 0)
+	writeEMS(inv, 2, emsCmdCharge, 3000)
+	if got := tick(site, meter, 2) - 3000; math.Abs(got) > 1 {
+		t.Fatalf("charge limit 0: battery %.0f W, want 0", got)
+	}
+	setSemanticValue(inv, "max_discharge_power", 0)
+	writeEMS(inv, 0, 204, 0)
+	if got := tick(site, meter, 3); math.Abs(got-3000) > 1 {
+		t.Fatalf("discharge limit 0: meter %.0f W, want the house alone", got)
+	}
+}
+
 // Self-consumption (any mode but forced) cancels the meter, as a real SH
 // does without an EMS.
 func TestEMSSelfConsumptionCancelsTheMeter(t *testing.T) {

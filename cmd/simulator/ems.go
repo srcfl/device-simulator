@@ -52,11 +52,13 @@ func emsTargetW(sim *Simulator, siteW, appliedW float64) float64 {
 	} else {
 		w = appliedW - siteW
 	}
-	if limit := getSemanticValue(sim, "max_charge_power") * 1000; limit > 0 && w > limit {
-		w = limit
+	// A model without the limit registers has no limit. One that has them
+	// enforces each, 0 included, as an SH does.
+	if getSemanticDef(sim, "max_charge_power") != nil {
+		w = math.Min(w, getSemanticValue(sim, "max_charge_power")*1000)
 	}
-	if limit := getSemanticValue(sim, "max_discharge_power") * 1000; limit > 0 && w < -limit {
-		w = -limit
+	if getSemanticDef(sim, "max_discharge_power") != nil {
+		w = math.Max(w, -getSemanticValue(sim, "max_discharge_power")*1000)
 	}
 	soc := getSemanticValue(sim, "battery_soc")
 	if maxSoC := getSemanticValue(sim, "battery_max_soc"); maxSoC > 0 && soc >= maxSoC && w > 0 {

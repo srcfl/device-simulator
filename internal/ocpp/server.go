@@ -108,6 +108,10 @@ type Server struct {
 	// charge point keeps them and delivers them once it is back online.
 	txQueueMu sync.Mutex
 	txQueue   []queuedTx
+	// txAssigned maps a local transaction id to the Central System's, for a
+	// session that ended before its StartTransaction was answered: its
+	// queued StopTransaction still names the local id. Guarded by mu.
+	txAssigned map[int]int
 
 	// profileDelay models a cloud charger: it accepts a charging profile at
 	// once and applies it this much later. Zero applies it at once.
@@ -158,6 +162,7 @@ func NewServer(id int, port int, vendor, model string, numConnectors int, maxPow
 		maxPowerKW:       maxPowerKW,
 		connectors:       connectors,
 		transactions:     make(map[int]*Transaction),
+		txAssigned:       make(map[int]int),
 		chargingProfiles: make(map[string]*storedProfile),
 		configuration: map[string]string{
 			"HeartbeatInterval":                        "60",
@@ -1172,30 +1177,31 @@ func (s *Server) handleGetCompositeSchedule(req GetCompositeScheduleRequest) *Ge
 	}
 
 	var periods []ChargingSchedulePeriod
-	lastLimit := -1.0
+	lastLimit, lastPhases := -1.0, 0
 
 	for offset := 0; offset <= req.Duration; offset += step {
 		t := now.Add(time.Duration(offset) * time.Second)
-		powerW := s.computeEffectivePowerLocked(connectorId, t)
+		powerW, phases := s.computeEffectiveLocked(connectorId, t)
 
 		var limit float64
 		if unit == "A" {
 			avgV := s.averagePhaseVoltageLocked()
 			if avgV > 0 {
-				limit = math.Round(powerW/(3.0*avgV)*10) / 10 // round to 0.1A
+				limit = math.Round(powerW/(float64(phases)*avgV)*10) / 10 // round to 0.1A
 			}
 		} else {
 			limit = math.Round(powerW)
 		}
 
-		if limit != lastLimit {
-			phases := 3
+		// A change of phases is a new period even at the same limit.
+		if limit != lastLimit || phases != lastPhases {
+			n := phases
 			periods = append(periods, ChargingSchedulePeriod{
 				StartPeriod:  int64(offset),
 				Limit:        limit,
-				NumberPhases: &phases,
+				NumberPhases: &n,
 			})
-			lastLimit = limit
+			lastLimit, lastPhases = limit, phases
 		}
 	}
 
@@ -1652,6 +1658,15 @@ func (s *Server) sendStartTransaction(connectorId int, idTag string, meterStart 
 		MeterStart:  meterStart,
 		Timestamp:   FormatTimestamp(time.Now()),
 	}
+	localID := 0
+	s.mu.RLock()
+	for id, tx := range s.transactions {
+		if tx.ConnectorID == connectorId && tx.IdTag == idTag {
+			localID = id
+			break
+		}
+	}
+	s.mu.RUnlock()
 
 	s.sendTxRequest(ActionStartTransaction, req, func(resp json.RawMessage) {
 		var txResp StartTransactionResponse
@@ -1660,16 +1675,15 @@ func (s *Server) sendStartTransaction(connectorId int, idTag string, meterStart 
 		}
 		log.Printf("[%s] Transaction started, server ID: %d", s.serialNumber, txResp.TransactionId)
 
-		// Update our local transaction with the server's transaction ID
+		// Rename the local transaction to the server's ID, or, if it has
+		// already ended, remember the ID for its queued StopTransaction.
 		s.mu.Lock()
-		for localId, tx := range s.transactions {
-			if tx.ConnectorID == connectorId && tx.IdTag == idTag {
-				// Remove old entry and add with server's ID
-				delete(s.transactions, localId)
-				tx.ID = txResp.TransactionId
-				s.transactions[txResp.TransactionId] = tx
-				break
-			}
+		if tx := s.transactions[localID]; tx != nil {
+			delete(s.transactions, localID)
+			tx.ID = txResp.TransactionId
+			s.transactions[txResp.TransactionId] = tx
+		} else if localID != 0 {
+			s.txAssigned[localID] = txResp.TransactionId
 		}
 		s.mu.Unlock()
 	})
@@ -1715,7 +1729,17 @@ func (s *Server) flushTxQueue() {
 	s.txQueue = nil
 	s.txQueueMu.Unlock()
 
-	for i, m := range queue {
+	for i := range queue {
+		m := &queue[i]
+		if stop, ok := m.payload.(StopTransactionRequest); ok {
+			s.mu.Lock()
+			if id, ok := s.txAssigned[stop.TransactionId]; ok {
+				delete(s.txAssigned, stop.TransactionId)
+				stop.TransactionId = id
+				m.payload = stop
+			}
+			s.mu.Unlock()
+		}
 		resp, err := s.sendRequest(m.action, m.payload)
 		if errors.Is(err, errNotConnected) {
 			// Offline again: keep the rest, in front of anything newer.
