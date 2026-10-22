@@ -129,6 +129,17 @@ func TestRunFuseStartsWarm(t *testing.T) {
 	})
 }
 
+// wired_phases reaches the charger.
+func TestRunWiresAOnePhaseCharger(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25},
+		Devices: []runDeviceSpec{{ID: "cp", Driver: "ocpp", OCPPURL: "ws://127.0.0.1:9/", MaxKW: 3.68, WiredPhases: 1}}}
+	r, _ := runFor(t, spec)
+	srv := r.devs["cp"].OCPPServer
+	if srv == nil || !srv.WiredOnOnePhase() {
+		t.Fatal("the charger is not wired on one phase")
+	}
+}
+
 // "meter" names the site meter in ports.json, so no device may take it.
 func TestRunRefusesTheMeterID(t *testing.T) {
 	spec := runSpec{Name: "meter-id", Site: runSiteSpec{FuseA: 25},

@@ -143,6 +143,7 @@ type Server struct {
 	loadBalancerA float64       // the charger's own cap per phase; 0 = none
 	startupDelay  time.Duration // from an offer rising from zero to the car drawing
 	carPhases    int     // phases the car charges on; 0 = as many as offered
+	wiredPhases  int     // phases the charger is wired on (from L1); 0 = three
 	evConnected  bool    // Whether an EV is plugged in
 	nextTxId     int     // Counter for local transaction IDs
 }
@@ -234,6 +235,29 @@ func (s *Server) SetLoadBalancer(a float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.loadBalancerA = a
+}
+
+// SetWiredPhases wires the charger on its first n phases from L1; 0 or 3
+// is three. A one-phase charger gives an order's current on L1, whatever
+// numberPhases says, and at most its rating there.
+func (s *Server) SetWiredPhases(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wiredPhases = n
+}
+
+// WiredOnOnePhase says whether SetWiredPhases(1) wired the charger on L1.
+func (s *Server) WiredOnOnePhase() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.wiredLocked() == 1
+}
+
+func (s *Server) wiredLocked() int {
+	if s.wiredPhases > 0 && s.wiredPhases < 3 {
+		return s.wiredPhases
+	}
+	return 3
 }
 
 // SetStartupDelay is how long the car takes to draw after an offer rises
@@ -1494,6 +1518,8 @@ func (s *Server) evaluateProfile(profile *ChargingProfile, now time.Time, txStar
 	if activePeriod.NumberPhases != nil && *activePeriod.NumberPhases > 0 {
 		phases = *activePeriod.NumberPhases
 	}
+	// A current flows on the phases the charger has.
+	phases = min(phases, s.wiredLocked())
 	// Convert to watts
 	unit := strings.ToUpper(strings.TrimSpace(schedule.ChargingRateUnit))
 	switch unit {
@@ -1606,6 +1632,11 @@ func (s *Server) computeEffectiveLocked(connectorId int, now time.Time) (float64
 	if bestLimit >= 0 && bestPhases == 1 && s.phaseSwitchingLocked() {
 		phases = 1
 		maxW /= 3
+	}
+	// A charger wired on fewer phases draws on those; max_kw is its rating
+	// as wired.
+	if w := s.wiredLocked(); w < phases {
+		phases = w
 	}
 
 	// Cap at hardware max

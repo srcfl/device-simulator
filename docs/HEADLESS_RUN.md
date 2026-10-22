@@ -55,7 +55,9 @@ output directory says where each device is.
   fuses have carried long enough to settle, starts the run warm instead of
   cold. A size the profile does not model is refused.
 - A charger dials `ocpp_url`; `user:password@` goes out as Basic auth.
-  `car_max_a` and `car_phases` are what the car takes.
+  `car_max_a` and `car_phases` are what the car takes. `wired_phases: 1`
+  wires a charger on L1 only: it gives an order's current there, whatever
+  `numberPhases` says, up to `max_kw` (its rating as wired).
 
 ## Events
 

@@ -88,11 +88,12 @@ type runDeviceSpec struct {
 
 	// An OCPP 1.6 charger in client mode, and the car on it.
 	OCPPURL     string            `json:"ocpp_url,omitempty"` // user:pass@ is sent as Basic auth
-	MaxKW       float64           `json:"max_kw,omitempty"`   // on three phases; default 11.04
+	MaxKW       float64           `json:"max_kw,omitempty"`   // as wired; default 11.04 on three phases
 	Vendor      string            `json:"vendor,omitempty"`
 	Model       string            `json:"model,omitempty"`
 	PhaseSwitch bool              `json:"phase_switch,omitempty"`
-	OCPPConfig  map[string]string `json:"ocpp_config,omitempty"` // configuration keys over the defaults
+	WiredPhases int               `json:"wired_phases,omitempty"` // 1: on L1 only, and max_kw is its rating there
+	OCPPConfig  map[string]string `json:"ocpp_config,omitempty"`  // configuration keys over the defaults
 	CarMaxA     float64           `json:"car_max_a,omitempty"`
 	CarPhases   int               `json:"car_phases,omitempty"`
 	Plugged     bool              `json:"plugged,omitempty"` // a car plugged in at the start
@@ -432,6 +433,7 @@ func (r *headlessRun) buildCharger(d runDeviceSpec) (*Simulator, error) {
 	srv.SetStartupDelay(seconds(startup))
 	srv.SetLoadBalancer(lb)
 	srv.SetCar(d.CarMaxA, d.CarPhases)
+	srv.SetWiredPhases(d.WiredPhases)
 	frames, err := os.Create(filepath.Join(r.out, "ocpp-"+d.ID+".jsonl"))
 	if err != nil {
 		return nil, err

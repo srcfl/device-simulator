@@ -262,6 +262,35 @@ func TestCompositeScheduleKeepsThePhases(t *testing.T) {
 	}
 }
 
+// A charger wired on one phase gives an order's current on L1 whatever its
+// numberPhases, and no more than its rating.
+func TestOnePhaseWiring(t *testing.T) {
+	wired := func(p ChargingProfile) *Server {
+		s := NewServer(1, 0, "TestVendor", "TestModel", 1, 3.68)
+		s.SetWiredPhases(1)
+		s.transactions[1] = &Transaction{ID: 1, ConnectorID: 1, StartTime: time.Now()}
+		s.connectors[1].Status = StatusCharging
+		s.applyChargingProfile(1, &p)
+		s.GenerateValues(time.Now())
+		return s
+	}
+	for _, c := range []struct {
+		name string
+		p    ChargingProfile
+		want float64
+	}{
+		{"16 A on three phases", txProfileA(16, 3), 3680},
+		{"10 A on one phase", txProfileA(10, 1), 2300},
+		{"32 A", txProfileA(32, 3), 3680},
+		{"3 kW", txProfileW(1, 3000), 3000},
+	} {
+		s := wired(c.p)
+		if got := s.PhasePowers(); math.Abs(got[0]-c.want) > 1 || got[1] != 0 || got[2] != 0 {
+			t.Errorf("%s: phase powers %v, want %.0f W on L1", c.name, got, c.want)
+		}
+	}
+}
+
 // On one phase a charger gives at most its rated current per phase.
 func TestOnePhaseDrawIsCappedAtRatedCurrent(t *testing.T) {
 	s := charging(t, 11.04, true, txProfileA(24, 1)) // a 16 A charger
