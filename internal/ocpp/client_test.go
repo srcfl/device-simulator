@@ -223,3 +223,62 @@ func TestStartTransactionWaitsForTheConnection(t *testing.T) {
 		t.Errorf("StartTransaction sent before BootNotification: %v", csms.actions)
 	}
 }
+
+func effectiveW(s *Server) float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.computeEffectivePowerLocked(1, time.Now())
+}
+
+func txProfileW(id int64, watts float64) ChargingProfile {
+	return ChargingProfile{
+		ChargingProfileId:      id,
+		ChargingProfilePurpose: "TxProfile",
+		ChargingProfileKind:    "Relative",
+		ChargingSchedule: ChargingSchedule{
+			ChargingRateUnit:       "W",
+			ChargingSchedulePeriod: []ChargingSchedulePeriod{{StartPeriod: 0, Limit: watts}},
+		},
+	}
+}
+
+// A slow cloud charger answers Accepted at once and changes its output only
+// after the delay, in the order the changes were accepted.
+func TestProfileDelayAcceptsAtOnceAndAppliesLater(t *testing.T) {
+	s := newTestServer() // 22 kW
+	s.transactions[1] = &Transaction{ID: 1, ConnectorID: 1, StartTime: time.Now()}
+	s.SetProfileDelay(300 * time.Millisecond)
+
+	if got := s.handleSetChargingProfile(SetChargingProfileRequest{ConnectorId: 1, CsChargingProfiles: txProfileW(1, 5000)}); got.Status != "Accepted" {
+		t.Fatalf("status %q, want Accepted", got.Status)
+	}
+	time.Sleep(100 * time.Millisecond)
+	s.handleSetChargingProfile(SetChargingProfileRequest{ConnectorId: 1, CsChargingProfiles: txProfileW(1, 7000)})
+	if got := effectiveW(s); got != 22000 {
+		t.Fatalf("right after Accepted: %v W, want the old 22000 W", got)
+	}
+	waitFor(t, "first profile", time.Second, func() bool { return effectiveW(s) == 5000 })
+	waitFor(t, "second profile", time.Second, func() bool { return effectiveW(s) == 7000 })
+
+	// A connector-0 TxProfile is refused at once, as without a delay.
+	if got := s.handleSetChargingProfile(SetChargingProfileRequest{ConnectorId: 0, CsChargingProfiles: txProfileW(2, 1000)}); got.Status != "Rejected" {
+		t.Errorf("connector 0 TxProfile: %q, want Rejected", got.Status)
+	}
+
+	if got := s.handleClearChargingProfile(ClearChargingProfileRequest{}); got.Status != "Accepted" {
+		t.Fatalf("clear: %q, want Accepted", got.Status)
+	}
+	if got := effectiveW(s); got != 7000 {
+		t.Fatalf("right after clear: %v W, want 7000 W until the delay passes", got)
+	}
+	waitFor(t, "clear", time.Second, func() bool { return effectiveW(s) == 22000 })
+}
+
+func TestNoProfileDelayAppliesAtOnce(t *testing.T) {
+	s := newTestServer()
+	s.transactions[1] = &Transaction{ID: 1, ConnectorID: 1, StartTime: time.Now()}
+	s.handleSetChargingProfile(SetChargingProfileRequest{ConnectorId: 1, CsChargingProfiles: txProfileW(1, 5000)})
+	if got := effectiveW(s); got != 5000 {
+		t.Fatalf("%v W, want 5000 W at once", got)
+	}
+}

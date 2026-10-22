@@ -821,6 +821,7 @@ func restoreSimulator(saved state.SimulatorState) (*Simulator, error) {
 		if saved.OCPPURL != "" {
 			ocppServer.SetOCPPURL(saved.OCPPURL)
 		}
+		ocppServer.SetProfileDelay(time.Duration(saved.ProfileDelayS * float64(time.Second)))
 		sim.OCPPServer = ocppServer
 		sim.Device = ocppServer
 		if sim.Automation.Scenario == "" {
@@ -1690,6 +1691,7 @@ func handleSimulatorStatus(w http.ResponseWriter, r *http.Request, sim *Simulato
 		state := sim.OCPPServer.GetState()
 		status["state"] = state
 		status["ocpp_url"] = sim.OCPPServer.GetOCPPURL()
+		status["profile_delay_s"] = sim.OCPPServer.ProfileDelay().Seconds()
 	}
 	sim.mu.RUnlock()
 
@@ -1708,6 +1710,9 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 		Serial             *string  `json:"serial"`
 		OCPPURL            *string  `json:"ocpp_url"`
 		BatteryCapacityKWh *float64 `json:"battery_capacity_kwh"`
+		// ProfileDelayS: an OCPP charger accepts a charging profile at
+		// once and applies it this many seconds later (a cloud charger).
+		ProfileDelayS *float64 `json:"profile_delay_s"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -1749,6 +1754,9 @@ func handleSimulatorConfig(w http.ResponseWriter, r *http.Request, sim *Simulato
 	}
 	if config.BatteryCapacityKWh != nil && *config.BatteryCapacityKWh > 0 {
 		sim.BatteryCapacityKWh = *config.BatteryCapacityKWh
+	}
+	if config.ProfileDelayS != nil && sim.OCPPServer != nil {
+		sim.OCPPServer.SetProfileDelay(time.Duration(*config.ProfileDelayS * float64(time.Second)))
 	}
 	sim.mu.Unlock()
 
@@ -3741,6 +3749,7 @@ func buildStateSnapshot() *state.AppState {
 		}
 		if sim.OCPPServer != nil {
 			sState.OCPPURL = sim.OCPPServer.GetOCPPURL()
+			sState.ProfileDelayS = sim.OCPPServer.ProfileDelay().Seconds()
 		}
 		sim.mu.RUnlock()
 

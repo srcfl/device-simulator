@@ -402,12 +402,13 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 					"serial":                schemaString("Simulator serial"),
 					"ocpp_url":              schemaString("OCPP URL"),
 					"battery_capacity_kwh": schemaNumber("Battery capacity in kWh"),
+					"profile_delay_s":      schemaNumber("OCPP charger: seconds between accepting a charging profile and applying it"),
 				}, []string{"id"}),
 			},
 			Method:       http.MethodPost,
 			PathTemplate: "/api/simulators/{id}/config",
 			PathParams:   []string{"id"},
-			BodyParams:   []string{"slave_id", "serial", "ocpp_url", "battery_capacity_kwh"},
+			BodyParams:   []string{"slave_id", "serial", "ocpp_url", "battery_capacity_kwh", "profile_delay_s"},
 		},
 		{
 			Tool: Tool{

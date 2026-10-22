@@ -35,6 +35,12 @@ type queuedTx struct {
 
 var errNotConnected = errors.New("not connected")
 
+// delayedOp is an accepted profile change waiting to take effect.
+type delayedOp struct {
+	due   time.Time
+	apply func()
+}
+
 // profileKey builds a composite key for the profile map: "connectorId:purpose:stackLevel"
 func profileKey(connectorId int, purpose string, stackLevel int) string {
 	return fmt.Sprintf("%d:%s:%d", connectorId, purpose, stackLevel)
@@ -101,6 +107,13 @@ type Server struct {
 	// charge point keeps them and delivers them once it is back online.
 	txQueueMu sync.Mutex
 	txQueue   []queuedTx
+
+	// profileDelay models a cloud charger: it accepts a charging profile at
+	// once and applies it this much later. Zero applies it at once.
+	profileDelay time.Duration
+	laterMu      sync.Mutex // guards later
+	later        []delayedOp
+	laterRunMu   sync.Mutex // keeps delayed operations in order
 
 	// Client mode fields
 	ocppURL        string // Central System URL to connect to (client mode)
@@ -170,6 +183,24 @@ func (s *Server) SetOCPPURL(url string) {
 	defer s.mu.Unlock()
 	s.ocppURL = url
 	s.clientMode = url != ""
+}
+
+// SetProfileDelay sets how long an accepted SetChargingProfile or
+// ClearChargingProfile takes to reach the charger's output.
+func (s *Server) SetProfileDelay(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profileDelay = d
+}
+
+// ProfileDelay returns the profile delay.
+func (s *Server) ProfileDelay() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.profileDelay
 }
 
 // GetOCPPURL returns the configured Central System URL
@@ -479,6 +510,11 @@ func (s *Server) Stop() error {
 	}
 
 	close(s.stopChan)
+
+	// A charger that is switched off forgets changes it had not applied.
+	s.laterMu.Lock()
+	s.later = nil
+	s.laterMu.Unlock()
 
 	if s.wsConn != nil {
 		s.wsConn.Close()
@@ -799,16 +835,53 @@ func (s *Server) handleSetChargingProfile(req SetChargingProfileRequest) *SetCha
 		return &SetChargingProfileResponse{Status: "Rejected"}
 	}
 
-	s.applyChargingProfile(req.ConnectorId, &req.CsChargingProfiles)
+	profile := req.CsChargingProfiles
+	if s.deferProfileChange(func() { s.applyChargingProfile(req.ConnectorId, &profile) }) {
+		return &SetChargingProfileResponse{Status: "Accepted"}
+	}
+	s.applyChargingProfile(req.ConnectorId, &profile)
 	return &SetChargingProfileResponse{Status: "Accepted"}
 }
 
 func (s *Server) handleClearChargingProfile(req ClearChargingProfileRequest) *ClearChargingProfileResponse {
+	if s.deferProfileChange(func() { s.clearChargingProfiles(req) }) {
+		return &ClearChargingProfileResponse{Status: "Accepted"}
+	}
 	cleared := s.clearChargingProfiles(req)
 	if cleared {
 		return &ClearChargingProfileResponse{Status: "Accepted"}
 	}
 	return &ClearChargingProfileResponse{Status: "Unknown"}
+}
+
+// deferProfileChange schedules apply after the profile delay and reports
+// whether it did. Changes take effect in the order they were accepted.
+func (s *Server) deferProfileChange(apply func()) bool {
+	d := s.ProfileDelay()
+	if d <= 0 {
+		return false
+	}
+	s.laterMu.Lock()
+	s.later = append(s.later, delayedOp{due: time.Now().Add(d), apply: apply})
+	s.laterMu.Unlock()
+	time.AfterFunc(d, s.runDueProfileChanges)
+	return true
+}
+
+func (s *Server) runDueProfileChanges() {
+	s.laterRunMu.Lock()
+	defer s.laterRunMu.Unlock()
+	for {
+		s.laterMu.Lock()
+		if len(s.later) == 0 || s.later[0].due.After(time.Now()) {
+			s.laterMu.Unlock()
+			return
+		}
+		op := s.later[0]
+		s.later = s.later[1:]
+		s.laterMu.Unlock()
+		op.apply()
+	}
 }
 
 func (s *Server) handleGetConfiguration(req GetConfigurationRequest) *GetConfigurationResponse {
