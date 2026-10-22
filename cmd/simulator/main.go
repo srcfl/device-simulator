@@ -149,6 +149,7 @@ type Site struct {
 	FuseOverload FuseOverload      `json:"-"`
 	FuseHeat     [3]fuse.Phase     `json:"-"`           // each phase's thermal state (L1, L2, L3)
 	FuseAmbientC *float64          `json:"-"`           // the fuse cabinet's air; nil is 25 °C
+	lastPhaseW   PhasePowers       // what flowed through each phase's fuse on the last tick
 	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -189,6 +190,11 @@ var (
 )
 
 func main() {
+	// `simulator run -spec house.json` runs one house headless (run.go).
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		os.Exit(runHeadless(os.Args[2:]))
+	}
+
 	// Base port configuration
 	modbusBasePort := flag.Int("modbus-base", 5000, "Base port for Modbus servers")
 	mqttBasePort := flag.Int("mqtt-base", 1883, "Base port for MQTT brokers")
@@ -4122,6 +4128,14 @@ func getPowerContribution(sim *Simulator) float64 {
 	return 0
 }
 
+// isRunning reads Running under the simulator's lock; a stop from the API
+// or a headless run writes it while the site loop ticks.
+func isRunning(sim *Simulator) bool {
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+	return sim.Running
+}
+
 // getPhaseContribution returns a charger's draw per phase. A car on a
 // 1-phase profile loads L1 only, which phase factors cannot express.
 func getPhaseContribution(sim *Simulator) ([3]float64, bool) {
@@ -4618,6 +4632,9 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 
 	// Calculate total power from phase powers
 	totalPower := phasePowers.L1 + phasePowers.L2 + phasePowers.L3
+	site.mu.Lock()
+	site.lastPhaseW = phasePowers
+	site.mu.Unlock()
 
 	// Update BaseLoadW for backward compatibility (used for display)
 	// This is the sum of SitePhaseLoads
@@ -4741,7 +4758,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		// Direct mode: write immediately to all meters
 		for _, mID := range meterIDs {
 			mSim := getSimulator(mID)
-			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && mSim.Running {
+			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && isRunning(mSim) {
 				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown)
 				updateMeterEnergy(mSim, totalPower, energyDeltaKWh, energyDeltaWh)
 			}
@@ -4754,7 +4771,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		// Propagate meter values to inverter sims that have built-in meter registers
 		for _, simID := range simIDs {
 			sim := getSimulator(simID)
-			if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !sim.Running {
+			if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !isRunning(sim) {
 				continue
 			}
 			if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {
@@ -4793,7 +4810,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 			// Write instant power values to all meters
 			for _, mID := range meterIDs {
 				mSim := getSimulator(mID)
-				if mSim == nil || mSim.Protocol != "modbus" || mSim.Server == nil || !mSim.Running {
+				if mSim == nil || mSim.Protocol != "modbus" || mSim.Server == nil || !isRunning(mSim) {
 					continue
 				}
 				writeMeterRegisters(mSim, instantPower, instantPhasePowers, fuseBlown)
@@ -4807,7 +4824,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 			// Propagate meter values to inverter sims that have built-in meter registers
 			for _, simID := range simIDs {
 				sim := getSimulator(simID)
-				if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !sim.Running {
+				if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !isRunning(sim) {
 					continue
 				}
 				if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {

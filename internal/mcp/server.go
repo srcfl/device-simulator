@@ -897,6 +897,47 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 		},
 		{
 			Tool: Tool{
+				Name:        "run.status",
+				Description: "Headless run only: name, elapsed time, events and samples so far",
+				InputSchema: schemaObject(nil, nil),
+			},
+			Method:       http.MethodGet,
+			PathTemplate: "/api/run",
+		},
+		{
+			Tool: Tool{
+				Name:        "run.event",
+				Description: "Headless run only: change the house now (do: mark, loads, pv, soc, plug, car, offline, online, reconnect, stop)",
+				InputSchema: schemaObject(map[string]interface{}{
+					"do":     schemaString("Event kind"),
+					"device": schemaString("Device id from the run's spec"),
+					"label":  schemaString("Mark label"),
+					"w":      schemaArray("House load per phase in watts", "number"),
+					"a":      schemaArray("House load per phase in amperes", "number"),
+					"pv_w":   schemaNumber("PV power"),
+					"pct":    schemaNumber("State of charge"),
+					"on":     schemaBoolean("Car plugged in"),
+					"max_a":  schemaNumber("Most the car draws per phase"),
+					"phases": schemaInteger("Phases the car charges on"),
+					"for_s":  schemaNumber("How long the device stays offline or disconnected"),
+				}, []string{"do"}),
+			},
+			Method:       http.MethodPost,
+			PathTemplate: "/api/run/event",
+			BodyParams:   []string{"do", "device", "label", "w", "a", "pv_w", "pct", "on", "max_a", "phases", "for_s"},
+		},
+		{
+			Tool: Tool{
+				Name:        "run.mark",
+				Description: "Headless run only: put a named mark in the record",
+				InputSchema: schemaObject(map[string]interface{}{"label": schemaString("Mark label")}, []string{"label"}),
+			},
+			Method:       http.MethodPost,
+			PathTemplate: "/api/run/mark",
+			BodyParams:   []string{"label"},
+		},
+		{
+			Tool: Tool{
 				Name:        "system.info",
 				Description: "Get system info",
 				InputSchema: schemaObject(nil, nil),

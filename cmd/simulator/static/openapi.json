@@ -422,6 +422,38 @@
         "responses": { "200": { "description": "Updated" } }
       }
     },
+    "/api/run": {
+      "get": {
+        "summary": "Headless run only (simulator run): name, elapsed time, events and samples so far",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/run/event": {
+      "post": {
+        "summary": "Headless run only: change the house now and record the event",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "required": ["do"], "properties": {
+          "do": { "type": "string", "enum": ["mark", "loads", "pv", "soc", "plug", "car", "offline", "online", "reconnect", "stop"] },
+          "device": { "type": "string", "description": "Device id from the run's spec" },
+          "label": { "type": "string" },
+          "w": { "type": "array", "items": { "type": "number" }, "description": "House load per phase, W" },
+          "a": { "type": "array", "items": { "type": "number" }, "description": "House load per phase, A" },
+          "pv_w": { "type": "number" },
+          "pct": { "type": "number", "description": "Battery state of charge" },
+          "on": { "type": "boolean", "description": "Car plugged in" },
+          "max_a": { "type": "number", "description": "Most the car draws per phase" },
+          "phases": { "type": "integer", "description": "Phases the car charges on" },
+          "for_s": { "type": "number", "description": "How long the device stays offline or disconnected" }
+        } } } } },
+        "responses": { "204": { "description": "Applied" }, "400": { "description": "Unknown event or device" } }
+      }
+    },
+    "/api/run/mark": {
+      "post": {
+        "summary": "Headless run only: put a named mark in the record",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "required": ["label"], "properties": { "label": { "type": "string" } } } } } },
+        "responses": { "204": { "description": "Marked" } }
+      }
+    },
     "/api/load-scenarios": {
       "get": {
         "summary": "List load scenarios",

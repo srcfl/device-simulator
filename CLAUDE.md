@@ -47,6 +47,15 @@ make build-linux
 - MQTT: 1883+
 - OCPP: 9000+
 
+### Headless Run
+
+```bash
+go run ./cmd/simulator run -spec house.json -port-base 18700 -out run/
+```
+
+One house from a spec, a timeline of events, a record a second
+(`cmd/simulator/run.go`, [docs/HEADLESS_RUN.md](docs/HEADLESS_RUN.md)).
+
 ### Run Tests
 
 ```bash

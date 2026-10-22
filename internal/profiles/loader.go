@@ -142,6 +142,20 @@ func (p *Profile) Params() ModelParams {
 	return *p.Model
 }
 
+// ForDriver returns the first profile, by name, that emulates the
+// device-drivers driver id, or nil.
+func (m *Manager) ForDriver(id string) *Profile {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var best *Profile
+	for _, p := range m.profiles {
+		if p.DriverID == id && (best == nil || p.Name < best.Name) {
+			best = p
+		}
+	}
+	return best
+}
+
 // Get returns a profile by name
 func (m *Manager) Get(name string) *Profile {
 	m.mu.RLock()

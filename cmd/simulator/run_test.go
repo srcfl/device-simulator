@@ -1,0 +1,208 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/srcfl/device-simulator/internal/ocpp/ocpptest"
+)
+
+// freeBase finds a port whose next 60 are free on 127.0.0.1.
+func freeBase(t *testing.T) int {
+	t.Helper()
+	for try := 0; try < 50; try++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		base := l.Addr().(*net.TCPAddr).Port
+		l.Close()
+		if base > 65000 {
+			continue
+		}
+		ok := true
+		for p := base; p < base+60 && ok; p++ {
+			l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", itoa(p)))
+			if err != nil {
+				ok = false
+				continue
+			}
+			l.Close()
+		}
+		if ok {
+			return base
+		}
+	}
+	t.Fatal("no free port range")
+	return 0
+}
+
+func itoa(n int) string { return string(json.Number(json.Number(jsonInt(n)))) }
+
+func jsonInt(n int) string { b, _ := json.Marshal(n); return string(b) }
+
+type planted struct {
+	samples []plantSample
+	marks   map[string]float64
+	events  []runEvent
+}
+
+func readPlant(t *testing.T, out string) planted {
+	t.Helper()
+	f, err := os.Open(filepath.Join(out, "plant.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	p := planted{marks: map[string]float64{}}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var line struct {
+			plantSample
+			Mark  string    `json:"mark"`
+			Event *runEvent `json:"event"`
+		}
+		if err := json.Unmarshal(sc.Bytes(), &line); err != nil {
+			t.Fatalf("plant.jsonl: %v: %s", err, sc.Bytes())
+		}
+		switch {
+		case line.Mark != "":
+			p.marks[line.Mark] = line.Elapsed
+		case line.Event != nil:
+			p.events = append(p.events, *line.Event)
+		default:
+			p.samples = append(p.samples, line.plantSample)
+		}
+	}
+	return p
+}
+
+func runFor(t *testing.T, spec runSpec) (*headlessRun, string) {
+	t.Helper()
+	out := t.TempDir()
+	r, err := startRun(spec, freeBase(t), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(r.end)
+	return r, out
+}
+
+func waitStop(t *testing.T, r *headlessRun, within time.Duration) {
+	t.Helper()
+	select {
+	case <-r.stop:
+		r.end()
+	case <-time.After(within):
+		t.Fatal("the run did not end")
+	}
+}
+
+// A run builds its house from the spec, applies its timeline, records a
+// sample a second and says where each device listens.
+func TestRunRecordsTheHouse(t *testing.T) {
+	spec := runSpec{Name: "t", DurationS: 4,
+		Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{690, 690, 690}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", PVW: 1500,
+			SoCPct: ptr(50.0), MinSoCPct: ptr(5.0), EMSControl: ptr(false)}},
+		Timeline: []runEvent{{AtS: 1.5, Do: "loads", A: &[3]float64{10, 3, 3}}, {AtS: 2, Do: "mark", Label: "after"}}}
+	r, out := runFor(t, spec)
+	waitStop(t, r, 10*time.Second)
+
+	var ports runPorts
+	b, err := os.ReadFile(filepath.Join(out, "ports.json"))
+	if err != nil || json.Unmarshal(b, &ports) != nil {
+		t.Fatalf("ports.json: %v %s", err, b)
+	}
+	if ports.Devices["inv"].Modbus == 0 || ports.Devices["meter"].Modbus == 0 || ports.HTTP == 0 {
+		t.Fatalf("ports %+v", ports)
+	}
+	p := readPlant(t, out)
+	if len(p.samples) < 3 || len(p.events) != 1 || p.marks["after"] < 1.9 {
+		t.Fatalf("%d samples, events %v, marks %v", len(p.samples), p.events, p.marks)
+	}
+	first, last := p.samples[0], p.samples[len(p.samples)-1]
+	// House 690 W per phase less 1 500 W of PV spread evenly.
+	if first.PhaseW[0] < 180 || first.PhaseW[0] > 200 {
+		t.Errorf("before the step: %v W", first.PhaseW)
+	}
+	if last.PhaseW[0]-last.PhaseW[1] < 1600 || last.PhaseA[0] < 7 || last.Fuse.RatingA != 25 || last.Fuse.Profile != "iec_gg" {
+		t.Errorf("after 10/3/3 A: %+v", last)
+	}
+	if _, err := os.Stat(filepath.Join(out, "result.json")); err != nil {
+		t.Error(err)
+	}
+	if n := len(simulators); n != 0 {
+		t.Errorf("%d simulators left after the run", n)
+	}
+}
+
+// The harness can change the house while it runs, and stop it.
+func TestRunTakesEventsOverHTTP(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 16, HouseW: [3]float64{230, 230, 230}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", EMSControl: ptr(false)}}}
+	r, out := runFor(t, spec)
+	post := func(path, body string) {
+		t.Helper()
+		resp, err := http.Post("http://127.0.0.1:"+itoa(r.base)+path, "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("%s: %s", path, resp.Status)
+		}
+	}
+	time.Sleep(1200 * time.Millisecond)
+	post("/api/run/mark", `{"label": "step"}`)
+	post("/api/run/event", `{"do": "loads", "w": [2300, 230, 230]}`)
+	time.Sleep(1500 * time.Millisecond)
+	post("/api/run/event", `{"do": "stop"}`)
+	waitStop(t, r, 5*time.Second)
+	p := readPlant(t, out)
+	if _, ok := p.marks["step"]; !ok || len(p.events) != 2 {
+		t.Fatalf("marks %v, events %v", p.marks, p.events)
+	}
+	if last := p.samples[len(p.samples)-1]; last.PhaseW[0] < 2200 {
+		t.Fatalf("after the posted step: %v W", last.PhaseW)
+	}
+	resp, err := http.Get("http://127.0.0.1:" + itoa(r.base) + "/api/update/check")
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+// A charger dials the Central System in its spec, logs its frames, and a
+// reconnect event drops the connection without ending the session.
+func TestRunChargerReconnects(t *testing.T) {
+	csms := ocpptest.New(t)
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25},
+		Devices: []runDeviceSpec{{ID: "garage", Driver: "ocpp", OCPPURL: csms.URL("ftw:pw"), Plugged: true, CarPhases: 1}}}
+	r, out := runFor(t, spec)
+	ocpptest.WaitFor(t, "StartTransaction", 10*time.Second, func() bool { return csms.Sent("StartTransaction") == 1 })
+	ocpptest.WaitFor(t, "charging", 5*time.Second, func() bool { return r.devs["garage"].OCPPServer.PhasePowers()[0] > 3000 })
+	if p := r.devs["garage"].OCPPServer.PhasePowers(); p[1] != 0 {
+		t.Fatalf("a one-phase car: %v", p)
+	}
+	if err := r.apply(runEvent{Do: "reconnect", Device: "garage", ForS: 0.2}); err != nil {
+		t.Fatal(err)
+	}
+	ocpptest.WaitFor(t, "a second connection", 15*time.Second, func() bool { return csms.Connections() == 2 })
+	if p := r.devs["garage"].OCPPServer.PhasePowers(); p[0] < 3000 {
+		t.Fatalf("after the reconnect the car draws %v", p)
+	}
+	r.end()
+	b, err := os.ReadFile(filepath.Join(out, "ocpp-garage.jsonl"))
+	if err != nil || !bytes.Contains(b, []byte(`"cp->cs"`)) || !bytes.Contains(b, []byte("BootNotification")) {
+		t.Fatalf("frame log: %v %.300s", err, b)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
