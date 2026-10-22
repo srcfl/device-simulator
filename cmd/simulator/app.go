@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/srcfl/device-simulator/fuse"
 	"github.com/srcfl/device-simulator/internal/modbus"
 	"github.com/srcfl/device-simulator/internal/modbus/devices"
 	"github.com/srcfl/device-simulator/internal/settings"
@@ -909,6 +910,7 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 	if fuseSize, ok := config["fuse_size"].(float64); ok {
 		site.FuseSize = int(fuseSize)
 		site.FuseDamage = PhaseLoads{}
+		site.FuseHeat = [3]fuse.Phase{}
 		site.FuseOverload = FuseOverload{}
 	}
 	if fuseProfile, ok := config["fuse_profile"].(string); ok {
@@ -918,6 +920,7 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 		if site.FuseProfile != fuseProfile {
 			site.FuseProfile = fuseProfile
 			site.FuseDamage = PhaseLoads{}
+			site.FuseHeat = [3]fuse.Phase{}
 			site.FuseOverload = FuseOverload{}
 		}
 	}
@@ -935,19 +938,19 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 	if fb, ok := config["fuse_blown"].(map[string]interface{}); ok {
 		if l1, ok := parseBool(fb["l1"]); ok {
 			if site.FuseBlown.L1 && !l1 {
-				site.FuseDamage.L1 = 0
+				site.FuseDamage.L1, site.FuseHeat[0] = 0, fuse.Phase{}
 			}
 			site.FuseBlown.L1 = l1
 		}
 		if l2, ok := parseBool(fb["l2"]); ok {
 			if site.FuseBlown.L2 && !l2 {
-				site.FuseDamage.L2 = 0
+				site.FuseDamage.L2, site.FuseHeat[1] = 0, fuse.Phase{}
 			}
 			site.FuseBlown.L2 = l2
 		}
 		if l3, ok := parseBool(fb["l3"]); ok {
 			if site.FuseBlown.L3 && !l3 {
-				site.FuseDamage.L3 = 0
+				site.FuseDamage.L3, site.FuseHeat[2] = 0, fuse.Phase{}
 			}
 			site.FuseBlown.L3 = l3
 		}

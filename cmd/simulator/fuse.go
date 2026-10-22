@@ -74,28 +74,31 @@ func updateFuseState(site *Site, phasePowers PhasePowers, simDelta time.Duration
 	fuseBlown := site.FuseBlown
 	overload := FuseOverload{}
 
-	updatePhase := func(power float64, blown bool, damage *float64) (FusePhaseOverload, bool) {
-		ph := fuse.Phase{Damage: *damage, Blown: blown}
-		status := profile.Step(&ph, math.Abs(power)/230.0, float64(fuseSize), simSeconds)
+	// Each phase keeps its thermal state between ticks, so a fuse that has
+	// been warm blows sooner.
+	updatePhase := func(i int, power float64, blown bool, damage *float64) (FusePhaseOverload, bool) {
+		ph := &site.FuseHeat[i]
+		ph.Blown, ph.AmbientC = blown, site.FuseAmbientC
+		status := profile.Step(ph, math.Abs(power)/230.0, float64(fuseSize), simSeconds)
 		*damage = ph.Damage
 		return status, ph.Blown && !blown
 	}
 
-	status, blew := updatePhase(phasePowers.L1, fuseBlown.L1, &damage.L1)
+	status, blew := updatePhase(0, phasePowers.L1, fuseBlown.L1, &damage.L1)
 	overload.L1 = status
 	if blew {
 		fuseBlown.L1 = true
 		changed = true
 	}
 
-	status, blew = updatePhase(phasePowers.L2, fuseBlown.L2, &damage.L2)
+	status, blew = updatePhase(1, phasePowers.L2, fuseBlown.L2, &damage.L2)
 	overload.L2 = status
 	if blew {
 		fuseBlown.L2 = true
 		changed = true
 	}
 
-	status, blew = updatePhase(phasePowers.L3, fuseBlown.L3, &damage.L3)
+	status, blew = updatePhase(2, phasePowers.L3, fuseBlown.L3, &damage.L3)
 	overload.L3 = status
 	if blew {
 		fuseBlown.L3 = true
