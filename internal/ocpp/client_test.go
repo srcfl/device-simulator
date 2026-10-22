@@ -20,6 +20,7 @@ type fakeCSMS struct {
 	srv *httptest.Server
 
 	mu      sync.Mutex
+	closed  bool // refuse connections, like a Central System that is down
 	paths   []string
 	auths   []string
 	actions []string
@@ -32,6 +33,11 @@ func newFakeCSMS(t *testing.T) *fakeCSMS {
 	up := websocket.Upgrader{Subprotocols: []string{"ocpp1.6"}}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
+		if f.closed {
+			f.mu.Unlock()
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
 		f.paths = append(f.paths, r.URL.Path)
 		f.auths = append(f.auths, r.Header.Get("Authorization"))
 		f.mu.Unlock()
@@ -160,5 +166,60 @@ func TestClientWithoutCredentialsSendsNoAuth(t *testing.T) {
 	defer csms.mu.Unlock()
 	if csms.auths[0] != "" {
 		t.Errorf("Authorization = %q, want none", csms.auths[0])
+	}
+}
+
+// A car plugged in while the charger cannot reach its Central System still
+// starts a session the Central System hears about once the charger is back.
+func TestStartTransactionWaitsForTheConnection(t *testing.T) {
+	csms := newFakeCSMS(t)
+	csms.closed = true
+	s := newTestServer()
+	s.reconnectDelay = 50 * time.Millisecond
+	s.SetOCPPURL(csms.url(""))
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop() })
+
+	if err := s.SetValue("evConnected", true); err != nil {
+		t.Fatal(err)
+	}
+	// The charger starts the session locally 2 s after plug-in.
+	waitFor(t, "local transaction", 5*time.Second, func() bool {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return len(s.transactions) == 1
+	})
+	s.txQueueMu.Lock()
+	queued := len(s.txQueue)
+	s.txQueueMu.Unlock()
+	if queued != 1 {
+		t.Fatalf("%d messages queued while offline, want the StartTransaction", queued)
+	}
+
+	csms.mu.Lock()
+	csms.closed = false
+	csms.mu.Unlock()
+	waitFor(t, "StartTransaction", 5*time.Second, func() bool { return csms.sent(ActionStartTransaction) == 1 })
+	waitFor(t, "server transaction id", 5*time.Second, func() bool {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.transactions[42] != nil
+	})
+
+	csms.mu.Lock()
+	defer csms.mu.Unlock()
+	var boot, start int
+	for i, a := range csms.actions {
+		switch a {
+		case ActionBootNotification:
+			boot = i
+		case ActionStartTransaction:
+			start = i
+		}
+	}
+	if start < boot {
+		t.Errorf("StartTransaction sent before BootNotification: %v", csms.actions)
 	}
 }

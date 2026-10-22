@@ -2,6 +2,7 @@ package ocpp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -24,6 +25,15 @@ type storedProfile struct {
 	ConnectorID int
 	Profile     ChargingProfile
 }
+
+// queuedTx is a transaction message waiting for a connection.
+type queuedTx struct {
+	action   string
+	payload  interface{}
+	onResult func(json.RawMessage)
+}
+
+var errNotConnected = errors.New("not connected")
 
 // profileKey builds a composite key for the profile map: "connectorId:purpose:stackLevel"
 func profileKey(connectorId int, purpose string, stackLevel int) string {
@@ -86,6 +96,11 @@ type Server struct {
 	pendingRequests  map[string]chan json.RawMessage
 	pendingActions   map[string]string // messageId -> action name for logging
 	stopChan         chan struct{}
+
+	// Transaction messages that found no connection, oldest first. A real
+	// charge point keeps them and delivers them once it is back online.
+	txQueueMu sync.Mutex
+	txQueue   []queuedTx
 
 	// Client mode fields
 	ocppURL        string // Central System URL to connect to (client mode)
@@ -1453,6 +1468,8 @@ func (s *Server) sendBootNotification() {
 		s.mu.RUnlock()
 		s.sendStatusNotification(id, status)
 	}
+
+	s.flushTxQueue()
 }
 
 func (s *Server) getHeartbeatInterval() int {
@@ -1525,14 +1542,11 @@ func (s *Server) sendStartTransaction(connectorId int, idTag string, meterStart 
 		Timestamp:   FormatTimestamp(time.Now()),
 	}
 
-	resp, err := s.sendRequest(ActionStartTransaction, req)
-	if err != nil {
-		log.Printf("[%s] StartTransaction failed: %v", s.serialNumber, err)
-		return
-	}
-
-	var txResp StartTransactionResponse
-	if err := json.Unmarshal(resp, &txResp); err == nil {
+	s.sendTxRequest(ActionStartTransaction, req, func(resp json.RawMessage) {
+		var txResp StartTransactionResponse
+		if err := json.Unmarshal(resp, &txResp); err != nil {
+			return
+		}
 		log.Printf("[%s] Transaction started, server ID: %d", s.serialNumber, txResp.TransactionId)
 
 		// Update our local transaction with the server's transaction ID
@@ -1547,7 +1561,7 @@ func (s *Server) sendStartTransaction(connectorId int, idTag string, meterStart 
 			}
 		}
 		s.mu.Unlock()
-	}
+	})
 }
 
 func (s *Server) sendStopTransaction(transactionId int, idTag string, meterStop int) {
@@ -1558,7 +1572,55 @@ func (s *Server) sendStopTransaction(transactionId int, idTag string, meterStop 
 		Timestamp:     FormatTimestamp(time.Now()),
 	}
 
-	s.sendRequest(ActionStopTransaction, req)
+	s.sendTxRequest(ActionStopTransaction, req, nil)
+}
+
+// sendTxRequest sends a transaction message, or queues it while there is no
+// connection. Without the queue a car plugged in before the charger reached
+// its Central System charged in a session the Central System never heard of.
+func (s *Server) sendTxRequest(action string, payload interface{}, onResult func(json.RawMessage)) {
+	resp, err := s.sendRequest(action, payload)
+	if errors.Is(err, errNotConnected) {
+		s.txQueueMu.Lock()
+		s.txQueue = append(s.txQueue, queuedTx{action: action, payload: payload, onResult: onResult})
+		s.txQueueMu.Unlock()
+		log.Printf("[%s] %s queued until the charger is online", s.serialNumber, action)
+		return
+	}
+	if err != nil {
+		log.Printf("[%s] %s failed: %v", s.serialNumber, action, err)
+		return
+	}
+	if onResult != nil {
+		onResult(resp)
+	}
+}
+
+// flushTxQueue delivers queued transaction messages in order. It runs after
+// a BootNotification is accepted.
+func (s *Server) flushTxQueue() {
+	s.txQueueMu.Lock()
+	queue := s.txQueue
+	s.txQueue = nil
+	s.txQueueMu.Unlock()
+
+	for i, m := range queue {
+		resp, err := s.sendRequest(m.action, m.payload)
+		if errors.Is(err, errNotConnected) {
+			// Offline again: keep the rest, in front of anything newer.
+			s.txQueueMu.Lock()
+			s.txQueue = append(append([]queuedTx{}, queue[i:]...), s.txQueue...)
+			s.txQueueMu.Unlock()
+			return
+		}
+		if err != nil {
+			log.Printf("[%s] queued %s failed: %v", s.serialNumber, m.action, err)
+			continue
+		}
+		if m.onResult != nil {
+			m.onResult(resp)
+		}
+	}
 }
 
 func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessage, error) {
@@ -1566,7 +1628,7 @@ func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessag
 	conn := s.wsConn
 	if conn == nil {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("not connected")
+		return nil, errNotConnected
 	}
 
 	messageId := fmt.Sprintf("%d", atomic.AddInt64(&s.messageIdSeq, 1))
