@@ -4,32 +4,28 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/srcfl/device-simulator/internal/ocpp/ocpptest"
 )
 
-// freeBase finds a port whose next 60 are free on 127.0.0.1.
+// freeBase finds a base whose next 60 ports are free on 127.0.0.1. It draws
+// bases below the ephemeral range, which the kernel hands out in turn and so
+// may have used up near its top.
 func freeBase(t *testing.T) int {
 	t.Helper()
-	for try := 0; try < 50; try++ {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		base := l.Addr().(*net.TCPAddr).Port
-		l.Close()
-		if base > 65000 {
-			continue
-		}
+	for try := 0; try < 100; try++ {
+		base := 20000 + rand.Intn(300)*100
 		ok := true
 		for p := base; p < base+60 && ok; p++ {
-			l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", itoa(p)))
+			l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(p)))
 			if err != nil {
 				ok = false
 				continue
@@ -44,9 +40,7 @@ func freeBase(t *testing.T) int {
 	return 0
 }
 
-func itoa(n int) string { return string(json.Number(json.Number(jsonInt(n)))) }
-
-func jsonInt(n int) string { b, _ := json.Marshal(n); return string(b) }
+func itoa(n int) string { return strconv.Itoa(n) }
 
 type planted struct {
 	samples []plantSample
