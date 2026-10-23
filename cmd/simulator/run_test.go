@@ -99,6 +99,36 @@ func waitStop(t *testing.T, r *headlessRun, within time.Duration) {
 	}
 }
 
+// fuse_preheat_a starts the fuses warm and fuse_ambient_c sets the
+// cabinet; a size the fuse profile does not model is refused. One run at a
+// time: runs share the simulator's settings.
+func TestRunFuseStartsWarm(t *testing.T) {
+	t.Run("warm", func(t *testing.T) {
+		r, _ := runFor(t, runSpec{Name: "warm", Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{230, 230, 230},
+			FuseAmbientC: ptr(30.0), FusePreheatA: &[3]float64{25, 12.5, 0}}})
+		r.site.mu.RLock()
+		heat, ambient := r.site.FuseHeat, r.site.FuseAmbientC
+		r.site.mu.RUnlock()
+		if heat[0].Damage < 0.4 || heat[1].Damage >= heat[0].Damage || heat[2].Damage != 0 || ambient == nil || *ambient != 30 {
+			t.Fatalf("preheated at 25/12.5/0 A in 30 °C: damage %.2f/%.2f/%.2f, ambient %v", heat[0].Damage, heat[1].Damage, heat[2].Damage, ambient)
+		}
+	})
+	t.Run("cold", func(t *testing.T) {
+		r, _ := runFor(t, runSpec{Name: "cold", Site: runSiteSpec{FuseA: 25}})
+		r.site.mu.RLock()
+		defer r.site.mu.RUnlock()
+		if d := r.site.FuseHeat[0].Damage; d != 0 {
+			t.Errorf("a cold start has damage %.2f", d)
+		}
+	})
+	t.Run("10 A gG", func(t *testing.T) {
+		if r, err := startRun(runSpec{Name: "ten", Site: runSiteSpec{FuseA: 10}}, freeBase(t), t.TempDir()); err == nil {
+			r.end()
+			t.Error("a 10 A gG fuse was accepted")
+		}
+	})
+}
+
 // "meter" names the site meter in ports.json, so no device may take it.
 func TestRunRefusesTheMeterID(t *testing.T) {
 	spec := runSpec{Name: "meter-id", Site: runSiteSpec{FuseA: 25},

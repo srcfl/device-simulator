@@ -53,6 +53,12 @@ type runSiteSpec struct {
 	FuseA       int        `json:"fuse_a"`
 	FuseProfile string     `json:"fuse_profile,omitempty"` // default iec_gg
 	HouseW      [3]float64 `json:"house_w"`                // per phase
+	// FuseAmbientC is the cabinet's air around the fuses; omitted is 25 °C.
+	FuseAmbientC *float64 `json:"fuse_ambient_c,omitempty"`
+	// FusePreheatA is a current per phase the fuses have carried long
+	// enough to settle, so the run starts warm, as a house does in the
+	// evening; omitted starts cold.
+	FusePreheatA *[3]float64 `json:"fuse_preheat_a,omitempty"`
 }
 
 // runDeviceSpec is one device, by the device-drivers driver it emulates.
@@ -172,6 +178,11 @@ func runHeadless(args []string) int {
 
 // startRun builds the house and starts serving, recording and the timeline.
 func startRun(spec runSpec, base int, out string) (*headlessRun, error) {
+	// A refused spec changes nothing: checked before the run takes the
+	// simulator's settings.
+	if _, err := runFuseProfile(spec.Site); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return nil, err
 	}
@@ -214,7 +225,23 @@ func startRun(spec runSpec, base int, out string) (*headlessRun, error) {
 	return r, nil
 }
 
+// runFuseProfile is the spec's fuse profile, checked with its size.
+func runFuseProfile(site runSiteSpec) (string, error) {
+	profile := site.FuseProfile
+	if profile == "" {
+		profile = FuseProfileIecGg
+	}
+	if _, ok := fuseProfiles[profile]; !ok {
+		return "", fmt.Errorf("fuse profile %q", profile)
+	}
+	return profile, checkFuse(site.FuseA, profile)
+}
+
 func (r *headlessRun) build() error {
+	fuseProfile, err := runFuseProfile(r.spec.Site)
+	if err != nil {
+		return err
+	}
 	var members []int
 	for _, d := range r.spec.Devices {
 		if d.ID == "" || r.devs[d.ID] != nil {
@@ -243,18 +270,21 @@ func (r *headlessRun) build() error {
 	}
 	r.site = site
 	r.meter = getSimulator(site.MeterID)
-	fuseProfile := r.spec.Site.FuseProfile
-	if fuseProfile == "" {
-		fuseProfile = FuseProfileIecGg
-	}
-	if _, ok := fuseProfiles[fuseProfile]; !ok {
-		return fmt.Errorf("fuse profile %q", fuseProfile)
-	}
 	site.mu.Lock()
 	if r.spec.Site.FuseA > 0 {
 		site.FuseSize = r.spec.Site.FuseA
 	}
 	site.FuseProfile = fuseProfile
+	site.FuseAmbientC = r.spec.Site.FuseAmbientC
+	if pre := r.spec.Site.FusePreheatA; pre != nil {
+		for i, a := range pre {
+			site.FuseHeat[i].AmbientC = site.FuseAmbientC
+			if err := fuseProfiles[fuseProfile].Preheat(&site.FuseHeat[i], a, float64(site.FuseSize)); err != nil {
+				site.mu.Unlock()
+				return fmt.Errorf("fuse_preheat_a L%d: %w", i+1, err)
+			}
+		}
+	}
 	site.PhaseFactors = PhaseFactors{L1: 1.0 / 3, L2: 1.0 / 3, L3: 1.0 / 3}
 	site.LoadScenario = "static"
 	site.mu.Unlock()

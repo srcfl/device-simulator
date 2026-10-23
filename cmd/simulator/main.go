@@ -4166,8 +4166,12 @@ func startSiteAggregation(site *Site) {
 
 	log.Printf("[Site %d] Aggregation started", site.ID)
 
+	// Read here, not in the loop: a headless run sets the tick before it
+	// builds its site, and the next run may set it again while this loop
+	// winds down.
+	interval := getSiteTickInterval()
 	go func() {
-		ticker := time.NewTicker(getSiteTickInterval())
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		lastTick := time.Now()
 

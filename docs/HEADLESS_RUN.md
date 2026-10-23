@@ -49,8 +49,11 @@ output directory says where each device is.
 - A hybrid inverter's battery follows its EMS registers (`ems_control`, on by
   default in a run).
 - The site meter is an SDM630 behind a fuse per phase (`fuse_a`,
-  `fuse_profile` from package `fuse`). Its id is `meter`, which no device
-  may take.
+  `fuse_profile` from package `fuse`: a thermal model, gG for 16-63 A). Its
+  id is `meter`, which no device may take. `fuse_ambient_c` is the
+  cabinet's air (default 25 °C); `fuse_preheat_a`, a current per phase the
+  fuses have carried long enough to settle, starts the run warm instead of
+  cold. A size the profile does not model is refused.
 - A charger dials `ocpp_url`; `user:password@` goes out as Basic auth.
   `car_max_a` and `car_phases` are what the car takes.
 
@@ -77,6 +80,6 @@ apply it now, or `{"label": "..."}` to `/api/run/mark`.
 | File | What |
 |---|---|
 | `ports.json` | the HTTP port, and each device's Modbus port and unit or OCPP identity |
-| `plant.jsonl` | a sample a second: `phase_w` and `phase_a` through each fuse (+ into the site), `meter_w`, `fuse` (`damage`, `blown`, `rating_a`), and each device's state; plus every event (`event`) and mark (`mark`) as it happened |
+| `plant.jsonl` | a sample a second: `phase_w` and `phase_a` through each fuse (+ into the site), `meter_w`, `fuse` (`damage`, the element's way from ambient to melting, 0 to 1; `blown`; `rating_a`), and each device's state; plus every event (`event`) and mark (`mark`) as it happened |
 | `ocpp-<id>.jsonl` | every OCPP-J frame a charger read (`cs->cp`) or wrote (`cp->cs`), with its time |
 | `result.json` | at the end: samples, events, whether a fuse blew |
