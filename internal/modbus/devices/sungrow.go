@@ -58,7 +58,9 @@ func SungrowRegisters() *modbus.RegisterSet {
 		// Serial Number (STR at address 4989, 10 registers = 20 chars)
 		{Address: 4989, Name: "Serial Number", SemanticName: "serial_number", Description: "Device serial number", Unit: "", Category: "pv", DataType: modbus.STR, Scale: 1.0, Words: 10, Endianness: modbus.Big},
 	}, map[uint16]int64{
-		5000:  100,
+		// Defaults are engineering values, in each register's unit: an
+		// SH10RT is rated 10 kW and charges and discharges at 5 kW.
+		5000:  10,
 		5241:  50,
 		5016:  0,
 		13021: 0,
@@ -71,8 +73,8 @@ func SungrowRegisters() *modbus.RegisterSet {
 		13051: 0,
 		13073: 10000,
 		13086: 170,
-		33046: 500,
-		33047: 500,
+		33046: 5,
+		33047: 5,
 		13057: 100, // Battery Max SoC (100.0%)
 		13058: 0,
 		13036: 150000,

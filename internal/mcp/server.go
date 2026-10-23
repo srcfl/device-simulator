@@ -402,12 +402,14 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 					"serial":                schemaString("Simulator serial"),
 					"ocpp_url":              schemaString("OCPP URL"),
 					"battery_capacity_kwh": schemaNumber("Battery capacity in kWh"),
+					"ems_control":          schemaBoolean("Modbus inverter: the battery follows the EMS registers (13049-13051 on Sungrow) like a real hybrid"),
+					"command_response_s":   schemaNumber("Seconds the device takes to act on an accepted command (battery after an EMS write, OCPP charger after a profile); overrides the model's value"),
 				}, []string{"id"}),
 			},
 			Method:       http.MethodPost,
 			PathTemplate: "/api/simulators/{id}/config",
 			PathParams:   []string{"id"},
-			BodyParams:   []string{"slave_id", "serial", "ocpp_url", "battery_capacity_kwh"},
+			BodyParams:   []string{"slave_id", "serial", "ocpp_url", "battery_capacity_kwh", "ems_control", "command_response_s"},
 		},
 		{
 			Tool: Tool{
@@ -892,6 +894,47 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 			},
 			Method:       http.MethodGet,
 			PathTemplate: "/api/load-scenarios",
+		},
+		{
+			Tool: Tool{
+				Name:        "run.status",
+				Description: "Headless run only: name, elapsed time, events and samples so far",
+				InputSchema: schemaObject(nil, nil),
+			},
+			Method:       http.MethodGet,
+			PathTemplate: "/api/run",
+		},
+		{
+			Tool: Tool{
+				Name:        "run.event",
+				Description: "Headless run only: change the house now (do: mark, loads, pv, soc, plug, car, offline, online, reconnect, silence, meter_late, meter_glitch, signed_currents, load_balancer, stop)",
+				InputSchema: schemaObject(map[string]interface{}{
+					"do":     schemaString("Event kind"),
+					"device": schemaString("Device id from the run's spec"),
+					"label":  schemaString("Mark label"),
+					"w":      schemaArray("House load per phase in watts", "number"),
+					"a":      schemaArray("House load per phase in amperes", "number"),
+					"pv_w":   schemaNumber("PV power"),
+					"pct":    schemaNumber("State of charge"),
+					"on":     schemaBoolean("Car plugged in"),
+					"max_a":  schemaNumber("Most the car draws per phase"),
+					"phases": schemaInteger("Phases the car charges on"),
+					"for_s":  schemaNumber("How long the device stays offline or disconnected"),
+				}, []string{"do"}),
+			},
+			Method:       http.MethodPost,
+			PathTemplate: "/api/run/event",
+			BodyParams:   []string{"do", "device", "label", "w", "a", "pv_w", "pct", "on", "max_a", "phases", "for_s"},
+		},
+		{
+			Tool: Tool{
+				Name:        "run.mark",
+				Description: "Headless run only: put a named mark in the record",
+				InputSchema: schemaObject(map[string]interface{}{"label": schemaString("Mark label")}, []string{"label"}),
+			},
+			Method:       http.MethodPost,
+			PathTemplate: "/api/run/mark",
+			BodyParams:   []string{"label"},
 		},
 		{
 			Tool: Tool{

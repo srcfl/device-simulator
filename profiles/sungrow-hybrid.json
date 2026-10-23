@@ -5,6 +5,10 @@
   "device_type": "sungrow",
   "zap_verified": true,
   "register_set_name": "sungrow",
+  "driver_id": "sungrow",
+  "model": {
+    "command_response_s": 2
+  },
   "defaults": {
     "5016": 0,
     "13021": 0,
@@ -17,8 +21,8 @@
     "13051": 0,
     "13073": 10000,
     "13086": 170,
-    "33046": 500,
-    "33047": 500,
+    "33046": 5,
+    "33047": 5,
     "5241": 50,
     "13036": 150000,
     "13040": 180000,

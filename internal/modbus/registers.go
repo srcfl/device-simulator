@@ -187,7 +187,7 @@ func init() {
 // DefaultValues contains the default register values
 var DefaultValues = map[uint16]int64{
 	// Device Ratings
-	5000: 100,
+	5000: 10, // Nominal Output Power (10 kW; defaults are engineering values)
 	5241: 50, // Grid Frequency (50.00 Hz, scaled by 100)
 
 	// Power Flow Registers
@@ -216,8 +216,8 @@ var DefaultValues = map[uint16]int64{
 	13051: 0,     // Battery Setpoint
 	13073: 10000, // PV Command Power
 	13086: 170,   // Export Limit Enable (170=Enabled)
-	33046: 500,   // Max Charge Power (5kW)
-	33047: 500,   // Max Discharge Power (5kW)
+	33046: 5,     // Max Charge Power (5kW)
+	33047: 5,     // Max Discharge Power (5kW)
 	13057: 100, // Battery Max SoC (100.0%)
 	13058: 0,     // Battery Min SoC (0.0%)
 

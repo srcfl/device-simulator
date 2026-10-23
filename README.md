@@ -90,7 +90,7 @@ All simulators are accessible through a unified API:
 ```
 GET  /api/simulators                        # List all simulators
 GET  /api/simulators/{id}                   # Get simulator details
-POST /api/simulators/{id}/config            # Update serial/slave ID
+POST /api/simulators/{id}/config            # Serial, slave ID, OCPP URL, ems_control, command_response_s
 GET  /api/simulators/{id}/registers         # Get all registers
 POST /api/simulators/{id}/registers/{addr}  # Write register value
 GET  /api/simulators/{id}/logs              # Get Modbus operation logs
@@ -102,6 +102,12 @@ POST /api/simulators/{id}/automation/stop   # Stop data generation
 POST /api/simulators/{id}/automation/config # Configure time multiplier
 GET  /health                                # Health check (always 42... I mean OK)
 ```
+
+## Headless runs
+
+`simulator run -spec house.json -port-base 18700 -out run/` builds one house
+from a JSON spec, runs a timeline of events and records it once a second, for
+an EMS's automated tests. See [docs/HEADLESS_RUN.md](docs/HEADLESS_RUN.md).
 
 ## Configuration
 

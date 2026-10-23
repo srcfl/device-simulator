@@ -29,6 +29,8 @@ type SimulatorState struct {
 	BatteryCapacityKWh float64         `json:"battery_capacity_kwh"`
 	Profile            string          `json:"profile"`
 	OCPPURL            string          `json:"ocpp_url"`
+	EMSControl         bool            `json:"ems_control,omitempty"`
+	CommandResponseS   *float64        `json:"command_response_s,omitempty"`
 	Automation         AutomationState `json:"automation"`
 }
 
