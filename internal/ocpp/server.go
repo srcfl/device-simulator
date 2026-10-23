@@ -67,6 +67,8 @@ type Connector struct {
 	CurrentPower float64 `json:"currentPower"`
 	EnergyWh     float64 `json:"energyWh"`
 	Phases       int     `json:"phases"` // 1 or 3: phases the car draws on
+
+	offerSince time.Time // when the offer last rose from zero
 }
 
 // Transaction represents an active charging transaction
@@ -137,8 +139,11 @@ type Server struct {
 	phaseW    [3]float64 // what the chargers draw on L1, L2, L3
 
 	// Simulation control
-	carMaxA      float64 // most the car draws per phase; 0 = whatever is offered
+	carMaxA       float64       // most the car draws per phase; 0 = whatever is offered
+	loadBalancerA float64       // the charger's own cap per phase; 0 = none
+	startupDelay  time.Duration // from an offer rising from zero to the car drawing
 	carPhases    int     // phases the car charges on; 0 = as many as offered
+	wiredPhases  int     // phases the charger is wired on (from L1); 0 = three
 	evConnected  bool    // Whether an EV is plugged in
 	nextTxId     int     // Counter for local transaction IDs
 }
@@ -221,6 +226,53 @@ func (s *Server) SetCar(maxA float64, phases int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.carMaxA, s.carPhases = maxA, phases
+}
+
+// SetLoadBalancer caps what the charger gives per phase, as a charger with
+// its own load balancer (Easee) does whatever the Central System offers.
+// Zero turns it off.
+func (s *Server) SetLoadBalancer(a float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loadBalancerA = a
+}
+
+// SetWiredPhases wires the charger on its first n phases from L1; 0 or 3
+// is three. A one-phase charger gives an order's current on L1, whatever
+// numberPhases says, and at most its rating there.
+func (s *Server) SetWiredPhases(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wiredPhases = n
+}
+
+// WiredOnOnePhase says whether SetWiredPhases(1) wired the charger on L1.
+func (s *Server) WiredOnOnePhase() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.wiredLocked() == 1
+}
+
+func (s *Server) wiredLocked() int {
+	if s.wiredPhases > 0 && s.wiredPhases < 3 {
+		return s.wiredPhases
+	}
+	return 3
+}
+
+// SetStartupDelay is how long the car takes to draw after an offer rises
+// from zero.
+func (s *Server) SetStartupDelay(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startupDelay = d
+}
+
+func (s *Server) loadBalancedLocked(w float64, phases int) float64 {
+	if s.loadBalancerA <= 0 {
+		return w
+	}
+	return math.Min(w, s.loadBalancerA*float64(phases)*s.averagePhaseVoltageLocked())
 }
 
 // carDrawLocked is what the car takes of an offer of w watts on phases.
@@ -1466,6 +1518,8 @@ func (s *Server) evaluateProfile(profile *ChargingProfile, now time.Time, txStar
 	if activePeriod.NumberPhases != nil && *activePeriod.NumberPhases > 0 {
 		phases = *activePeriod.NumberPhases
 	}
+	// A current flows on the phases the charger has.
+	phases = min(phases, s.wiredLocked())
 	// Convert to watts
 	unit := strings.ToUpper(strings.TrimSpace(schedule.ChargingRateUnit))
 	switch unit {
@@ -1578,6 +1632,11 @@ func (s *Server) computeEffectiveLocked(connectorId int, now time.Time) (float64
 	if bestLimit >= 0 && bestPhases == 1 && s.phaseSwitchingLocked() {
 		phases = 1
 		maxW /= 3
+	}
+	// A charger wired on fewer phases draws on those; max_kw is its rating
+	// as wired.
+	if w := s.wiredLocked(); w < phases {
+		phases = w
 	}
 
 	// Cap at hardware max
@@ -2471,18 +2530,34 @@ func (s *Server) GenerateValues(simTime time.Time) {
 	// Simulate power consumption for active transactions
 	var totalPower float64
 	var phaseW [3]float64
+	offered := map[int]bool{} // connectors in a session that may draw
 	for _, tx := range s.transactions {
 		conn := s.connectors[tx.ConnectorID]
 		if conn.Status == StatusCharging || conn.Status == StatusSuspendedEVSE {
-			powerW, phases := s.carDrawLocked(s.computeEffectiveLocked(tx.ConnectorID, simTime))
+			offered[tx.ConnectorID] = true
+			offerW, offerPhases := s.computeEffectiveLocked(tx.ConnectorID, simTime)
+			offerW = s.loadBalancedLocked(offerW, offerPhases)
+			powerW, phases := s.carDrawLocked(offerW, offerPhases)
 			conn.Phases = phases
+			// The car takes a while to start drawing after an offer rises
+			// from zero; the charger meanwhile reports Charging at 0 W.
+			if offerW > 0 {
+				if conn.offerSince.IsZero() {
+					conn.offerSince = simTime
+				}
+				if simTime.Sub(conn.offerSince) < s.startupDelay {
+					powerW = 0
+				}
+			} else {
+				conn.offerSince = time.Time{}
+			}
 
-			if powerW <= 0 && conn.Status == StatusCharging {
+			if offerW <= 0 && conn.Status == StatusCharging {
 				// Power dropped to 0 — transition to SuspendedEVSE
 				conn.Status = StatusSuspendedEVSE
 				conn.CurrentPower = 0
 				statusChanges = append(statusChanges, statusChange{tx.ConnectorID, StatusSuspendedEVSE})
-			} else if powerW > 0 && conn.Status == StatusSuspendedEVSE {
+			} else if offerW > 0 && conn.Status == StatusSuspendedEVSE {
 				// Power restored — transition back to Charging
 				conn.Status = StatusCharging
 				conn.CurrentPower = powerW
@@ -2504,6 +2579,13 @@ func (s *Server) GenerateValues(simTime time.Time) {
 			energyDelta := conn.CurrentPower / 3600.0
 			conn.EnergyWh += energyDelta
 			tx.MeterNow = int(conn.EnergyWh)
+		}
+	}
+	// A connector out of session waits out the startup delay again on its
+	// next offer.
+	for id, conn := range s.connectors {
+		if !offered[id] && conn != nil {
+			conn.offerSince = time.Time{}
 		}
 	}
 

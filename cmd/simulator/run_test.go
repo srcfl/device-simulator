@@ -129,6 +129,17 @@ func TestRunFuseStartsWarm(t *testing.T) {
 	})
 }
 
+// wired_phases reaches the charger.
+func TestRunWiresAOnePhaseCharger(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25},
+		Devices: []runDeviceSpec{{ID: "cp", Driver: "ocpp", OCPPURL: "ws://127.0.0.1:9/", MaxKW: 3.68, WiredPhases: 1}}}
+	r, _ := runFor(t, spec)
+	srv := r.devs["cp"].OCPPServer
+	if srv == nil || !srv.WiredOnOnePhase() {
+		t.Fatal("the charger is not wired on one phase")
+	}
+}
+
 // "meter" names the site meter in ports.json, so no device may take it.
 func TestRunRefusesTheMeterID(t *testing.T) {
 	spec := runSpec{Name: "meter-id", Site: runSiteSpec{FuseA: 25},
@@ -239,4 +250,136 @@ func TestRunChargerReconnects(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
+func randomSpec(seed int64) runSpec {
+	return runSpec{Name: "r", Site: runSiteSpec{FuseA: 20, HouseW: [3]float64{690, 690, 690}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", PVW: 3000},
+			{ID: "garage", Driver: "ocpp", OCPPURL: "ws://127.0.0.1:1/"}},
+		Random: &runRandom{Seed: seed, DurationS: 1800}}
+}
+
+// A seed gives the same timeline every time, within the house's bounds.
+func TestRandomTimelinesAreSeededAndBounded(t *testing.T) {
+	a, b, c := randomSpec(7), randomSpec(7), randomSpec(8)
+	ea, eb, ec := randomize(&a), randomize(&b), randomize(&c)
+	ja, _ := json.Marshal(ea)
+	jb, _ := json.Marshal(eb)
+	jc, _ := json.Marshal(ec)
+	if !bytes.Equal(ja, jb) || bytes.Equal(ja, jc) {
+		t.Fatal("seed 7 twice differs, or seed 8 is the same")
+	}
+	if *a.Devices[1].CommandResponseS != *b.Devices[1].CommandResponseS || a.Site.SignedPhaseCurrents == nil {
+		t.Fatal("the seed did not fix the devices' timing")
+	}
+	if len(ea) < 20 {
+		t.Fatalf("%d events in 30 min", len(ea))
+	}
+	kinds := map[string]int{}
+	for seed := int64(1); seed <= 20; seed++ {
+		s := randomSpec(seed)
+		for _, ev := range randomize(&s) {
+			kinds[ev.Do]++
+			if ev.AtS < 30 || ev.AtS > 1800 {
+				t.Fatalf("seed %d: event at %.0f s outside the run", seed, ev.AtS)
+			}
+			if ev.A != nil {
+				for _, x := range ev.A {
+					if x < 0.3 || x > 18 {
+						t.Fatalf("seed %d: house %.1f A on a 20 A fuse", seed, x)
+					}
+				}
+			}
+		}
+	}
+	for _, k := range []string{"loads", "pv", "soc", "car", "silence", "offline", "reconnect", "meter_late", "meter_glitch", "signed_currents", "load_balancer"} {
+		if kinds[k] == 0 {
+			t.Errorf("20 seeds never drew %s", k)
+		}
+	}
+	only := randomSpec(1)
+	only.Random.Kinds = []string{"meter_glitch"}
+	for _, ev := range randomize(&only) {
+		if ev.Do != "meter_glitch" {
+			t.Fatalf("kinds filter let %s through", ev.Do)
+		}
+	}
+}
+
+// The meter's faults reach what an EMS reads: a late meter stands still,
+// a glitch puts 0 W in the total once, and signed currents carry the sign.
+// A later silence or outage is not ended by an earlier one's timer.
+func TestOverlappingFaultsKeepTheLatest(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", EMSControl: ptr(false)}}}
+	r, _ := runFor(t, spec)
+	inv := r.devs["inv"]
+	for _, ev := range []runEvent{{Do: "silence", Device: "inv", ForS: 0.3}, {Do: "silence", Device: "inv"}} {
+		if err := r.apply(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(600 * time.Millisecond)
+	if !inv.Server.Silent() {
+		t.Fatal("an indefinite silence ended at the earlier silence's deadline")
+	}
+	for _, ev := range []runEvent{{Do: "online", Device: "inv"}, {Do: "offline", Device: "inv", ForS: 0.3}, {Do: "offline", Device: "inv", ForS: 5}} {
+		if err := r.apply(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(600 * time.Millisecond)
+	if isRunning(inv) {
+		t.Fatal("a 5 s outage ended at the earlier outage's deadline")
+	}
+}
+
+// Energy that flows while the meter's readings stand still shows on its
+// counters once they move again.
+func TestLateMeterKeepsTheEnergy(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{3000, 3000, 3000}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", EMSControl: ptr(false)}}}
+	r, _ := runFor(t, spec)
+	kwh := func() float64 { return getSemanticValue(r.meter, "total_import") }
+	ocpptest.WaitFor(t, "import on the meter", 5*time.Second, func() bool { return getSemanticValue(r.meter, "meter_power") > 8000 })
+	t0, e0 := time.Now(), kwh()
+	if err := r.apply(runEvent{Do: "meter_late", ForS: 2}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Second)
+	w := getSemanticValue(r.meter, "meter_power")
+	got, want := kwh()-e0, w/1000*time.Since(t0).Hours()
+	if got < 0.8*want || got > 1.2*want {
+		t.Fatalf("%.5f kWh counted over %v at %.0f W, want about %.5f", got, time.Since(t0).Round(time.Millisecond), w, want)
+	}
+}
+
+func TestRunMeterFaults(t *testing.T) {
+	spec := runSpec{Name: "t", Site: runSiteSpec{FuseA: 25, HouseW: [3]float64{690, 690, 690}},
+		Devices: []runDeviceSpec{{ID: "inv", Driver: "sungrow", PVW: 5000, EMSControl: ptr(false)}}}
+	r, _ := runFor(t, spec)
+	meterW := func() float64 { return getSemanticValue(r.meter, "meter_power") }
+	l1A := func() float64 { return getSemanticValue(r.meter, "meter_l1_current") }
+	ocpptest.WaitFor(t, "export on the meter", 5*time.Second, func() bool { return meterW() < -2000 })
+	if l1A() < 0 {
+		t.Fatalf("an SDM630 reports magnitudes, got %v A", l1A())
+	}
+	if err := r.apply(runEvent{Do: "signed_currents", On: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	ocpptest.WaitFor(t, "a signed current", 3*time.Second, func() bool { return l1A() < 0 })
+
+	if err := r.apply(runEvent{Do: "meter_late", ForS: 2}); err != nil {
+		t.Fatal(err)
+	}
+	r.setLoads([3]float64{3000, 3000, 3000})
+	time.Sleep(1200 * time.Millisecond)
+	if w := meterW(); w > -2000 {
+		t.Fatalf("a late meter moved to %v W", w)
+	}
+	ocpptest.WaitFor(t, "the meter again", 5*time.Second, func() bool { return meterW() > 0 })
+
+	if err := r.apply(runEvent{Do: "meter_glitch"}); err != nil {
+		t.Fatal(err)
+	}
+	ocpptest.WaitFor(t, "a 0 W total", 3*time.Second, func() bool { return meterW() == 0 && getSemanticValue(r.meter, "meter_l1_power") > 0 })
+	ocpptest.WaitFor(t, "the total again", 3*time.Second, func() bool { return meterW() > 0 })
+}

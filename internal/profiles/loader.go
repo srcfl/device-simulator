@@ -48,6 +48,15 @@ type ModelParams struct {
 	// command: a hybrid's battery after an EMS write, an OCPP charger's
 	// output after a charging profile.
 	CommandResponseS float64 `json:"command_response_s,omitempty"`
+	// StartupDelayS is how long a car on an OCPP charger takes to draw
+	// after an offer rises from zero.
+	StartupDelayS float64 `json:"startup_delay_s,omitempty"`
+	// LoadBalancerA is an OCPP charger's own cap per phase, whatever the
+	// Central System offers (Easee's load balancer). Zero is none.
+	LoadBalancerA float64 `json:"load_balancer_a,omitempty"`
+	// SignedPhaseCurrents: a meter's phase currents carry the sign of their
+	// phase's power. An SDM630 reports magnitudes.
+	SignedPhaseCurrents bool `json:"signed_phase_currents,omitempty"`
 }
 
 // Profile defines a device simulation profile
