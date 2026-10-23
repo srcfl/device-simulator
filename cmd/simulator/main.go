@@ -2643,12 +2643,21 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		}
 		site.BaseLoadW = *config.BaseLoadW
 	}
-	if config.FuseSize != nil {
-		if err := checkFuseSize(*config.FuseSize); err != nil {
+	if config.FuseSize != nil || config.FuseProfile != nil {
+		size, profile := site.FuseSize, site.FuseProfile
+		if config.FuseSize != nil {
+			size = *config.FuseSize
+		}
+		if config.FuseProfile != nil {
+			profile = *config.FuseProfile
+		}
+		if err := checkFuse(size, profile); err != nil {
 			site.mu.Unlock()
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+	}
+	if config.FuseSize != nil {
 		site.FuseSize = *config.FuseSize
 		site.FuseDamage = PhaseLoads{}
 		site.FuseHeat = [3]fuse.Phase{}

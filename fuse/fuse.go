@@ -74,7 +74,7 @@ type Gate struct {
 // holder-to-ambient (they add up to 1). Each Tau is that body's heat
 // capacity times its own outgoing resistance; they are parameters, not the
 // system's modes, which come out of the coupled ladder (at 25 A 0.12 s,
-// 9.4 s and 1,315 s).
+// 9.4 s and 1,308 s).
 type Thermal struct {
 	UMin       float64 // steady melting multiple at the reference ambient
 	Re, TauE   float64 // element
@@ -129,7 +129,18 @@ type Profile struct {
 // parameters are fitted, least squares on log time from cold at 20 °C, to
 // ABB's melting times at 1.5, 1.6, 2, 2.5, 3, 4, 5, 8 and 10 × In, the
 // current that melts in 0.01 s and the curve's start at 7,990 s; the fit
-// keeps every gate. Residuals: rms 0.08-0.095 decades, at most 0.17.
+// keeps every gate. At those eleven points the residuals are rms
+// 0.08-0.095 decades, at most 0.17. Against all 48 vertices of each ABB
+// curve they are rms 0.13-0.20, at most 0.22-0.46: the model is too slow
+// at 1.6-1.95 × (16 A at 1.82 ×: ABB 150 s, model 447 s) and too fast at
+// 2.0-2.5 × (down to -0.27). Where the element's quasi-steady rise over
+// the body reaches the melting rise, u = UMin/√(Re + Rb) = 2.02-2.09 × In,
+// the body stage takes over from the holder and the curve drops steeply:
+// its log-log slope between 1.9 and 2.3 × reaches -18 to -52, ABB's -7 to
+// -11. Fitting all 48 vertices reaches only rms 0.12-0.15, so it is the
+// three-body ladder's shape. A simulation judging overloads at 1.9-2.1 ×
+// In sits on that step: a small change of current there moves the melting
+// time a lot.
 // Letting the element's resistance rise with temperature (silver, 0.0038
 // per K) made the fit worse (rms 0.11-0.14), so it is left out.
 var gg = []struct {
@@ -141,22 +152,22 @@ var gg = []struct {
 	abb                          [9]float64
 	abb001A, abbStartA           float64 // A melting in 0.01 s; A at the curve's 7,990 s start
 }{
-	{16, 33, 65, 85, 150, 300, 1000, 1.428717, 0.073252, 0.074250, 0.500994, 7.03215, 1616.13,
-		[9]float64{3546.8, 1165.2, 53.1, 9.445, 3.29, 0.8381, 0.3328, 0.0554, 0.0246}, 208.1, 22.9},
-	{20, 42, 85, 110, 200, 500, 1800, 1.414377, 0.070387, 0.091390, 0.513906, 9.47446, 1241.79,
-		[9]float64{2592.9, 819.5, 57.8, 12.3, 4.58, 1.177, 0.4498, 0.0711, 0.0318}, 284.5, 28.3},
-	{25, 52, 110, 150, 260, 1000, 3000, 1.395152, 0.073492, 0.128142, 0.528300, 8.82109, 1302.24,
-		[9]float64{2341.3, 821.6, 58.7, 11.8, 4.222, 1.098, 0.445, 0.0847, 0.0419}, 406.9, 34.9},
-	{32, 75, 150, 200, 350, 1800, 5000, 1.391843, 0.075659, 0.167797, 0.532303, 10.60028, 1501.37,
-		[9]float64{2581.2, 970.5, 72.9, 14.1, 5.056, 1.311, 0.5272, 0.1026, 0.0519}, 591.8, 44.6},
-	{35, 82.47, 164.94, 222.22, 387.17, 2209.86, 6331.18, 1.391721, 0.075520, 0.169985, 0.532484, 10.92192, 1591.95, // gates interpolated
-		[9]float64{2680.3, 1049.8, 76.5, 14.6, 5.206, 1.342, 0.5387, 0.1044, 0.0527}, 650.8, 48.8},
-	{40, 95, 190, 260, 450, 3000, 9000, 1.394819, 0.073959, 0.177486, 0.530528, 11.82141, 1606.21,
-		[9]float64{2778.0, 1066.7, 80.2, 15.8, 5.714, 1.494, 0.5982, 0.1149, 0.0577}, 761.5, 55.9},
-	{50, 125, 250, 350, 610, 5000, 16000, 1.409631, 0.071707, 0.197219, 0.525392, 16.77180, 1951.30,
-		[9]float64{3566.2, 1471.4, 121.6, 23.2, 8.242, 2.115, 0.8293, 0.1445, 0.0696}, 1000.8, 70.8},
-	{63, 160, 320, 450, 820, 9000, 27000, 1.314812, 0.063486, 0.165089, 0.603945, 19.24608, 1551.42,
-		[9]float64{1798.4, 910.0, 134.6, 29.3, 9.987, 2.193, 0.7666, 0.1183, 0.0563}, 1151.8, 83.0},
+	{16, 33, 65, 85, 150, 300, 1000, 1.429959, 0.073378, 0.074249, 0.500174, 7.03102, 1604.18,
+		[9]float64{3546.8, 1165.2, 53.1, 9.445, 3.29, 0.8381, 0.3328, 0.0554, 0.0246}, 208.1, 22.918},
+	{20, 42, 85, 110, 200, 500, 1800, 1.412945, 0.070246, 0.091392, 0.514825, 9.47660, 1251.63,
+		[9]float64{2592.9, 819.5, 57.8, 12.3, 4.58, 1.177, 0.4498, 0.0711, 0.0318}, 284.5, 28.272},
+	{25, 52, 110, 150, 260, 1000, 3000, 1.396178, 0.073599, 0.128139, 0.527645, 8.81978, 1295.49,
+		[9]float64{2341.3, 821.6, 58.7, 11.8, 4.222, 1.098, 0.445, 0.0847, 0.0419}, 406.9, 34.925},
+	{32, 75, 150, 200, 350, 1800, 5000, 1.392001, 0.075676, 0.167797, 0.532203, 10.60002, 1500.19,
+		[9]float64{2581.2, 970.5, 72.9, 14.1, 5.056, 1.311, 0.5272, 0.1026, 0.0519}, 591.8, 44.605},
+	{35, 82.47, 164.94, 222.22, 387.17, 2209.86, 6331.18, 1.390453, 0.075385, 0.169990, 0.533283, 10.92408, 1601.99, // gates interpolated
+		[9]float64{2680.3, 1049.8, 76.5, 14.6, 5.206, 1.342, 0.5387, 0.1044, 0.0527}, 650.8, 48.759},
+	{40, 95, 190, 260, 450, 3000, 9000, 1.396104, 0.074093, 0.177481, 0.529719, 11.81891, 1595.82,
+		[9]float64{2778.0, 1066.7, 80.2, 15.8, 5.714, 1.494, 0.5982, 0.1149, 0.0577}, 761.5, 55.948},
+	{50, 125, 250, 350, 610, 5000, 16000, 1.409864, 0.071730, 0.197218, 0.525250, 16.77090, 1948.86,
+		[9]float64{3566.2, 1471.4, 121.6, 23.2, 8.242, 2.115, 0.8293, 0.1445, 0.0696}, 1000.8, 70.810},
+	{63, 160, 320, 450, 820, 9000, 27000, 1.314326, 0.063439, 0.165090, 0.604208, 19.24866, 1554.48,
+		[9]float64{1798.4, 910.0, 134.6, 29.3, 9.987, 2.193, 0.7666, 0.1183, 0.0563}, 1151.8, 82.971},
 }
 
 var abbMultiples = [9]float64{1.5, 1.6, 2, 2.5, 3, 4, 5, 8, 10}
@@ -396,9 +407,11 @@ func (p Profile) Step(ph *Phase, amps, ratingA, dt float64) Status {
 	}
 	u := math.Abs(amps) / ratingA
 	st := Status{Ratio: u}
-	if math.IsInf(u, 1) {
+	if math.IsInf(u*u, 1) {
+		// A current whose square overflows (or an infinite one) melts the
+		// fuse at once; the ratio stays finite for JSON.
 		ph.Blown, ph.Damage = true, 1
-		st.Damage = 1
+		st.Ratio, st.Damage = math.MaxFloat64, 1
 		return st
 	}
 	melt := b.sys.meltRise(ambient)
@@ -423,12 +436,16 @@ func (p Profile) Step(ph *Phase, amps, ratingA, dt float64) Status {
 
 // Preheat puts the phase in the steady state of a current held for ever in
 // its ambient, as a fuse that has carried the evening's load: a scenario
-// that starts mid-evening starts warm, not cold. It refuses a current that
-// would melt the fuse before reaching that state, and anything Step
-// refuses, leaving the phase as it was.
+// that starts mid-evening starts warm, not cold. It refuses a blown fuse
+// (clear Blown and Theta to replace one), a current that would melt the
+// fuse before reaching that state, and anything Step refuses, leaving the
+// phase as it was.
 func (p Profile) Preheat(ph *Phase, amps, ratingA float64) error {
 	if len(p.Bands) == 0 {
 		return fmt.Errorf("%s has no fuse model", p.ID)
+	}
+	if ph.Blown {
+		return fmt.Errorf("the fuse is blown")
 	}
 	if st := p.Step(&Phase{AmbientC: ph.AmbientC}, amps, ratingA, 0); st.Invalid != "" {
 		return fmt.Errorf("%s", st.Invalid)
@@ -439,7 +456,7 @@ func (p Profile) Preheat(ph *Phase, amps, ratingA float64) error {
 	if inf[0] >= b.sys.meltRise(ph.ambient()) {
 		return fmt.Errorf("%.3g × %g A melts the fuse before it settles", u, ratingA)
 	}
-	ph.Theta, ph.Blown = inf, false
+	ph.Theta = inf
 	ph.Damage = inf[0] / b.sys.meltRise(ph.ambient())
 	return nil
 }

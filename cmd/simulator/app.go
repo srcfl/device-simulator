@@ -907,19 +907,30 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 	if baseLoad, ok := config["base_load_w"].(float64); ok {
 		site.BaseLoadW = baseLoad
 	}
-	if fuseSize, ok := config["fuse_size"].(float64); ok {
-		if fuseSize != math.Trunc(fuseSize) {
-			return fmt.Errorf("fuse size %v A is not whole amperes", fuseSize)
+	fuseSize, sizeSet := config["fuse_size"].(float64)
+	fuseProfile, profileSet := config["fuse_profile"].(string)
+	if sizeSet || profileSet {
+		size, profile := site.FuseSize, site.FuseProfile
+		if sizeSet {
+			if fuseSize != math.Trunc(fuseSize) {
+				return fmt.Errorf("fuse size %v A is not whole amperes", fuseSize)
+			}
+			size = int(fuseSize)
 		}
-		if err := checkFuseSize(int(fuseSize)); err != nil {
+		if profileSet {
+			profile = fuseProfile
+		}
+		if err := checkFuse(size, profile); err != nil {
 			return err
 		}
+	}
+	if sizeSet {
 		site.FuseSize = int(fuseSize)
 		site.FuseDamage = PhaseLoads{}
 		site.FuseHeat = [3]fuse.Phase{}
 		site.FuseOverload = FuseOverload{}
 	}
-	if fuseProfile, ok := config["fuse_profile"].(string); ok {
+	if profileSet {
 		if _, exists := fuseProfiles[fuseProfile]; !exists {
 			return fmt.Errorf("unknown fuse profile")
 		}

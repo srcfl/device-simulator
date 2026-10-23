@@ -68,14 +68,19 @@ func TestUnsupportedFuseSize(t *testing.T) {
 	if site.FuseBlown.L1 || site.FuseOverload.L1.Invalid == "" {
 		t.Fatalf("10 A at 40 A: blown %v, status %+v; want refused", site.FuseBlown.L1, site.FuseOverload.L1)
 	}
-	for _, a := range []int{16, 20, 25, 32, 35, 40, 50, 63} {
-		if err := checkFuseSize(a); err != nil {
-			t.Errorf("%d A refused: %v", a, err)
-		}
-	}
-	for _, a := range []int{0, 10, 30, 80} {
-		if checkFuseSize(a) == nil {
-			t.Errorf("%d A accepted", a)
+	for _, c := range []struct {
+		a       int
+		profile string
+		ok      bool
+	}{
+		{16, FuseProfileIecGg, true}, {35, FuseProfileIecGg, true}, {63, FuseProfileIecGg, true}, {0, FuseProfileIecGg, true},
+		{10, FuseProfileIecGg, false}, {30, FuseProfileIecGg, false}, {80, FuseProfileIecGg, false}, {-1, FuseProfileIecGg, false},
+		{10, FuseProfileIecGm, false}, {35, FuseProfileIecGm, true},
+		{10, FuseProfileIecAm, true}, {125, FuseProfileIecAm, true},
+		{10, FuseProfileManual, true}, {100, FuseProfileManual, true},
+	} {
+		if err := checkFuse(c.a, c.profile); (err == nil) != c.ok {
+			t.Errorf("%d A %s: %v, want ok %v", c.a, c.profile, err, c.ok)
 		}
 	}
 }

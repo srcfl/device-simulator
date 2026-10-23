@@ -1,6 +1,7 @@
 package fuse
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 )
@@ -128,6 +129,13 @@ func TestPreheat(t *testing.T) {
 		if err := p.Preheat(ph, amps, 25); err == nil || ph.Theta != ([3]float64{}) {
 			t.Errorf("preheat at %v A: err %v, state %v; want refused, cold", amps, err, ph.Theta)
 		}
+	}
+	// A blown fuse stays blown: preheating does not replace it.
+	blown := ref()
+	hold(p, blown, 3, 25, 600, 1)
+	before := *blown
+	if err := p.Preheat(blown, 25, 25); err == nil || !blown.Blown || blown.Theta != before.Theta {
+		t.Errorf("preheat on a blown fuse: err %v, blown %v; want refused, still blown", err, blown.Blown)
 	}
 }
 
@@ -300,9 +308,18 @@ func TestInvalidInputLeavesTheState(t *testing.T) {
 			t.Errorf("%s: %+v, state %v → %v; want refused, unchanged", c.name, st, before.Theta, ph.Theta)
 		}
 	}
-	ph := *warm
-	if st := p.Step(&ph, math.Inf(-1), 25, 1); !ph.Blown || st.Damage != 1 || st.Invalid != "" {
-		t.Errorf("an infinite current: %+v, want blown", st)
+	for _, amps := range []float64{math.Inf(-1), 1e160 * 25} {
+		ph := *warm
+		st := p.Step(&ph, amps, 25, 1)
+		_, err := json.Marshal(st)
+		if !ph.Blown || st.Damage != 1 || st.Invalid != "" || math.IsInf(st.Ratio, 0) || err != nil {
+			t.Errorf("%g A: %+v (json: %v), want blown with a finite ratio", amps, st, err)
+		}
+		for _, x := range ph.Theta {
+			if math.IsNaN(x) || math.IsInf(x, 0) {
+				t.Errorf("%g A left the state %v", amps, ph.Theta)
+			}
+		}
 	}
 	if p.Supports(10) || p.Supports(80) || !p.Supports(16) || !p.Supports(30) || !p.Supports(63) {
 		t.Error("gG supports 16-63 A only")

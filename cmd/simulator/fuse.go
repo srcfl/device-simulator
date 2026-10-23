@@ -35,25 +35,30 @@ var fuseProfiles = func() map[string]fuse.Profile {
 	return m
 }()
 
-// fuseSizes are the ratings the gG model is calibrated for (IEC 60269-1's
-// 16-63 A band, plus 35 A); smaller and larger fuses have other
-// conventional currents, which the model does not have.
-var fuseSizes = func() []int {
-	gg, _ := fuse.Lookup(fuse.IecGg)
-	var out []int
-	for _, r := range gg.Ratings() {
-		out = append(out, int(r))
+// checkFuse says whether the profile models a fuse of a amperes. gG and the
+// profiles scaled from it are calibrated at their bands' ratings (16-63 A;
+// smaller and larger fuses have other conventional currents); aM and
+// manual take any size. A size of 0 is the site's default, 16 A.
+func checkFuse(a int, profileID string) error {
+	if a == 0 {
+		a = 16
 	}
-	return out
-}()
-
-func checkFuseSize(a int) error {
-	for _, s := range fuseSizes {
-		if a == s {
+	if a < 0 {
+		return fmt.Errorf("fuse size %d A", a)
+	}
+	p := resolveFuseProfile(profileID)
+	ratings := p.Ratings()
+	if p.ID == FuseProfileManual || len(ratings) == 0 && p.Supports(float64(a)) {
+		return nil
+	}
+	sizes := make([]int, len(ratings))
+	for i, r := range ratings {
+		sizes[i] = int(r)
+		if sizes[i] == a {
 			return nil
 		}
 	}
-	return fmt.Errorf("fuse size must be one of %v A", fuseSizes)
+	return fmt.Errorf("the %s fuse is modelled at %v A, not %d A", p.ID, sizes, a)
 }
 
 func resolveFuseProfile(id string) fuse.Profile {
