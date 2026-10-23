@@ -689,7 +689,7 @@ func buildToolSpecs() ([]Tool, map[string]ToolSpec) {
 					"id":           schemaInteger("Site ID"),
 					"name":         schemaString("Site name"),
 					"base_load_w":  schemaNumber("Base load in watts"),
-					"fuse_size":    schemaInteger("Fuse size"),
+					"fuse_size":    schemaInteger("Fuse size in A: 16, 20, 25, 32, 35, 40, 50 or 63"),
 					"fuse_profile": schemaString("Fuse profile"),
 					"phase_factors": schemaObject(nil, nil),
 					"fuse_blown":    schemaObject(nil, nil),

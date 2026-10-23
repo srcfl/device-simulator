@@ -86,6 +86,9 @@ The app supports two modes controlled by the `--desktop` flag:
 - `cmd/simulator/templates/index.html` - Embedded dashboard UI
 - `cmd/simulator/wails.json` - Wails configuration
 
+**Public package:**
+- `fuse/` - each phase's fuse as a thermal model (element, body, holder; I² heating), within IEC 60269-1's gates and following ABB's gG curves for 16-63 A; no dependencies, so an EMS's own simulation (FTW's `go/internal/sitesim`) imports the same model
+
 **Internal packages:**
 - `internal/modbus/server.go` - Modbus TCP server with register storage and logging
 - `internal/modbus/registers.go` - Register definitions, encoding/decoding (U16, I16, U32, I32)

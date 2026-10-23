@@ -234,6 +234,10 @@
                                              :class="getFuseCountdownClass('l1')"
                                              :title="getFuseCountdownTitle('l1')"
                                              x-text="getFuseCountdownLabel('l1')"></div>
+                                        <div class="phase-countdown warning invalid"
+                                             x-show="getFuseInvalid('l1')"
+                                             :title="getFuseInvalid('l1')"
+                                             x-text="getFuseInvalid('l1')"></div>
                                     </div>
                                 </div>
                                 <div class="phase-bar-container">
@@ -254,6 +258,10 @@
                                              :class="getFuseCountdownClass('l2')"
                                              :title="getFuseCountdownTitle('l2')"
                                              x-text="getFuseCountdownLabel('l2')"></div>
+                                        <div class="phase-countdown warning invalid"
+                                             x-show="getFuseInvalid('l2')"
+                                             :title="getFuseInvalid('l2')"
+                                             x-text="getFuseInvalid('l2')"></div>
                                     </div>
                                 </div>
                                 <div class="phase-bar-container">
@@ -274,6 +282,10 @@
                                              :class="getFuseCountdownClass('l3')"
                                              :title="getFuseCountdownTitle('l3')"
                                              x-text="getFuseCountdownLabel('l3')"></div>
+                                        <div class="phase-countdown warning invalid"
+                                             x-show="getFuseInvalid('l3')"
+                                             :title="getFuseInvalid('l3')"
+                                             x-text="getFuseInvalid('l3')"></div>
                                     </div>
                                 </div>
                                 <!-- Scale + legend row -->
@@ -317,11 +329,9 @@
                                                 <label>Fuse Size</label>
                                                 <select x-model.number="localFuseSize"
                                                         @change="onFuseSizeChange($event.target.value)">
-                                                    <option value="10">10 A</option>
-                                                    <option value="16">16 A</option>
-                                                    <option value="20">20 A</option>
-                                                    <option value="25">25 A</option>
-                                                    <option value="32">32 A</option>
+                                                    <template x-for="size in fuseSizeOptions()" :key="size">
+                                                        <option :value="size" :selected="size === localFuseSize" x-text="`${size} A`"></option>
+                                                    </template>
                                                 </select>
                                             </div>
                                             <div class="modal-field">

@@ -1475,6 +1475,15 @@
     color: var(--color-error);
 }
 
+/* The fuse model's reason for refusing a phase: a sentence, not a timer */
+.phase-countdown.invalid {
+    text-transform: none;
+    letter-spacing: 0;
+    white-space: normal;
+    text-align: right;
+    max-width: 220px;
+}
+
 .phase-bar-scale {
     display: flex;
     align-items: center;

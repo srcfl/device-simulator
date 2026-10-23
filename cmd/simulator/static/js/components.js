@@ -2487,6 +2487,21 @@ document.addEventListener('alpine:init', () => {
             return overload[phase] || null;
         },
 
+        // Why the fuse model refused this phase (a size it does not model,
+        // for one), or '' when it judged it.
+        getFuseInvalid(phase) {
+            return this.getFuseOverload(phase)?.invalid || '';
+        },
+
+        // The sizes the settings offer: gG's bands, plus a saved size outside
+        // them, so the select never shows blank.
+        fuseSizeOptions() {
+            const sizes = [16, 20, 25, 32, 35, 40, 50, 63];
+            const current = Alpine.store('site').data?.fuse_size;
+            if (current && !sizes.includes(current)) sizes.push(current);
+            return sizes.sort((a, b) => a - b);
+        },
+
         hasFuseCountdown(phase) {
             const info = this.getFuseOverload(phase);
             if (!info || !info.active) return false;

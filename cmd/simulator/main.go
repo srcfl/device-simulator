@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/srcfl/device-simulator/fuse"
 	"github.com/srcfl/device-simulator/internal/device"
 	simmdns "github.com/srcfl/device-simulator/internal/mdns"
 	"github.com/srcfl/device-simulator/internal/modbus"
@@ -143,6 +144,8 @@ type Site struct {
 	FuseBlown    PhaseFuses        `json:"fuse_blown"`    // Per-phase blown fuse state
 	FuseDamage   PhaseLoads        `json:"-"`
 	FuseOverload FuseOverload      `json:"-"`
+	FuseHeat     [3]fuse.Phase     `json:"-"`           // each phase's thermal state (L1, L2, L3)
+	FuseAmbientC *float64          `json:"-"`           // the fuse cabinet's air; nil is 25 °C
 	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -2640,16 +2643,24 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		}
 		site.BaseLoadW = *config.BaseLoadW
 	}
-	if config.FuseSize != nil {
-		// Validate fuse size (common values: 10, 16, 20, 25, 32 Amps)
-		validFuses := map[int]bool{10: true, 16: true, 20: true, 25: true, 32: true}
-		if !validFuses[*config.FuseSize] {
+	if config.FuseSize != nil || config.FuseProfile != nil {
+		size, profile := site.FuseSize, site.FuseProfile
+		if config.FuseSize != nil {
+			size = *config.FuseSize
+		}
+		if config.FuseProfile != nil {
+			profile = *config.FuseProfile
+		}
+		if err := checkFuse(size, profile); err != nil {
 			site.mu.Unlock()
-			http.Error(w, "Fuse size must be 10, 16, 20, 25, or 32 Amps", http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+	}
+	if config.FuseSize != nil {
 		site.FuseSize = *config.FuseSize
 		site.FuseDamage = PhaseLoads{}
+		site.FuseHeat = [3]fuse.Phase{}
 		site.FuseOverload = FuseOverload{}
 	}
 	if config.FuseProfile != nil {
@@ -2661,6 +2672,7 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		if site.FuseProfile != *config.FuseProfile {
 			site.FuseProfile = *config.FuseProfile
 			site.FuseDamage = PhaseLoads{}
+			site.FuseHeat = [3]fuse.Phase{}
 			site.FuseOverload = FuseOverload{}
 		}
 	}
@@ -2684,13 +2696,13 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 	}
 	if config.FuseBlown != nil {
 		if site.FuseBlown.L1 && !config.FuseBlown.L1 {
-			site.FuseDamage.L1 = 0
+			site.FuseDamage.L1, site.FuseHeat[0] = 0, fuse.Phase{}
 		}
 		if site.FuseBlown.L2 && !config.FuseBlown.L2 {
-			site.FuseDamage.L2 = 0
+			site.FuseDamage.L2, site.FuseHeat[1] = 0, fuse.Phase{}
 		}
 		if site.FuseBlown.L3 && !config.FuseBlown.L3 {
-			site.FuseDamage.L3 = 0
+			site.FuseDamage.L3, site.FuseHeat[2] = 0, fuse.Phase{}
 		}
 		site.FuseBlown = *config.FuseBlown
 	}
