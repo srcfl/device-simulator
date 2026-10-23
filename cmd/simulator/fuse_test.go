@@ -57,3 +57,25 @@ func TestSiteFuseRemembersItsHeat(t *testing.T) {
 		t.Fatalf("a cleared fuse blew after %d s, want the cold %d s", again, cold)
 	}
 }
+
+// A site saved with a size the model does not cover says so on every phase
+// and never blows; new sizes outside the bands are refused.
+func TestUnsupportedFuseSize(t *testing.T) {
+	site := &Site{FuseSize: 10, FuseProfile: FuseProfileIecGg}
+	for s := 0; s < 60; s++ {
+		updateFuseState(site, PhasePowers{L1: 40 * 230}, time.Second)
+	}
+	if site.FuseBlown.L1 || site.FuseOverload.L1.Invalid == "" {
+		t.Fatalf("10 A at 40 A: blown %v, status %+v; want refused", site.FuseBlown.L1, site.FuseOverload.L1)
+	}
+	for _, a := range []int{16, 20, 25, 32, 35, 40, 50, 63} {
+		if err := checkFuseSize(a); err != nil {
+			t.Errorf("%d A refused: %v", a, err)
+		}
+	}
+	for _, a := range []int{0, 10, 30, 80} {
+		if checkFuseSize(a) == nil {
+			t.Errorf("%d A accepted", a)
+		}
+	}
+}

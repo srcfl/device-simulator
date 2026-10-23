@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -33,6 +34,27 @@ var fuseProfiles = func() map[string]fuse.Profile {
 	}
 	return m
 }()
+
+// fuseSizes are the ratings the gG model is calibrated for (IEC 60269-1's
+// 16-63 A band, plus 35 A); smaller and larger fuses have other
+// conventional currents, which the model does not have.
+var fuseSizes = func() []int {
+	gg, _ := fuse.Lookup(fuse.IecGg)
+	var out []int
+	for _, r := range gg.Ratings() {
+		out = append(out, int(r))
+	}
+	return out
+}()
+
+func checkFuseSize(a int) error {
+	for _, s := range fuseSizes {
+		if a == s {
+			return nil
+		}
+	}
+	return fmt.Errorf("fuse size must be one of %v A", fuseSizes)
+}
 
 func resolveFuseProfile(id string) fuse.Profile {
 	if profile, ok := fuseProfiles[id]; ok {

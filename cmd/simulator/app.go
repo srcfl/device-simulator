@@ -908,6 +908,12 @@ func (a *App) UpdateSiteConfig(id int, config map[string]interface{}) error {
 		site.BaseLoadW = baseLoad
 	}
 	if fuseSize, ok := config["fuse_size"].(float64); ok {
+		if fuseSize != math.Trunc(fuseSize) {
+			return fmt.Errorf("fuse size %v A is not whole amperes", fuseSize)
+		}
+		if err := checkFuseSize(int(fuseSize)); err != nil {
+			return err
+		}
 		site.FuseSize = int(fuseSize)
 		site.FuseDamage = PhaseLoads{}
 		site.FuseHeat = [3]fuse.Phase{}

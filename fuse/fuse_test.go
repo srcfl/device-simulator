@@ -14,6 +14,8 @@ func profile(t *testing.T, id string) Profile {
 	return p
 }
 
+func ref() *Phase { return &Phase{AmbientC: Ambient(RefAmbientC)} }
+
 // hold runs a phase at multiple × rating for seconds in steps of dt and
 // says how long it took to blow (+Inf if it held).
 func hold(p Profile, ph *Phase, multiple, rating, seconds, dt float64) float64 {
@@ -27,9 +29,9 @@ func hold(p Profile, ph *Phase, multiple, rating, seconds, dt float64) float64 {
 }
 
 // Every gG band, from cold at the reference ambient, keeps IEC 60269-1's
-// gates and its pre-arcing I²t window at 0.01 s, and sits within 0.05
-// decades of the centre points it was fitted to.
-func TestGGBandsMeetTheGates(t *testing.T) {
+// gates and its pre-arcing I²t window at 0.01 s, and sits within 0.2
+// decades of the ABB curve it was fitted to.
+func TestGGBandsMeetTheGatesAndFollowABB(t *testing.T) {
 	p := profile(t, IecGg)
 	for _, b := range p.Bands {
 		for _, g := range b.Gates {
@@ -46,10 +48,13 @@ func TestGGBandsMeetTheGates(t *testing.T) {
 		if i2t := math.Pow(u*b.RatingA, 2) * 0.01; i2t < b.I2tMin || i2t > b.I2tMax {
 			t.Errorf("%g A: pre-arcing I²t at 0.01 s %.0f A²s, want %g-%g", b.RatingA, i2t, b.I2tMin, b.I2tMax)
 		}
-		for _, pt := range b.Targets {
+		if len(b.Reference) != 11 {
+			t.Fatalf("%g A: %d reference points", b.RatingA, len(b.Reference))
+		}
+		for _, pt := range b.Reference {
 			got := b.MeltSeconds(pt.Multiple, RefAmbientC)
-			if d := math.Abs(math.Log10(got / pt.Seconds)); d > 0.05 {
-				t.Errorf("%g A at %.2f×: %.3g s, %.2f decades from the fitted %.3g s", b.RatingA, pt.Multiple, got, d, pt.Seconds)
+			if d := math.Abs(math.Log10(got / pt.Seconds)); d > 0.2 {
+				t.Errorf("%g A at %.2f×: %.3g s, %.2f decades from ABB's %.3g s", b.RatingA, pt.Multiple, got, d, pt.Seconds)
 			}
 		}
 	}
@@ -74,24 +79,23 @@ func multipleAt(b *Band, seconds float64) float64 {
 func TestConventionalCurrents(t *testing.T) {
 	p := profile(t, IecGg)
 	for _, b := range p.Bands {
-		cold := func() *Phase { return &Phase{AmbientC: RefAmbientC} }
-		if got := hold(p, cold(), 1.25, b.RatingA, 3600, 1); !math.IsInf(got, 1) {
+		if got := hold(p, ref(), 1.25, b.RatingA, 3600, 1); !math.IsInf(got, 1) {
 			t.Errorf("%g A: 1.25× blew after %.0f s, want it to hold 1 h", b.RatingA, got)
 		}
-		if got := hold(p, cold(), 1.6, b.RatingA, 3600, 1); got > 3600 {
+		if got := hold(p, ref(), 1.6, b.RatingA, 3600, 1); got > 3600 {
 			t.Errorf("%g A: 1.6× held 1 h, want it to blow", b.RatingA)
 		}
 	}
 }
 
 // A fuse that has carried its rating for an hour blows at 2 × in under
-// half its cold time; at 1.5 × in under two thirds.
+// half its cold time; at 1.5 × in under three quarters.
 func TestPreloadBlowsSooner(t *testing.T) {
 	p := profile(t, IecGg)
 	for _, rating := range []float64{16, 25, 63} {
-		for _, c := range []struct{ multiple, factor float64 }{{2, 0.5}, {1.5, 2.0 / 3}} {
-			cold := hold(p, &Phase{AmbientC: RefAmbientC}, c.multiple, rating, 7200, 0.5)
-			warm := &Phase{AmbientC: RefAmbientC}
+		for _, c := range []struct{ multiple, factor float64 }{{2, 0.5}, {1.5, 0.75}} {
+			cold := hold(p, ref(), c.multiple, rating, 7200, 0.5)
+			warm := ref()
 			hold(p, warm, 1, rating, 3600, 1)
 			hot := hold(p, warm, c.multiple, rating, 7200, 0.5)
 			t.Logf("%g A, %g×: cold %.1f s, after 1 h at In %.1f s", rating, c.multiple, cold, hot)
@@ -102,12 +106,37 @@ func TestPreloadBlowsSooner(t *testing.T) {
 	}
 }
 
+// Preheat sets the steady state of a held current: the same as a long soak,
+// and a preheated fuse blows sooner than a cold one. It refuses a current
+// that melts the fuse before settling.
+func TestPreheat(t *testing.T) {
+	p := profile(t, IecGg)
+	warm := ref()
+	if err := p.Preheat(warm, 25, 25); err != nil {
+		t.Fatal(err)
+	}
+	soaked := ref()
+	hold(p, soaked, 1, 25, 6*3600, 10)
+	if math.Abs(warm.Damage-soaked.Damage) > 0.01 {
+		t.Fatalf("preheated at In damage %.3f, after a 6 h soak %.3f", warm.Damage, soaked.Damage)
+	}
+	if hot, cold := hold(p, warm, 2, 25, 7200, 0.5), p.MeltSeconds(2, 25, RefAmbientC); hot >= cold/2 {
+		t.Errorf("2× from preheated: %.1f s, want under half the cold %.1f s", hot, cold)
+	}
+	for _, amps := range []float64{1.6 * 25, math.NaN(), math.Inf(1)} {
+		ph := ref()
+		if err := p.Preheat(ph, amps, 25); err == nil || ph.Theta != ([3]float64{}) {
+			t.Errorf("preheat at %v A: err %v, state %v; want refused, cold", amps, err, ph.Theta)
+		}
+	}
+}
+
 // 30 s at 1.5 × every 2 min (0.5 × between) heats a fuse further each
 // cycle: the element ends each burst hotter than the last, and after ten
 // cycles a held 1.5 × blows sooner than from cold.
 func TestShortOverloadsAccumulate(t *testing.T) {
 	p := profile(t, IecGg)
-	ph := &Phase{AmbientC: RefAmbientC}
+	ph := ref()
 	var peaks []float64
 	for cycle := 0; cycle < 10; cycle++ {
 		hold(p, ph, 1.5, 25, 30, 1)
@@ -128,11 +157,11 @@ func TestShortOverloadsAccumulate(t *testing.T) {
 	}
 }
 
-// With no current a hot fuse cools along its slowest body's exponential:
-// after an hour, each further 10 minutes take off the same share.
+// With no current a hot fuse cools along its slowest mode: after an hour,
+// each further 10 minutes take off the same share.
 func TestCoolingIsExponential(t *testing.T) {
 	p := profile(t, IecGg)
-	ph := &Phase{AmbientC: RefAmbientC}
+	ph := ref()
 	hold(p, ph, 1.3, 25, 7200, 1)
 	hold(p, ph, 0, 25, 3600, 1)
 	var ratios []float64
@@ -146,8 +175,10 @@ func TestCoolingIsExponential(t *testing.T) {
 			t.Fatalf("10-minute cooling ratios %.4f, want one constant share", ratios)
 		}
 	}
-	if want := math.Exp(-600 / holderTauS); math.Abs(ratios[0]-want) > 0.05 {
-		t.Errorf("cooling ratio %.3f per 10 min, want about e^(-600/τ) = %.3f", ratios[0], want)
+	b, _ := p.Band(25)
+	slow := math.Min(b.sys.lambda[0], math.Min(b.sys.lambda[1], b.sys.lambda[2]))
+	if want := math.Exp(-600 * slow); math.Abs(ratios[0]-want) > 0.01 {
+		t.Errorf("cooling ratio %.4f per 10 min, want e^(-600/τ) = %.4f for the slowest mode", ratios[0], want)
 	}
 }
 
@@ -157,22 +188,42 @@ func TestExportHeatsAsImport(t *testing.T) {
 	for s := 0; s < 120; s++ {
 		a := p.Step(&in, 40, 25, 1)
 		b := p.Step(&out, -40, 25, 1)
-		if a != b || in != out {
+		if a != b || in.Theta != out.Theta || in.Damage != out.Damage {
 			t.Fatalf("second %d: import %+v, export %+v", s, a, b)
 		}
 	}
 }
 
-// The step is exact: 0.5 s and 2 s steps blow at the same moment, to
-// within the step.
-func TestStepSizeDoesNotMatter(t *testing.T) {
+// The step is exact: steps of 0.5, 1 and 2 s reach the same state, and the
+// time left (a dt = 0 probe) drops by exactly the time stepped.
+func TestStepIsExact(t *testing.T) {
 	p := profile(t, IecGg)
 	for _, m := range []float64{1.7, 2.5, 6} {
-		fine := hold(p, &Phase{AmbientC: RefAmbientC}, m, 25, 7200, 0.5)
-		coarse := hold(p, &Phase{AmbientC: RefAmbientC}, m, 25, 7200, 2)
 		cold := p.MeltSeconds(m, 25, RefAmbientC)
-		if math.Abs(fine-cold) > 0.5 || math.Abs(coarse-cold) > 2 {
-			t.Errorf("%g×: blew after %.1f s (0.5 s steps) and %.1f s (2 s steps), want %.2f s", m, fine, coarse, cold)
+		var states [][3]float64
+		for _, dt := range []float64{0.5, 1, 2} {
+			ph := ref()
+			elapsed := 0.0
+			for elapsed+dt < math.Min(cold, 60) {
+				p.Step(ph, m*25, 25, dt)
+				elapsed += dt
+			}
+			left := p.Step(ph, m*25, 25, 0).RemainingSeconds
+			if math.Abs(left-(cold-elapsed)) > 1e-9*cold {
+				t.Errorf("%g× in %g s steps: %.12g s left after %g s, want %.12g", m, dt, left, elapsed, cold-elapsed)
+			}
+			ph2 := ref()
+			for i := 0; i < int(math.Round(4/dt)); i++ {
+				p.Step(ph2, m*25, 25, dt)
+			}
+			states = append(states, ph2.Theta)
+		}
+		for _, s := range states[1:] {
+			for i := range s {
+				if math.Abs(s[i]-states[0][i]) > 1e-9*math.Abs(states[0][i]) {
+					t.Errorf("%g× after 4 s: state %v, with 0.5 s steps %v", m, s, states[0])
+				}
+			}
 		}
 	}
 }
@@ -181,17 +232,17 @@ func TestStepSizeDoesNotMatter(t *testing.T) {
 // the element's way from ambient to melting.
 func TestStatusDescribesThePhase(t *testing.T) {
 	p := profile(t, IecGg)
-	ph := &Phase{AmbientC: RefAmbientC}
+	ph := ref()
 	first := p.Step(ph, 50, 25, 1)
 	second := p.Step(ph, 50, 25, 1)
 	cold := p.MeltSeconds(2, 25, RefAmbientC)
-	if !first.Active || math.Abs(first.TripSeconds-cold) > 1e-6*cold || math.Abs(first.RemainingSeconds-(cold-1)) > 1e-3 {
+	if !first.Active || math.Abs(first.TripSeconds-cold) > 1e-9*cold || math.Abs(first.RemainingSeconds-(cold-1)) > 1e-9*cold {
 		t.Fatalf("first second at 2×: %+v, want active, trip %.2f s, remaining %.2f s", first, cold, cold-1)
 	}
-	if math.Abs(second.RemainingSeconds-(first.RemainingSeconds-1)) > 1e-3 || second.Damage <= first.Damage {
+	if math.Abs(second.RemainingSeconds-(first.RemainingSeconds-1)) > 1e-9*cold || second.Damage <= first.Damage {
 		t.Fatalf("second second: %+v after %+v", second, first)
 	}
-	idle := p.Step(&Phase{AmbientC: RefAmbientC}, 25, 25, 1)
+	idle := p.Step(ref(), 25, 25, 1)
 	if idle.Active || idle.TripSeconds != 0 || idle.RemainingSeconds != 0 || idle.Damage <= 0 {
 		t.Fatalf("at the rating: %+v, want warming but never melting", idle)
 	}
@@ -200,6 +251,61 @@ func TestStatusDescribesThePhase(t *testing.T) {
 	}
 	if st := p.Step(ph, 0, 25, 1); st.Damage != 1 || !ph.Blown {
 		t.Fatalf("a blown fuse: %+v", st)
+	}
+}
+
+// 0 °C is a temperature: a cold cabinet, not the default.
+func TestZeroAmbientIsZero(t *testing.T) {
+	p := profile(t, IecGg)
+	at0 := p.Step(&Phase{AmbientC: Ambient(0)}, 1.5*25, 25, 0).TripSeconds
+	unset := p.Step(&Phase{}, 1.5*25, 25, 0).TripSeconds
+	if want := p.MeltSeconds(1.5, 25, 0); at0 != want {
+		t.Errorf("Step at 0 °C: %.0f s, MeltSeconds at 0 °C %.0f s", at0, want)
+	}
+	if want := p.MeltSeconds(1.5, 25, DefaultAmbientC); unset != want || at0 <= unset {
+		t.Errorf("unset ambient %.0f s, want the default's %.0f s and slower at 0 °C (%.0f s)", unset, want, at0)
+	}
+}
+
+// Input that is not a current, a step or a cabinet leaves the phase as it
+// was and says so; an infinite current blows the fuse.
+func TestInvalidInputLeavesTheState(t *testing.T) {
+	p := profile(t, IecGg)
+	warm := ref()
+	hold(p, warm, 1.2, 25, 600, 1)
+	for _, c := range []struct {
+		name             string
+		amps, rating, dt float64
+		ambient          *float64
+	}{
+		{"NaN current", math.NaN(), 25, 1, nil},
+		{"NaN step", 30, 25, math.NaN(), nil},
+		{"infinite step", 30, 25, math.Inf(1), nil},
+		{"negative step", 30, 25, -1, nil},
+		{"NaN ambient", 30, 25, 1, Ambient(math.NaN())},
+		{"infinite ambient", 30, 25, 1, Ambient(math.Inf(1))},
+		{"ambient at the melting point", 30, 25, 1, Ambient(MeltC)},
+		{"no rating", 30, 0, 1, nil},
+		{"NaN rating", 30, math.NaN(), 1, nil},
+		{"10 A, below the bands", 15, 10, 1, nil},
+		{"80 A, above them", 100, 80, 1, nil},
+	} {
+		ph := *warm
+		if c.ambient != nil {
+			ph.AmbientC = c.ambient
+		}
+		before := ph
+		st := p.Step(&ph, c.amps, c.rating, c.dt)
+		if st.Invalid == "" || ph.Theta != before.Theta || ph.Damage != before.Damage || ph.Blown {
+			t.Errorf("%s: %+v, state %v → %v; want refused, unchanged", c.name, st, before.Theta, ph.Theta)
+		}
+	}
+	ph := *warm
+	if st := p.Step(&ph, math.Inf(-1), 25, 1); !ph.Blown || st.Damage != 1 || st.Invalid != "" {
+		t.Errorf("an infinite current: %+v, want blown", st)
+	}
+	if p.Supports(10) || p.Supports(80) || !p.Supports(16) || !p.Supports(30) || !p.Supports(63) {
+		t.Error("gG supports 16-63 A only")
 	}
 }
 
@@ -220,8 +326,11 @@ func TestWarmCabinetBlowsSooner(t *testing.T) {
 // aM keeps its gates at any rating.
 func TestAMGates(t *testing.T) {
 	p := profile(t, IecAm)
-	for _, rating := range []float64{16, 63} {
-		b, _ := p.Band(rating)
+	for _, rating := range []float64{10, 16, 63, 125} {
+		b, ok := p.Band(rating)
+		if !ok {
+			t.Fatalf("aM has no band for %g A", rating)
+		}
 		for _, g := range b.Gates {
 			got := b.MeltSeconds(g.Multiple, RefAmbientC)
 			if g.Min && got < g.Seconds || !g.Min && got > g.Seconds {
@@ -239,8 +348,7 @@ func TestManualNeverBlows(t *testing.T) {
 	}
 }
 
-// Every profile but manual melts above its curve's start and holds at its
-// rating.
+// Every profile but manual has a curve and a source and holds at its rating.
 func TestEveryProfileHasACurve(t *testing.T) {
 	for _, p := range All() {
 		if p.ID == Manual {

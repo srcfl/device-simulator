@@ -145,7 +145,7 @@ type Site struct {
 	FuseDamage   PhaseLoads        `json:"-"`
 	FuseOverload FuseOverload      `json:"-"`
 	FuseHeat     [3]fuse.Phase     `json:"-"`           // each phase's thermal state (L1, L2, L3)
-	FuseAmbientC float64           `json:"-"`           // the fuse cabinet's air; 0 is 25 °C
+	FuseAmbientC *float64          `json:"-"`           // the fuse cabinet's air; nil is 25 °C
 	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -2644,11 +2644,9 @@ func handleSiteConfig(w http.ResponseWriter, r *http.Request, site *Site) {
 		site.BaseLoadW = *config.BaseLoadW
 	}
 	if config.FuseSize != nil {
-		// Validate fuse size (common values: 10, 16, 20, 25, 32 Amps)
-		validFuses := map[int]bool{10: true, 16: true, 20: true, 25: true, 32: true, 35: true, 40: true, 50: true, 63: true}
-		if !validFuses[*config.FuseSize] {
+		if err := checkFuseSize(*config.FuseSize); err != nil {
 			site.mu.Unlock()
-			http.Error(w, "Fuse size must be 10, 16, 20, 25, 32, 35, 40, 50 or 63 Amps", http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		site.FuseSize = *config.FuseSize

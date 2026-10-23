@@ -13,20 +13,20 @@
 // In per-unit terms the heat into the element is u² (u = I/In) and the
 // three thermal resistances add up to 1, so at a steady current the element
 // sits u² above ambient. It melts at UMin², UMin being the steady current
-// (as a multiple of In) that just melts it at the reference ambient. The
-// element and the body set the short times (adiabatic I²t below 0.1 s, the
-// body's seconds); the holder sets the long ones.
+// (as a multiple of In) that just melts it at the reference ambient.
 //
-// The gG bands are calibrated per rating to IEC 60269-1's conventional
-// currents and gates and the pre-arcing I²t at 0.01 s (see gg below); aM to
-// its gates. The other profiles are gG with scaled times and are not
-// calibrated. The model is independent of any EMS's own fuse protection: it
-// is the judge.
+// The gG bands keep IEC 60269-1's conventional currents, gates and
+// pre-arcing I²t window at 0.01 s, and within them follow a manufacturer's
+// published curves (see gg). aM keeps its gates. The other profiles are gG
+// with scaled times and are not calibrated. The model is a central
+// estimate of one maker's fuse-links, not a worst case, and it is
+// independent of any EMS's own fuse protection: it is the judge.
 //
 // It has no dependencies, so an EMS's own fast simulation can import it.
 package fuse
 
 import (
+	"fmt"
 	"math"
 	"sort"
 )
@@ -71,8 +71,10 @@ type Gate struct {
 
 // Thermal is a band's three bodies. Re, Rb and Rh are the shares of the
 // steady temperature rise across element-to-body, body-to-holder and
-// holder-to-ambient (they add up to 1); each Tau is that body's heat
-// capacity times its resistance onwards.
+// holder-to-ambient (they add up to 1). Each Tau is that body's heat
+// capacity times its own outgoing resistance; they are parameters, not the
+// system's modes, which come out of the coupled ladder (at 25 A 0.12 s,
+// 9.4 s and 1,315 s).
 type Thermal struct {
 	UMin       float64 // steady melting multiple at the reference ambient
 	Re, TauE   float64 // element
@@ -86,12 +88,12 @@ type Thermal struct {
 type Band struct {
 	RatingA float64
 	Thermal Thermal
-	// Gates are the sourced bounds; I2tMin and I2tMax bound the pre-arcing
-	// I²t at 0.01 s (A²s). Targets are the centre points the band is fitted
-	// to.
+	// Gates are the standard's bounds; I2tMin and I2tMax bound the
+	// pre-arcing I²t at 0.01 s (A²s). Reference is the manufacturer's curve
+	// the band is fitted to.
 	Gates          []Gate
 	I2tMin, I2tMax float64
-	Targets        []Point
+	Reference      []Point
 
 	sys system
 }
@@ -108,53 +110,64 @@ type Profile struct {
 	RefRatingA float64
 }
 
-// The holder and cabinet: a modelling choice, not from a standard. IEC 60269
-// fixes a gG fuse only at 1.25 × In (must not melt in 1 h) and 1.6 × In (must
-// melt within 1 h) in the long-time region; these two numbers put a cold
-// 1.6 × melt at about 13 minutes.
-const (
-	holderShare = 0.4    // of the steady rise at a steady current
-	holderTauS  = 1200.0 // s
-)
-
-// gg are the gG bands. Gates, I²t windows and conventional currents from
-// IEC 60269-1 as tabled in Schneider Electric, "Complementary technical
-// information" CA908036E v3.2 (2018), gate and pre-arcing I²t tables; the
-// 25, 40, 50 and 63 A rows also in Enel GSCL004 rev. 0 (2016) Tables 6, 7
-// and 14, and 25 A in Mersen EduPack TM-104 (2012) slide 6. 35 A is not in
-// those tables: its gates and I²t are interpolated on log axes between 32 A
-// and 40 A. Conventional currents: Inf = 1.25 In and If = 1.6 In with a
-// conventional time of 1 h for 16 ≤ In ≤ 63 A.
+// gg are the gG bands, 16 to 63 A.
 //
-// Re, TauE and TauB are fitted (least squares on log time, from cold at the
-// reference ambient) to three centre points: the 0.01 s point at the
-// geometric mean of the I²t window, the 0.1 s point at the geometric mean
-// of the two 0.1 s gate currents, and √50 s at the geometric mean of
-// Imin(10 s) and Imax(5 s). UMin = √(1.25 × 1.6) lies between Inf and If.
+// Gates, I²t windows and conventional currents are IEC 60269-1's, as tabled
+// in Schneider Electric, "Complementary technical information" CA908036E
+// v3.2 (2018); the 25, 40, 50 and 63 A rows are also in Enel GSCL004 rev. 0
+// (2016) Tables 6, 7 and 14, and 25 A in Mersen EduPack TM-104 (2012) slide
+// 6. 35 A is not in those tables: its gates and I²t are interpolated on log
+// axes between 32 A and 40 A. Conventional currents: Inf = 1.25 In must not
+// melt and If = 1.6 In must melt within the conventional time, 1 h for
+// 16 ≤ In ≤ 63 A.
+//
+// The gates leave a wide tube: no gate constrains 1.4-2 ×, where home
+// overloads land. Within it each band follows ABB's pre-arcing curves for
+// OFAF gG fuse-links, size 000, 500 V (ABB "Fusegear DIN-type HRC-fuse
+// links" 1SCC317001C0201, page 14), digitized from the PDF's vector paths
+// (48 vertices a curve; read-off error under 2 % in time). All six thermal
+// parameters are fitted, least squares on log time from cold at 20 °C, to
+// ABB's melting times at 1.5, 1.6, 2, 2.5, 3, 4, 5, 8 and 10 × In, the
+// current that melts in 0.01 s and the curve's start at 7,990 s; the fit
+// keeps every gate. Residuals: rms 0.08-0.095 decades, at most 0.17.
+// Letting the element's resistance rise with temperature (silver, 0.0038
+// per K) made the fit worse (rms 0.11-0.14), so it is left out.
 var gg = []struct {
 	ratingA                      float64
 	imin10, imax5, imin01, imax1 float64 // A
 	i2tMin, i2tMax               float64 // A²s at 0.01 s
-	re, tauE, tauB               float64 // fitted
+	uMin, re, tauE, rh           float64 // fitted
+	tauB, tauH                   float64 // fitted, s
+	abb                          [9]float64
+	abb001A, abbStartA           float64 // A melting in 0.01 s; A at the curve's 7,990 s start
 }{
-	{16, 33, 65, 85, 150, 300, 1000, 0.042489, 0.040263, 15.5955},
-	{20, 42, 85, 110, 200, 500, 1800, 0.038486, 0.040450, 16.8370},
-	{25, 52, 110, 150, 260, 1000, 3000, 0.034171, 0.042170, 17.0309},
-	{32, 75, 150, 200, 350, 1800, 5000, 0.030930, 0.040115, 21.9215},
-	{35, 82.47, 164.94, 222.22, 387.17, 2209.86, 6331.18, 0.030262, 0.041014, 22.1359}, // interpolated
-	{40, 95, 190, 260, 450, 3000, 9000, 0.029308, 0.042411, 22.4587},
-	{50, 125, 250, 350, 610, 5000, 16000, 0.024424, 0.038492, 25.1411},
-	{63, 160, 320, 450, 820, 9000, 27000, 0.022440, 0.038871, 25.8209},
+	{16, 33, 65, 85, 150, 300, 1000, 1.428717, 0.073252, 0.074250, 0.500994, 7.03215, 1616.13,
+		[9]float64{3546.8, 1165.2, 53.1, 9.445, 3.29, 0.8381, 0.3328, 0.0554, 0.0246}, 208.1, 22.9},
+	{20, 42, 85, 110, 200, 500, 1800, 1.414377, 0.070387, 0.091390, 0.513906, 9.47446, 1241.79,
+		[9]float64{2592.9, 819.5, 57.8, 12.3, 4.58, 1.177, 0.4498, 0.0711, 0.0318}, 284.5, 28.3},
+	{25, 52, 110, 150, 260, 1000, 3000, 1.395152, 0.073492, 0.128142, 0.528300, 8.82109, 1302.24,
+		[9]float64{2341.3, 821.6, 58.7, 11.8, 4.222, 1.098, 0.445, 0.0847, 0.0419}, 406.9, 34.9},
+	{32, 75, 150, 200, 350, 1800, 5000, 1.391843, 0.075659, 0.167797, 0.532303, 10.60028, 1501.37,
+		[9]float64{2581.2, 970.5, 72.9, 14.1, 5.056, 1.311, 0.5272, 0.1026, 0.0519}, 591.8, 44.6},
+	{35, 82.47, 164.94, 222.22, 387.17, 2209.86, 6331.18, 1.391721, 0.075520, 0.169985, 0.532484, 10.92192, 1591.95, // gates interpolated
+		[9]float64{2680.3, 1049.8, 76.5, 14.6, 5.206, 1.342, 0.5387, 0.1044, 0.0527}, 650.8, 48.8},
+	{40, 95, 190, 260, 450, 3000, 9000, 1.394819, 0.073959, 0.177486, 0.530528, 11.82141, 1606.21,
+		[9]float64{2778.0, 1066.7, 80.2, 15.8, 5.714, 1.494, 0.5982, 0.1149, 0.0577}, 761.5, 55.9},
+	{50, 125, 250, 350, 610, 5000, 16000, 1.409631, 0.071707, 0.197219, 0.525392, 16.77180, 1951.30,
+		[9]float64{3566.2, 1471.4, 121.6, 23.2, 8.242, 2.115, 0.8293, 0.1445, 0.0696}, 1000.8, 70.8},
+	{63, 160, 320, 450, 820, 9000, 27000, 1.314812, 0.063486, 0.165089, 0.603945, 19.24608, 1551.42,
+		[9]float64{1798.4, 910.0, 134.6, 29.3, 9.987, 2.193, 0.7666, 0.1183, 0.0563}, 1151.8, 83.0},
 }
 
-func ggBands(timeFactor float64, withGates bool) []Band {
-	uMin := math.Sqrt(1.25 * 1.6)
+var abbMultiples = [9]float64{1.5, 1.6, 2, 2.5, 3, 4, 5, 8, 10}
+
+func ggBands(timeFactor float64, calibrated bool) []Band {
 	var out []Band
 	for _, r := range gg {
-		th := Thermal{UMin: uMin, Re: r.re, TauE: r.tauE, Rb: 1 - r.re - holderShare, TauB: r.tauB,
-			Rh: holderShare, TauH: holderTauS, TimeFactor: timeFactor}
+		th := Thermal{UMin: r.uMin, Re: r.re, TauE: r.tauE, Rb: 1 - r.re - r.rh, TauB: r.tauB,
+			Rh: r.rh, TauH: r.tauH, TimeFactor: timeFactor}
 		b := Band{RatingA: r.ratingA, Thermal: th}
-		if withGates {
+		if calibrated {
 			in := r.ratingA
 			b.Gates = []Gate{
 				{1.25, 3600, true}, {1.6, 3600, false},
@@ -162,30 +175,34 @@ func ggBands(timeFactor float64, withGates bool) []Band {
 				{r.imin01 / in, 0.1, true}, {r.imax1 / in, 0.1, false},
 			}
 			b.I2tMin, b.I2tMax = r.i2tMin, r.i2tMax
-			b.Targets = []Point{
-				{math.Sqrt(math.Sqrt(r.i2tMin*r.i2tMax)/0.01) / in, 0.01},
-				{math.Sqrt(r.imin01*r.imax1) / in, 0.1},
-				{math.Sqrt(r.imin10*r.imax5) / in, math.Sqrt(50)},
+			b.Reference = append(b.Reference, Point{r.abbStartA / in, 7990})
+			for i, m := range abbMultiples {
+				b.Reference = append(b.Reference, Point{m, r.abb[i]})
 			}
+			b.Reference = append(b.Reference, Point{r.abb001A / in, 0.01})
 		}
 		out = append(out, b)
 	}
 	return out
 }
 
+// amHolderTauS is aM's holder and cabinet, as gG's were before they were
+// fitted: a modelling choice.
+const amHolderTauS = 1200.0
+
 // amBand is aM at any rating. Gates from Mersen EduPack TM-104 (2012) slide
 // 7, "as per IEC 60269", for any current rating: not melting within 60 s at
 // 4 In, 0.5 s at 8 In and 0.2 s at 10 In; melting within 60 s at 6.3 In,
-// 0.5 s at 12.5 In and 0.1 s at 19 In. Fitted like gG to √(4 × 6.3) In at
-// 60 s, 10 In at √(0.2 × 0.5) s and 19 In at 0.05 s, with UMin = 4 (aM
-// protects against short circuits, not overloads) and the holder at a 0.2
-// share, which the fit needs.
+// 0.5 s at 12.5 In and 0.1 s at 19 In. Fitted to √(4 × 6.3) In at 60 s,
+// 10 In at √(0.2 × 0.5) s and 19 In at 0.05 s, with UMin = 4 (an
+// assumption: aM protects against short circuits, not overloads) and the
+// holder at a 0.2 share, which the fit needs.
 func amBand() Band {
 	return Band{RatingA: 0,
-		Thermal: Thermal{UMin: 4, Re: 0.2005, TauE: 0.2001, Rb: 0.5995, TauB: 45.9302, Rh: 0.2, TauH: holderTauS},
+		Thermal: Thermal{UMin: 4, Re: 0.2005, TauE: 0.2001, Rb: 0.5995, TauB: 45.9302, Rh: 0.2, TauH: amHolderTauS},
 		Gates: []Gate{{4, 60, true}, {6.3, 60, false}, {8, 0.5, true}, {10, 0.2, true},
 			{12.5, 0.5, false}, {19, 0.1, false}},
-		Targets: []Point{{math.Sqrt(4 * 6.3), 60}, {10, math.Sqrt(0.2 * 0.5)}, {19, 0.05}},
+		Reference: []Point{{math.Sqrt(4 * 6.3), 60}, {10, math.Sqrt(0.2 * 0.5)}, {19, 0.05}},
 	}
 }
 
@@ -193,8 +210,8 @@ var profiles = func() map[string]Profile {
 	m := map[string]Profile{
 		Manual: {ID: Manual, Label: "Manual", Source: "never blows by itself"},
 		IecGg: {ID: IecGg, Label: "IEC 60269 gG/gL (general purpose)", RefRatingA: 25, Bands: ggBands(1, true),
-			Source: "IEC 60269-1 gates, I²t and conventional currents per rating (see gg)"},
-		IecAm: {ID: IecAm, Label: "IEC 60269 aM (motor, short-circuit)", Bands: []Band{amBand()},
+			Source: "IEC 60269-1 gates, I²t and conventional currents; ABB OFAF 000 gG curves within them (see gg)"},
+		IecAm: {ID: IecAm, Label: "IEC 60269 aM (motor, short-circuit)", RefRatingA: 25, Bands: []Band{amBand()},
 			Source: "IEC 60269 aM gates (see amBand)"},
 		// Not calibrated: gG with every time scaled, as the simulator's
 		// earlier curves had them against gG.
@@ -209,8 +226,7 @@ var profiles = func() map[string]Profile {
 		for i := range p.Bands {
 			p.Bands[i].sys = newSystem(p.Bands[i].Thermal)
 		}
-		if len(p.Bands) > 0 {
-			b := p.band(p.RefRatingA)
+		if b, err := p.band(p.RefRatingA); err == nil {
 			for _, x := range []float64{1.5, 1.6, 2, 3, 5, 10, 20} {
 				if t := b.MeltSeconds(x, RefAmbientC); !math.IsInf(t, 1) {
 					p.Curve = append(p.Curve, Point{x, t})
@@ -238,32 +254,58 @@ func All() []Profile {
 	return out
 }
 
-// band is the band nearest ratingA on log axes; a rating outside the bands
-// takes the nearest end.
-func (p Profile) band(ratingA float64) *Band {
+// Ratings are the ratings a gG-based profile is calibrated for; between
+// them a rating takes the nearest band on log axes.
+func (p Profile) Ratings() []float64 {
+	var out []float64
+	for _, b := range p.Bands {
+		if b.RatingA > 0 {
+			out = append(out, b.RatingA)
+		}
+	}
+	return out
+}
+
+// band is the band for ratingA: the nearest on log axes between the first
+// and the last rating, any rating for a rating-independent band (aM), an
+// error outside the bands or for a profile without any.
+func (p Profile) band(ratingA float64) (*Band, error) {
 	if len(p.Bands) == 0 {
-		return nil
+		return nil, fmt.Errorf("%s has no fuse model", p.ID)
+	}
+	if !(ratingA > 0) || math.IsInf(ratingA, 0) {
+		return nil, fmt.Errorf("fuse rating %v A is not a rating", ratingA)
+	}
+	if len(p.Bands) == 1 && p.Bands[0].RatingA == 0 {
+		return &p.Bands[0], nil
+	}
+	lo, hi := p.Bands[0].RatingA, p.Bands[len(p.Bands)-1].RatingA
+	if ratingA < lo || ratingA > hi {
+		return nil, fmt.Errorf("%s is modelled for %g-%g A, not %g A", p.ID, lo, hi, ratingA)
 	}
 	best, dist := 0, math.Inf(1)
 	for i, b := range p.Bands {
-		if b.RatingA <= 0 || ratingA <= 0 {
-			return &p.Bands[i]
-		}
 		if d := math.Abs(math.Log(ratingA / b.RatingA)); d < dist {
 			best, dist = i, d
 		}
 	}
-	return &p.Bands[best]
+	return &p.Bands[best], nil
 }
 
-// Band returns the band a fuse rated ratingA uses, and false for a profile
-// without bands.
+// Band returns the band a fuse rated ratingA uses, and false when the
+// profile has none for it.
 func (p Profile) Band(ratingA float64) (Band, bool) {
-	b := p.band(ratingA)
-	if b == nil {
+	b, err := p.band(ratingA)
+	if err != nil {
 		return Band{}, false
 	}
 	return *b, true
+}
+
+// Supports says whether the profile models a fuse rated ratingA.
+func (p Profile) Supports(ratingA float64) bool {
+	_, err := p.band(ratingA)
+	return err == nil
 }
 
 // TripSeconds is the time to melt from cold at multiple × the rating, at the
@@ -273,10 +315,10 @@ func (p Profile) TripSeconds(multiple float64) float64 {
 }
 
 // MeltSeconds is the time to melt from cold at multiple × a rating of
-// ratingA in ambientC; +Inf if it never melts.
+// ratingA in ambientC; +Inf if it never melts or the rating has no band.
 func (p Profile) MeltSeconds(multiple, ratingA, ambientC float64) float64 {
-	b := p.band(ratingA)
-	if b == nil {
+	b, err := p.band(ratingA)
+	if err != nil {
 		return math.Inf(1)
 	}
 	return b.MeltSeconds(multiple, ambientC)
@@ -292,49 +334,74 @@ type Phase struct {
 	// Theta is each body's rise over ambient, in per-unit (element, body,
 	// holder); zero is cold.
 	Theta [3]float64
-	// AmbientC is the cabinet's air; 0 means DefaultAmbientC.
-	AmbientC float64
+	// AmbientC is the cabinet's air; nil means DefaultAmbientC. 0 is 0 °C.
+	AmbientC *float64
 	// Damage is the element's way from ambient to melting, 0 to 1; Step
 	// sets it.
 	Damage float64
 	Blown  bool
 }
 
+// Ambient returns a pointer to c, for Phase.AmbientC.
+func Ambient(c float64) *float64 { return &c }
+
+func (ph *Phase) ambient() float64 {
+	if ph.AmbientC == nil {
+		return DefaultAmbientC
+	}
+	return *ph.AmbientC
+}
+
 // Status describes a phase after a step.
 type Status struct {
-	Ratio            float64 `json:"ratio"`       // current over the rating
-	TripSeconds      float64 `json:"trip_s"`      // time to melt at this ratio from cold; 0 if never
-	RemainingSeconds float64 `json:"remaining_s"` // time to melt at this ratio from now; 0 if never
-	Damage           float64 `json:"damage"`      // the element's way from ambient to melting
-	Active           bool    `json:"active"`      // it will melt if the current stays
+	Ratio            float64 `json:"ratio"`             // current over the rating
+	TripSeconds      float64 `json:"trip_s"`            // time to melt at this ratio from cold; 0 if never
+	RemainingSeconds float64 `json:"remaining_s"`       // time to melt at this ratio from now; 0 if never
+	Damage           float64 `json:"damage"`            // the element's way from ambient to melting
+	Active           bool    `json:"active"`            // it will melt if the current stays
+	Invalid          string  `json:"invalid,omitempty"` // why the step was refused; the state is unchanged
 }
 
 // Step advances one phase by dt seconds at amps through a fuse rated
-// ratingA. The sign of amps does not matter. The step is exact for a
-// current held over dt, so the result does not depend on the step size. A
-// profile without bands leaves the phase as it is.
+// ratingA. The sign of amps does not matter, and an infinite current blows
+// the fuse at once. The step is exact for a current held over dt, so the
+// result does not depend on the step size; dt = 0 changes nothing and asks
+// how long the fuse has left at that current.
+//
+// Step refuses, leaving the phase as it was and saying why in
+// Status.Invalid: a NaN current, a negative, NaN or infinite dt, an ambient
+// that is not finite or not below the melting point, and a rating the
+// profile does not model (the profile without a model, manual, refuses
+// nothing and never blows).
 func (p Profile) Step(ph *Phase, amps, ratingA, dt float64) Status {
-	b := p.band(ratingA)
-	if b == nil {
+	if len(p.Bands) == 0 {
 		return Status{Damage: ph.Damage}
 	}
-	if dt < 0 {
-		dt = 0
+	b, err := p.band(ratingA)
+	switch {
+	case err != nil:
+		return Status{Damage: ph.Damage, Invalid: err.Error()}
+	case math.IsNaN(amps):
+		return Status{Damage: ph.Damage, Invalid: "current is NaN"}
+	case !(dt >= 0) || math.IsInf(dt, 1):
+		return Status{Damage: ph.Damage, Invalid: fmt.Sprintf("step of %v s", dt)}
+	}
+	ambient := ph.ambient()
+	if math.IsNaN(ambient) || math.IsInf(ambient, 0) || ambient >= MeltC {
+		return Status{Damage: ph.Damage, Invalid: fmt.Sprintf("ambient of %v °C", ambient)}
 	}
 	if ph.Blown {
 		ph.Damage = 1
 		return Status{Damage: 1}
 	}
-	u := 0.0
-	if ratingA > 0 {
-		u = math.Abs(amps) / ratingA
-	}
-	ambient := ph.AmbientC
-	if ambient == 0 {
-		ambient = DefaultAmbientC
+	u := math.Abs(amps) / ratingA
+	st := Status{Ratio: u}
+	if math.IsInf(u, 1) {
+		ph.Blown, ph.Damage = true, 1
+		st.Damage = 1
+		return st
 	}
 	melt := b.sys.meltRise(ambient)
-	st := Status{Ratio: u}
 	if cold := b.sys.timeToMelt([3]float64{}, u, melt); !math.IsInf(cold, 1) {
 		st.TripSeconds = cold
 	}
@@ -352,6 +419,29 @@ func (p Profile) Step(ph *Phase, amps, ratingA, dt float64) Status {
 		st.RemainingSeconds, st.Active = left-dt, true
 	}
 	return st
+}
+
+// Preheat puts the phase in the steady state of a current held for ever in
+// its ambient, as a fuse that has carried the evening's load: a scenario
+// that starts mid-evening starts warm, not cold. It refuses a current that
+// would melt the fuse before reaching that state, and anything Step
+// refuses, leaving the phase as it was.
+func (p Profile) Preheat(ph *Phase, amps, ratingA float64) error {
+	if len(p.Bands) == 0 {
+		return fmt.Errorf("%s has no fuse model", p.ID)
+	}
+	if st := p.Step(&Phase{AmbientC: ph.AmbientC}, amps, ratingA, 0); st.Invalid != "" {
+		return fmt.Errorf("%s", st.Invalid)
+	}
+	b, _ := p.band(ratingA)
+	u := math.Abs(amps) / ratingA
+	inf, _ := b.sys.modes([3]float64{}, u)
+	if inf[0] >= b.sys.meltRise(ph.ambient()) {
+		return fmt.Errorf("%.3g × %g A melts the fuse before it settles", u, ratingA)
+	}
+	ph.Theta, ph.Blown = inf, false
+	ph.Damage = inf[0] / b.sys.meltRise(ph.ambient())
+	return nil
 }
 
 // system is a band's ladder solved once: C dθ/dt = -G θ + (u², 0, 0).
@@ -397,7 +487,6 @@ func newSystem(t Thermal) system {
 // meltRise is the element's melting rise over ambient, in per-unit: UMin²
 // at the reference ambient, less in a warmer cabinet.
 func (s *system) meltRise(ambientC float64) float64 {
-	ambientC = math.Min(ambientC, MeltC-1)
 	return s.uMin2 * (MeltC - ambientC) / (MeltC - RefAmbientC)
 }
 
@@ -447,7 +536,7 @@ func (s *system) timeToMelt(theta [3]float64, u, melt float64) float64 {
 	for t := 1e-6; t <= 1e7; t *= 1.2 {
 		if f(t) >= 0 {
 			lo, hi := prev, t
-			for i := 0; i < 60 && hi-lo > 1e-9*hi; i++ {
+			for i := 0; i < 200 && hi-lo > 1e-12*hi; i++ {
 				mid := (lo + hi) / 2
 				if f(mid) >= 0 {
 					hi = mid
