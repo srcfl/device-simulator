@@ -47,6 +47,23 @@ type Server struct {
 	clientsMu     sync.RWMutex
 	nextClientID  int
 	RegisterSet   *RegisterSet // Device-specific register definitions (nil = uses global Sungrow defs)
+	silent        bool         // read requests but never answer
+}
+
+// SetSilent makes the server keep its connections and read every request
+// but answer none, as a device that hangs does: a client sees timeouts,
+// not a refused connection.
+func (s *Server) SetSilent(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.silent = on
+}
+
+// Silent says whether the server is ignoring requests.
+func (s *Server) Silent() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.silent
 }
 
 // NewServer creates a new Modbus server with the specified register count
@@ -375,7 +392,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			response = s.makeException(transactionID, unitID, functionCode, 0x01)
 		}
 
-		if response != nil {
+		if response != nil && !s.Silent() {
 			conn.Write(response)
 		}
 	}

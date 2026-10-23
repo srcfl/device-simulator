@@ -67,6 +67,8 @@ type Connector struct {
 	CurrentPower float64 `json:"currentPower"`
 	EnergyWh     float64 `json:"energyWh"`
 	Phases       int     `json:"phases"` // 1 or 3: phases the car draws on
+
+	offerSince time.Time // when the offer last rose from zero
 }
 
 // Transaction represents an active charging transaction
@@ -124,6 +126,8 @@ type Server struct {
 	ocppURL        string // Central System URL to connect to (client mode)
 	clientMode     bool   // true = connect to URL, false = listen for connections
 	reconnectDelay time.Duration
+	redialAt       time.Time // DropConnection keeps the charger away until then
+	frameLog       func(dir string, frame []byte)
 
 	// 3-phase metering
 	voltageL1 float64
@@ -135,6 +139,11 @@ type Server struct {
 	phaseW    [3]float64 // what the chargers draw on L1, L2, L3
 
 	// Simulation control
+	carMaxA       float64       // most the car draws per phase; 0 = whatever is offered
+	loadBalancerA float64       // the charger's own cap per phase; 0 = none
+	startupDelay  time.Duration // from an offer rising from zero to the car drawing
+	carPhases    int     // phases the car charges on; 0 = as many as offered
+	wiredPhases  int     // phases the charger is wired on (from L1); 0 = three
 	evConnected  bool    // Whether an EV is plugged in
 	nextTxId     int     // Counter for local transaction IDs
 }
@@ -210,6 +219,78 @@ func (s *Server) ProfileDelay() time.Duration {
 	return s.profileDelay
 }
 
+// SetCar describes the car on the charger: the most it draws per phase and
+// on how many phases it charges. A one-phase car draws on L1 whatever the
+// charger offers. Zeros mean the car takes what it is offered.
+func (s *Server) SetCar(maxA float64, phases int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.carMaxA, s.carPhases = maxA, phases
+}
+
+// SetLoadBalancer caps what the charger gives per phase, as a charger with
+// its own load balancer (Easee) does whatever the Central System offers.
+// Zero turns it off.
+func (s *Server) SetLoadBalancer(a float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loadBalancerA = a
+}
+
+// SetWiredPhases wires the charger on its first n phases from L1; 0 or 3
+// is three. A one-phase charger gives an order's current on L1, whatever
+// numberPhases says, and at most its rating there.
+func (s *Server) SetWiredPhases(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wiredPhases = n
+}
+
+// WiredOnOnePhase says whether SetWiredPhases(1) wired the charger on L1.
+func (s *Server) WiredOnOnePhase() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.wiredLocked() == 1
+}
+
+func (s *Server) wiredLocked() int {
+	if s.wiredPhases > 0 && s.wiredPhases < 3 {
+		return s.wiredPhases
+	}
+	return 3
+}
+
+// SetStartupDelay is how long the car takes to draw after an offer rises
+// from zero.
+func (s *Server) SetStartupDelay(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startupDelay = d
+}
+
+func (s *Server) loadBalancedLocked(w float64, phases int) float64 {
+	if s.loadBalancerA <= 0 {
+		return w
+	}
+	return math.Min(w, s.loadBalancerA*float64(phases)*s.averagePhaseVoltageLocked())
+}
+
+// carDrawLocked is what the car takes of an offer of w watts on phases.
+func (s *Server) carDrawLocked(w float64, phases int) (float64, int) {
+	if w <= 0 || (s.carMaxA <= 0 && (s.carPhases <= 0 || s.carPhases >= phases)) {
+		return w, phases
+	}
+	v := s.averagePhaseVoltageLocked()
+	a := w / (float64(phases) * v)
+	if s.carMaxA > 0 {
+		a = math.Min(a, s.carMaxA)
+	}
+	if s.carPhases > 0 && s.carPhases < phases {
+		phases = s.carPhases
+	}
+	return a * float64(phases) * v, phases
+}
+
 // GetOCPPURL returns the configured Central System URL
 func (s *Server) GetOCPPURL() string {
 	s.mu.RLock()
@@ -251,6 +332,10 @@ func (s *Server) Start() error {
 
 	// Recreate stop channel (may have been closed by previous Stop)
 	s.stopChan = make(chan struct{})
+
+	// The charger's power follows its profiles whether or not a Central
+	// System is connected.
+	go s.simulationLoop(s.stopChan)
 
 	if s.clientMode && s.ocppURL != "" {
 		// Client mode: connect to Central System
@@ -302,6 +387,17 @@ func (s *Server) clientLoop() {
 			return
 		}
 
+		// An outage asked for while a retry was already waiting ends at its
+		// own deadline, not the retry's.
+		if wait := s.untilRedial(); wait > 0 {
+			select {
+			case <-s.stopChan:
+				return
+			case <-time.After(wait):
+				continue
+			}
+		}
+
 		// Build the full WebSocket URL with charge point identity
 		// OCPP 1.6 expects: ws://host/path/ChargePointId
 		wsURL, header, err := dialTarget(url, serial)
@@ -331,7 +427,7 @@ func (s *Server) clientLoop() {
 			select {
 			case <-s.stopChan:
 				return
-			case <-time.After(s.reconnectDelay):
+			case <-time.After(s.redialWait()):
 				continue
 			}
 		}
@@ -348,17 +444,14 @@ func (s *Server) clientLoop() {
 		// Send BootNotification
 		go s.sendBootNotification()
 
-		// Start heartbeat loop
-		go s.heartbeatLoop()
-
-		// Start meter values loop
-		go s.meterValuesLoop()
-
-		// Start simulation loop to update values
-		go s.simulationLoop()
+		// Heartbeats and meter values belong to this connection.
+		done := make(chan struct{})
+		go s.heartbeatLoop(done)
+		go s.meterValuesLoop(done)
 
 		// Read messages until disconnected
 		s.readLoop(conn)
+		close(done)
 
 		s.mu.Lock()
 		s.wsConn = nil
@@ -368,7 +461,7 @@ func (s *Server) clientLoop() {
 		select {
 		case <-s.stopChan:
 			return
-		case <-time.After(s.reconnectDelay):
+		case <-time.After(s.redialWait()):
 			log.Printf("[%s] Reconnecting to Central System...", serial)
 		}
 	}
@@ -396,6 +489,53 @@ func dialTarget(raw, identity string) (string, http.Header, error) {
 	}
 	u.Path += identity
 	return u.String(), header, nil
+}
+
+// DropConnection closes the connection to the Central System, as a lost
+// network does, and keeps the charger from dialling again for d. A session
+// in progress goes on: the car keeps charging.
+func (s *Server) DropConnection(d time.Duration) {
+	s.mu.Lock()
+	s.redialAt = time.Now().Add(d)
+	conn := s.wsConn
+	s.mu.Unlock()
+	if conn != nil {
+		conn.Close()
+	}
+}
+
+// untilRedial is how long DropConnection still keeps the charger away.
+func (s *Server) untilRedial() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return time.Until(s.redialAt)
+}
+
+// redialWait is how long the client waits before it dials again.
+func (s *Server) redialWait() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if until := time.Until(s.redialAt); until > s.reconnectDelay {
+		return until
+	}
+	return s.reconnectDelay
+}
+
+// SetFrameLog makes the charger report every OCPP-J frame it reads
+// ("cs->cp") or writes ("cp->cs"). Nil turns it off.
+func (s *Server) SetFrameLog(fn func(dir string, frame []byte)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frameLog = fn
+}
+
+func (s *Server) logFrame(dir string, frame []byte) {
+	s.mu.RLock()
+	fn := s.frameLog
+	s.mu.RUnlock()
+	if fn != nil {
+		fn(dir, frame)
+	}
 }
 
 // RedactURL hides the password in a Central System URL for logs.
@@ -429,7 +569,7 @@ func (s *Server) readLoop(conn *websocket.Conn) {
 }
 
 // meterValuesLoop periodically sends meter values during active transactions
-func (s *Server) meterValuesLoop() {
+func (s *Server) meterValuesLoop(done <-chan struct{}) {
 	for {
 		intervalSeconds := s.getMeterValueSampleInterval()
 		if intervalSeconds <= 0 {
@@ -438,6 +578,8 @@ func (s *Server) meterValuesLoop() {
 
 		select {
 		case <-s.stopChan:
+			return
+		case <-done:
 			return
 		case <-time.After(time.Duration(intervalSeconds) * time.Second):
 			s.sendMeterValuesForActiveTransactions()
@@ -560,14 +702,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Send BootNotification
 	go s.sendBootNotification()
 
-	// Start heartbeat loop
-	go s.heartbeatLoop()
-
-	// Start meter values loop
-	go s.meterValuesLoop()
-
-	// Start simulation loop to update values
-	go s.simulationLoop()
+	// Heartbeats and meter values belong to this connection.
+	done := make(chan struct{})
+	defer close(done)
+	go s.heartbeatLoop(done)
+	go s.meterValuesLoop(done)
 
 	// Read messages
 	for {
@@ -588,6 +727,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMessage(data []byte) {
+	s.logFrame("cs->cp", data)
 	messageType, messageId, action, payload, err := ParseOCPPMessage(data)
 	if err != nil {
 		log.Printf("[%s] Failed to parse message: %v", s.serialNumber, err)
@@ -1378,6 +1518,8 @@ func (s *Server) evaluateProfile(profile *ChargingProfile, now time.Time, txStar
 	if activePeriod.NumberPhases != nil && *activePeriod.NumberPhases > 0 {
 		phases = *activePeriod.NumberPhases
 	}
+	// A current flows on the phases the charger has.
+	phases = min(phases, s.wiredLocked())
 	// Convert to watts
 	unit := strings.ToUpper(strings.TrimSpace(schedule.ChargingRateUnit))
 	switch unit {
@@ -1491,6 +1633,11 @@ func (s *Server) computeEffectiveLocked(connectorId int, now time.Time) (float64
 		phases = 1
 		maxW /= 3
 	}
+	// A charger wired on fewer phases draws on those; max_kw is its rating
+	// as wired.
+	if w := s.wiredLocked(); w < phases {
+		phases = w
+	}
 
 	// Cap at hardware max
 	effectiveW = math.Min(effectiveW, maxW)
@@ -1600,7 +1747,7 @@ func (s *Server) getHeartbeatInterval() int {
 	return 60
 }
 
-func (s *Server) heartbeatLoop() {
+func (s *Server) heartbeatLoop(done <-chan struct{}) {
 	interval := s.getHeartbeatInterval()
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
@@ -1608,6 +1755,8 @@ func (s *Server) heartbeatLoop() {
 	for {
 		select {
 		case <-s.stopChan:
+			return
+		case <-done:
 			return
 		case <-ticker.C:
 			s.sendRequest(ActionHeartbeat, HeartbeatRequest{})
@@ -1621,14 +1770,15 @@ func (s *Server) heartbeatLoop() {
 	}
 }
 
-// simulationLoop updates simulation values every second
-func (s *Server) simulationLoop() {
+// simulationLoop updates simulation values every second for as long as the
+// charger runs, connected or not: a car charges through a network outage.
+func (s *Server) simulationLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.stopChan:
+		case <-stop:
 			return
 		case <-ticker.C:
 			s.GenerateValues(time.Now())
@@ -1785,6 +1935,7 @@ func (s *Server) sendRequest(action string, payload interface{}) (json.RawMessag
 
 	// Serialize WebSocket writes to prevent concurrent write panic
 	s.writeMu.Lock()
+	s.logFrame("cp->cs", msg)
 	err = conn.WriteMessage(websocket.TextMessage, msg)
 	s.writeMu.Unlock()
 
@@ -1831,6 +1982,7 @@ func (s *Server) sendResponse(messageId string, payload interface{}) {
 
 	// Serialize WebSocket writes
 	s.writeMu.Lock()
+	s.logFrame("cp->cs", msg)
 	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 		log.Printf("[%s] Failed to send response: %v", s.serialNumber, err)
 	}
@@ -1853,6 +2005,7 @@ func (s *Server) sendError(messageId, errorCode, errorDescription string, errorD
 
 	// Serialize WebSocket writes
 	s.writeMu.Lock()
+	s.logFrame("cp->cs", msg)
 	if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 		log.Printf("[%s] Failed to send error response: %v", s.serialNumber, err)
 	}
@@ -2377,18 +2530,34 @@ func (s *Server) GenerateValues(simTime time.Time) {
 	// Simulate power consumption for active transactions
 	var totalPower float64
 	var phaseW [3]float64
+	offered := map[int]bool{} // connectors in a session that may draw
 	for _, tx := range s.transactions {
 		conn := s.connectors[tx.ConnectorID]
 		if conn.Status == StatusCharging || conn.Status == StatusSuspendedEVSE {
-			powerW, phases := s.computeEffectiveLocked(tx.ConnectorID, simTime)
+			offered[tx.ConnectorID] = true
+			offerW, offerPhases := s.computeEffectiveLocked(tx.ConnectorID, simTime)
+			offerW = s.loadBalancedLocked(offerW, offerPhases)
+			powerW, phases := s.carDrawLocked(offerW, offerPhases)
 			conn.Phases = phases
+			// The car takes a while to start drawing after an offer rises
+			// from zero; the charger meanwhile reports Charging at 0 W.
+			if offerW > 0 {
+				if conn.offerSince.IsZero() {
+					conn.offerSince = simTime
+				}
+				if simTime.Sub(conn.offerSince) < s.startupDelay {
+					powerW = 0
+				}
+			} else {
+				conn.offerSince = time.Time{}
+			}
 
-			if powerW <= 0 && conn.Status == StatusCharging {
+			if offerW <= 0 && conn.Status == StatusCharging {
 				// Power dropped to 0 — transition to SuspendedEVSE
 				conn.Status = StatusSuspendedEVSE
 				conn.CurrentPower = 0
 				statusChanges = append(statusChanges, statusChange{tx.ConnectorID, StatusSuspendedEVSE})
-			} else if powerW > 0 && conn.Status == StatusSuspendedEVSE {
+			} else if offerW > 0 && conn.Status == StatusSuspendedEVSE {
 				// Power restored — transition back to Charging
 				conn.Status = StatusCharging
 				conn.CurrentPower = powerW
@@ -2410,6 +2579,13 @@ func (s *Server) GenerateValues(simTime time.Time) {
 			energyDelta := conn.CurrentPower / 3600.0
 			conn.EnergyWh += energyDelta
 			tx.MeterNow = int(conn.EnergyWh)
+		}
+	}
+	// A connector out of session waits out the startup delay again on its
+	// next offer.
+	for id, conn := range s.connectors {
+		if !offered[id] && conn != nil {
+			conn.offerSince = time.Time{}
 		}
 	}
 

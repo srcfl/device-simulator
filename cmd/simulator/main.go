@@ -149,6 +149,13 @@ type Site struct {
 	FuseOverload FuseOverload      `json:"-"`
 	FuseHeat     [3]fuse.Phase     `json:"-"`           // each phase's thermal state (L1, L2, L3)
 	FuseAmbientC *float64          `json:"-"`           // the fuse cabinet's air; nil is 25 °C
+	lastPhaseW   PhasePowers       // what flowed through each phase's fuse on the last tick
+
+	// What the site meter reports, beside the truth (headless runs).
+	meterFrozenUntil time.Time         // a late meter: its registers stand still until then
+	meterHeldKWh     [2]float64        // import, export that flowed while they stood still
+	meterGlitch      bool              // the next reading's total disagrees with its phases
+	signedCurrents   bool              // phase currents carry the sign of their power
 	BoundMeter   bool              `json:"bound_meter"` // True if meter was auto-created with site
 	P1Buffer     *P1IntervalBuffer // P1 port interval buffer
 
@@ -189,6 +196,11 @@ var (
 )
 
 func main() {
+	// `simulator run -spec house.json` runs one house headless (run.go).
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		os.Exit(runHeadless(os.Args[2:]))
+	}
+
 	// Base port configuration
 	modbusBasePort := flag.Int("modbus-base", 5000, "Base port for Modbus servers")
 	mqttBasePort := flag.Int("mqtt-base", 1883, "Base port for MQTT brokers")
@@ -1953,46 +1965,7 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 			return
 		}
 
-		// Apply profile based on protocol
-		switch sim.Protocol {
-		case "modbus":
-			// Update RegisterSet if the profile specifies one
-			if profile.RegisterSetName != "" {
-				if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
-					sim.RegisterSet = rs
-					sim.Server.RegisterSet = rs
-					sim.Server.InitDefaultsFromSet(rs)
-				}
-			}
-			// Apply profile-specific defaults
-			for addr, value := range profile.Defaults {
-				var def *modbus.RegisterDef
-				if sim.RegisterSet != nil {
-					def = sim.RegisterSet.Lookup[addr]
-				}
-				if def == nil {
-					def = modbus.RegisterLookup[addr]
-				}
-				if def != nil {
-					if err := sim.Server.WriteRegisterValue(def, value); err != nil {
-						log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
-					}
-				}
-			}
-			sim.mu.Lock()
-			sim.EMSResponse = commandResponse(profile)
-			sim.mu.Unlock()
-		case "ocpp":
-			if profile.OCPPConfig != nil && sim.OCPPServer != nil {
-				sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
-				sim.OCPPServer.ApplyConfiguration(profile.OCPPConfig.Configuration)
-				sim.mu.Lock()
-				sim.EMSResponse = commandResponse(profile)
-				sim.mu.Unlock()
-				sim.OCPPServer.SetProfileDelay(commandResponse(profile))
-				log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
-			}
-		}
+		applyProfile(sim, profile)
 
 		sim.ProfilesManager.SetActive(name)
 
@@ -2008,6 +1981,50 @@ func handleProfile(w http.ResponseWriter, r *http.Request, sim *Simulator, profi
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(profile)
+}
+
+// applyProfile puts a profile's register set, defaults, OCPP configuration
+// and model parameters on a simulator.
+func applyProfile(sim *Simulator, profile *profiles.Profile) {
+	switch sim.Protocol {
+	case "modbus":
+		// Update RegisterSet if the profile specifies one
+		if profile.RegisterSetName != "" {
+			if rs := devices.GetRegisterSet(profile.RegisterSetName); rs != nil {
+				sim.RegisterSet = rs
+				sim.Server.RegisterSet = rs
+				sim.Server.InitDefaultsFromSet(rs)
+			}
+		}
+		// Apply profile-specific defaults
+		for addr, value := range profile.Defaults {
+			var def *modbus.RegisterDef
+			if sim.RegisterSet != nil {
+				def = sim.RegisterSet.Lookup[addr]
+			}
+			if def == nil {
+				def = modbus.RegisterLookup[addr]
+			}
+			if def != nil {
+				if err := sim.Server.WriteRegisterValue(def, value); err != nil {
+					log.Printf("[%s] Failed to write register %d: %v", sim.Serial, addr, err)
+				}
+			}
+		}
+		sim.mu.Lock()
+		sim.EMSResponse = commandResponse(profile)
+		sim.mu.Unlock()
+	case "ocpp":
+		if profile.OCPPConfig != nil && sim.OCPPServer != nil {
+			sim.OCPPServer.SetVendorModel(profile.OCPPConfig.Vendor, profile.OCPPConfig.Model)
+			sim.OCPPServer.ApplyConfiguration(profile.OCPPConfig.Configuration)
+			sim.mu.Lock()
+			sim.EMSResponse = commandResponse(profile)
+			sim.mu.Unlock()
+			sim.OCPPServer.SetProfileDelay(commandResponse(profile))
+			log.Printf("[%s] Applied OCPP profile: %s (%s)", sim.Serial, profile.OCPPConfig.Model, profile.OCPPConfig.Vendor)
+		}
+	}
 }
 
 func handleAutomation(w http.ResponseWriter, r *http.Request, sim *Simulator) {
@@ -4117,6 +4134,14 @@ func getPowerContribution(sim *Simulator) float64 {
 	return 0
 }
 
+// isRunning reads Running under the simulator's lock; a stop from the API
+// or a headless run writes it while the site loop ticks.
+func isRunning(sim *Simulator) bool {
+	sim.mu.RLock()
+	defer sim.mu.RUnlock()
+	return sim.Running
+}
+
 // getPhaseContribution returns a charger's draw per phase. A car on a
 // 1-phase profile loads L1 only, which phase factors cannot express.
 func getPhaseContribution(sim *Simulator) ([3]float64, bool) {
@@ -4147,8 +4172,12 @@ func startSiteAggregation(site *Site) {
 
 	log.Printf("[Site %d] Aggregation started", site.ID)
 
+	// Read here, not in the loop: a headless run sets the tick before it
+	// builds its site, and the next run may set it again while this loop
+	// winds down.
+	interval := getSiteTickInterval()
 	go func() {
-		ticker := time.NewTicker(getSiteTickInterval())
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		lastTick := time.Now()
 
@@ -4613,6 +4642,9 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 
 	// Calculate total power from phase powers
 	totalPower := phasePowers.L1 + phasePowers.L2 + phasePowers.L3
+	site.mu.Lock()
+	site.lastPhaseW = phasePowers
+	site.mu.Unlock()
 
 	// Update BaseLoadW for backward compatibility (used for display)
 	// This is the sum of SitePhaseLoads
@@ -4731,29 +4763,54 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		}
 	}
 
+	// A late meter keeps its last reading; a glitch shows once.
+	site.mu.Lock()
+	frozen := time.Now().Before(site.meterFrozenUntil)
+	q := meterQuirks{signedCurrents: site.signedCurrents, glitch: site.meterGlitch && !frozen}
+	if q.glitch {
+		site.meterGlitch = false
+	}
+	// The energy goes on while the readings stand still, and shows when
+	// they move again.
+	var held [2]float64
+	if frozen {
+		if totalPower > 0 {
+			site.meterHeldKWh[0] += energyDeltaKWh
+		} else if totalPower < 0 {
+			site.meterHeldKWh[1] += energyDeltaKWh
+		}
+	} else {
+		held, site.meterHeldKWh = site.meterHeldKWh, [2]float64{}
+	}
+	site.mu.Unlock()
+
 	// Handle P1 interval mode
-	if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
+	if frozen {
+		// The meter stands still; the physics above went on.
+	} else if p1Buffer == nil || p1Buffer.Mode == P1ModeDirect {
 		// Direct mode: write immediately to all meters
 		for _, mID := range meterIDs {
 			mSim := getSimulator(mID)
-			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && mSim.Running {
-				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown)
+			if mSim != nil && mSim.Protocol == "modbus" && mSim.Server != nil && isRunning(mSim) {
+				writeMeterRegisters(mSim, totalPower, phasePowers, fuseBlown, q)
+				accumulateMeterEnergy(mSim, held[0], held[1])
 				updateMeterEnergy(mSim, totalPower, energyDeltaKWh, energyDeltaWh)
 			}
 		}
 		// Also write to primary meter if not in meterIDs (backward compat)
 		if len(meterIDs) == 0 {
-			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown)
+			writeMeterRegisters(meterSim, totalPower, phasePowers, fuseBlown, q)
+			accumulateMeterEnergy(meterSim, held[0], held[1])
 			updateMeterEnergy(meterSim, totalPower, energyDeltaKWh, energyDeltaWh)
 		}
 		// Propagate meter values to inverter sims that have built-in meter registers
 		for _, simID := range simIDs {
 			sim := getSimulator(simID)
-			if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !sim.Running {
+			if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !isRunning(sim) {
 				continue
 			}
 			if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {
-				writeMeterRegisters(sim, totalPower, phasePowers, fuseBlown)
+				writeMeterRegisters(sim, totalPower, phasePowers, fuseBlown, q)
 			}
 		}
 	} else {
@@ -4770,6 +4827,8 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 		} else if totalPower < 0 {
 			p1Buffer.ExportEnergyDelta += energyDeltaKWh
 		}
+		p1Buffer.ImportEnergyDelta += held[0]
+		p1Buffer.ExportEnergyDelta += held[1]
 
 		// Check if interval has elapsed
 		intervalDuration := getP1IntervalDuration(p1Buffer.Mode)
@@ -4788,7 +4847,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 			// Write instant power values to all meters
 			for _, mID := range meterIDs {
 				mSim := getSimulator(mID)
-				if mSim == nil || mSim.Protocol != "modbus" || mSim.Server == nil || !mSim.Running {
+				if mSim == nil || mSim.Protocol != "modbus" || mSim.Server == nil || !isRunning(mSim) {
 					continue
 				}
 				writeMeterRegisters(mSim, instantPower, instantPhasePowers, fuseBlown)
@@ -4802,7 +4861,7 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 			// Propagate meter values to inverter sims that have built-in meter registers
 			for _, simID := range simIDs {
 				sim := getSimulator(simID)
-				if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !sim.Running {
+				if sim == nil || sim.Protocol != "modbus" || sim.Server == nil || !isRunning(sim) {
 					continue
 				}
 				if sim.Category == "inverter" && sim.RegisterSet != nil && sim.RegisterSet.Semantic["meter_power"] != nil {
@@ -4818,7 +4877,17 @@ func calculateAndUpdateMeter(site *Site, simDelta time.Duration) {
 // writeMeterRegisters writes power values to meter registers.
 // Writes to semantic names on the meter's RegisterSet, and also to global-lookup
 // addresses for dual-format support (SDM630 + Sungrow on same meter).
-func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, fuseBlown PhaseFuses) {
+// meterQuirks are what a meter reports beside the truth.
+type meterQuirks struct {
+	signedCurrents bool // currents carry the sign of their phase's power
+	glitch         bool // the total reads 0 W while the phases are right
+}
+
+func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers PhasePowers, fuseBlown PhaseFuses, quirks ...meterQuirks) {
+	var q meterQuirks
+	if len(quirks) > 0 {
+		q = quirks[0]
+	}
 	if fuseBlown.L1 {
 		phasePowers.L1 = 0
 	}
@@ -4829,6 +4898,9 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 		phasePowers.L3 = 0
 	}
 	totalPower = phasePowers.L1 + phasePowers.L2 + phasePowers.L3
+	if q.glitch {
+		totalPower = 0
+	}
 
 	// Write total power via semantic name (hits the correct address for any device)
 	setSemanticValue(meterSim, "meter_power", totalPower)
@@ -4842,6 +4914,11 @@ func writeMeterRegisters(meterSim *Simulator, totalPower float64, phasePowers Ph
 	l1Current := math.Abs(phasePowers.L1) / 230.0
 	l2Current := math.Abs(phasePowers.L2) / 230.0
 	l3Current := math.Abs(phasePowers.L3) / 230.0
+	if q.signedCurrents {
+		l1Current = math.Copysign(l1Current, phasePowers.L1)
+		l2Current = math.Copysign(l2Current, phasePowers.L2)
+		l3Current = math.Copysign(l3Current, phasePowers.L3)
+	}
 
 	setSemanticValue(meterSim, "meter_l1_current", l1Current)
 	setSemanticValue(meterSim, "meter_l2_current", l2Current)

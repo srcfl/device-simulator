@@ -103,6 +103,12 @@ POST /api/simulators/{id}/automation/config # Configure time multiplier
 GET  /health                                # Health check (always 42... I mean OK)
 ```
 
+## Headless runs
+
+`simulator run -spec house.json -port-base 18700 -out run/` builds one house
+from a JSON spec, runs a timeline of events and records it once a second, for
+an EMS's automated tests. See [docs/HEADLESS_RUN.md](docs/HEADLESS_RUN.md).
+
 ## Configuration
 
 | Environment Variable | Default | Description |

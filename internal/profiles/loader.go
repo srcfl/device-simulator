@@ -48,6 +48,15 @@ type ModelParams struct {
 	// command: a hybrid's battery after an EMS write, an OCPP charger's
 	// output after a charging profile.
 	CommandResponseS float64 `json:"command_response_s,omitempty"`
+	// StartupDelayS is how long a car on an OCPP charger takes to draw
+	// after an offer rises from zero.
+	StartupDelayS float64 `json:"startup_delay_s,omitempty"`
+	// LoadBalancerA is an OCPP charger's own cap per phase, whatever the
+	// Central System offers (Easee's load balancer). Zero is none.
+	LoadBalancerA float64 `json:"load_balancer_a,omitempty"`
+	// SignedPhaseCurrents: a meter's phase currents carry the sign of their
+	// phase's power. An SDM630 reports magnitudes.
+	SignedPhaseCurrents bool `json:"signed_phase_currents,omitempty"`
 }
 
 // Profile defines a device simulation profile
@@ -140,6 +149,20 @@ func (p *Profile) Params() ModelParams {
 		return ModelParams{}
 	}
 	return *p.Model
+}
+
+// ForDriver returns the first profile, by name, that emulates the
+// device-drivers driver id, or nil.
+func (m *Manager) ForDriver(id string) *Profile {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var best *Profile
+	for _, p := range m.profiles {
+		if p.DriverID == id && (best == nil || p.Name < best.Name) {
+			best = p
+		}
+	}
+	return best
 }
 
 // Get returns a profile by name

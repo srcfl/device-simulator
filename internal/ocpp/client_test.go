@@ -3,6 +3,7 @@ package ocpp
 import (
 	"encoding/json"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -261,10 +262,204 @@ func TestCompositeScheduleKeepsThePhases(t *testing.T) {
 	}
 }
 
+// A charger wired on one phase gives an order's current on L1 whatever its
+// numberPhases, and no more than its rating.
+func TestOnePhaseWiring(t *testing.T) {
+	wired := func(p ChargingProfile) *Server {
+		s := NewServer(1, 0, "TestVendor", "TestModel", 1, 3.68)
+		s.SetWiredPhases(1)
+		s.transactions[1] = &Transaction{ID: 1, ConnectorID: 1, StartTime: time.Now()}
+		s.connectors[1].Status = StatusCharging
+		s.applyChargingProfile(1, &p)
+		s.GenerateValues(time.Now())
+		return s
+	}
+	for _, c := range []struct {
+		name string
+		p    ChargingProfile
+		want float64
+	}{
+		{"16 A on three phases", txProfileA(16, 3), 3680},
+		{"10 A on one phase", txProfileA(10, 1), 2300},
+		{"32 A", txProfileA(32, 3), 3680},
+		{"3 kW", txProfileW(1, 3000), 3000},
+	} {
+		s := wired(c.p)
+		if got := s.PhasePowers(); math.Abs(got[0]-c.want) > 1 || got[1] != 0 || got[2] != 0 {
+			t.Errorf("%s: phase powers %v, want %.0f W on L1", c.name, got, c.want)
+		}
+	}
+}
+
 // On one phase a charger gives at most its rated current per phase.
 func TestOnePhaseDrawIsCappedAtRatedCurrent(t *testing.T) {
 	s := charging(t, 11.04, true, txProfileA(24, 1)) // a 16 A charger
 	if got := s.PhasePowers(); got != [3]float64{3680, 0, 0} {
 		t.Fatalf("phase powers %v, want 16 A (3680 W) on L1", got)
+	}
+}
+
+// A dropped connection keeps the charger away for the time asked, the car
+// keeps charging through it, and after it comes back the charger sends one
+// heartbeat per interval, not one per connection it ever had.
+// An outage that starts while the charger is already retrying lasts its
+// full length.
+func TestDropConnectionWhileRetrying(t *testing.T) {
+	csms := ocpptest.New(t)
+	csms.SetClosed(true)
+	s := newTestServer()
+	s.reconnectDelay = 50 * time.Millisecond
+	s.SetOCPPURL(csms.URL(""))
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop() })
+	time.Sleep(20 * time.Millisecond) // the first dial fails; a retry waits
+	before := time.Now()
+	s.DropConnection(600 * time.Millisecond)
+	csms.SetClosed(false)
+	waitFor(t, "BootNotification", 5*time.Second, func() bool { return csms.Sent(ActionBootNotification) == 1 })
+	if away := time.Since(before); away < 600*time.Millisecond {
+		t.Fatalf("back after %v, want at least 600 ms", away)
+	}
+}
+
+func TestDropConnectionKeepsTheSessionAndOneLoopSet(t *testing.T) {
+	csms := ocpptest.New(t)
+	csms.SetHeartbeatInterval(1)
+	s := newTestServer()
+	s.reconnectDelay = 50 * time.Millisecond
+	var mu sync.Mutex
+	frames := map[string]int{}
+	s.SetFrameLog(func(dir string, _ []byte) { mu.Lock(); frames[dir]++; mu.Unlock() })
+	s.SetOCPPURL(csms.URL(""))
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Stop() })
+	waitFor(t, "BootNotification", 5*time.Second, func() bool { return csms.Sent(ActionBootNotification) == 1 })
+	if err := s.SetValue("evConnected", true); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "StartTransaction", 5*time.Second, func() bool { return csms.Sent(ActionStartTransaction) == 1 })
+
+	for i := 0; i < 2; i++ {
+		before := time.Now()
+		s.DropConnection(300 * time.Millisecond)
+		waitFor(t, "reconnect", 5*time.Second, func() bool { return csms.Connections() == i+2 })
+		if away := time.Since(before); away < 300*time.Millisecond {
+			t.Fatalf("back after %v, want at least 300 ms", away)
+		}
+	}
+	waitFor(t, "BootNotification after the drops", 5*time.Second, func() bool { return csms.Sent(ActionBootNotification) == 3 })
+
+	beats := csms.Sent(ActionHeartbeat)
+	s.mu.RLock()
+	energy0 := s.connectors[1].EnergyWh
+	s.mu.RUnlock()
+	time.Sleep(3500 * time.Millisecond)
+	if n := csms.Sent(ActionHeartbeat) - beats; n < 2 || n > 4 {
+		t.Errorf("%d heartbeats in 3.5 s at a 1 s interval after two drops, want 3", n)
+	}
+	s.mu.RLock()
+	gained, txs, power := s.connectors[1].EnergyWh-energy0, len(s.transactions), s.connectors[1].CurrentPower
+	s.mu.RUnlock()
+	if txs != 1 || power <= 0 {
+		t.Fatalf("after the drops: %d transactions, %v W", txs, power)
+	}
+	// About 3.5 s at the charger's power, not a multiple of it.
+	if want := power * 3.5 / 3600; gained > 1.5*want {
+		t.Errorf("energy grew %.2f Wh in 3.5 s at %.0f W, want about %.2f Wh", gained, power, want)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if frames["cs->cp"] == 0 || frames["cp->cs"] == 0 {
+		t.Errorf("frame log %v, want both directions", frames)
+	}
+}
+
+// The car decides too: a one-phase car under a three-phase order draws on
+// L1 only, and a car that takes 10 A takes 10 A of a 16 A offer.
+func TestCarTakesWhatItCan(t *testing.T) {
+	// Amps per phase at the 227-230 V the simulator varies over.
+	amps := func(w float64) float64 { return w / 229 }
+	near := func(w, a float64) bool { return math.Abs(amps(w)-a) < 0.2 }
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetCar(0, 1)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); !near(got[0], 16) || got[1] != 0 || got[2] != 0 {
+		t.Fatalf("one-phase car: %v, want 16 A on L1 only", got)
+	}
+	s.SetCar(10, 0)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); !near(got[0], 10) || !near(got[2], 10) {
+		t.Fatalf("10 A car: %v, want 10 A on each phase", got)
+	}
+	s.SetCar(0, 0)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); !near(got[1], 16) {
+		t.Fatalf("car without limits: %v, want the 16 A offer", got)
+	}
+}
+
+// The charger's own load balancer caps the draw per phase below the offer.
+func TestLoadBalancerCapsTheDraw(t *testing.T) {
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetLoadBalancer(10)
+	s.GenerateValues(time.Now())
+	if got := s.PhasePowers(); got[0]/229 > 10.2 || got[0]/229 < 9.8 {
+		t.Fatalf("load balancer at 10 A: %v", got)
+	}
+	s.mu.RLock()
+	offer := s.computeEffectivePowerLocked(1, time.Now())
+	s.mu.RUnlock()
+	if offer < 10900 {
+		t.Fatalf("the offer itself is %v W, want the profile's 16 A", offer)
+	}
+}
+
+// After an offer rises from zero the car waits the start delay, while the
+// charger says Charging.
+// Every session waits out the delay, not only the first.
+func TestStartupDelayEachSession(t *testing.T) {
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetStartupDelay(time.Minute)
+	s.connectors[1].offerSince = time.Time{}
+	t0 := time.Now()
+	s.GenerateValues(t0)
+	s.GenerateValues(t0.Add(61 * time.Second))
+	if got := s.connectors[1].CurrentPower; got < 11000 {
+		t.Fatalf("first session after the delay: %v W", got)
+	}
+	delete(s.transactions, 1)
+	s.GenerateValues(t0.Add(62 * time.Second))
+	s.transactions[2] = &Transaction{ID: 2, ConnectorID: 1, StartTime: t0.Add(63 * time.Second)}
+	s.connectors[1].Status = StatusCharging
+	s.GenerateValues(t0.Add(63 * time.Second))
+	if got := s.connectors[1].CurrentPower; got != 0 {
+		t.Fatalf("second session at once: %v W, want 0 until the delay passes", got)
+	}
+	s.GenerateValues(t0.Add(124 * time.Second))
+	if got := s.connectors[1].CurrentPower; got < 11000 {
+		t.Fatalf("second session after the delay: %v W", got)
+	}
+}
+
+func TestStartupDelay(t *testing.T) {
+	s := charging(t, 22.08, false, txProfileA(16, 3))
+	s.SetStartupDelay(time.Minute)
+	s.connectors[1].offerSince = time.Time{}
+	t0 := time.Now()
+	s.GenerateValues(t0)
+	if got := s.connectors[1].CurrentPower; got != 0 || s.connectors[1].Status != StatusCharging {
+		t.Fatalf("at the offer: %v W, %s", got, s.connectors[1].Status)
+	}
+	s.GenerateValues(t0.Add(30 * time.Second))
+	if got := s.connectors[1].CurrentPower; got != 0 {
+		t.Fatalf("after 30 s: %v W", got)
+	}
+	s.GenerateValues(t0.Add(61 * time.Second))
+	if got := s.connectors[1].CurrentPower; got < 11000 {
+		t.Fatalf("after the delay: %v W", got)
 	}
 }

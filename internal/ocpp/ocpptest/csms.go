@@ -23,6 +23,7 @@ type CSMS struct {
 	srv *httptest.Server
 
 	mu       sync.Mutex
+	interval int // heartbeat interval in the BootNotification answer
 	closed   bool
 	paths    []string
 	auths    []string
@@ -34,7 +35,7 @@ type CSMS struct {
 
 // New starts a Central System that stops with the test.
 func New(t testing.TB) *CSMS {
-	f := &CSMS{t: t}
+	f := &CSMS{t: t, interval: 60}
 	up := websocket.Upgrader{Subprotocols: []string{"ocpp1.6"}}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -71,9 +72,12 @@ func New(t testing.TB) *CSMS {
 			}
 			json.Unmarshal(frame[2], &action)
 			var result interface{} = map[string]interface{}{}
+			f.mu.Lock()
+			interval := f.interval
+			f.mu.Unlock()
 			switch action {
 			case "BootNotification":
-				result = map[string]interface{}{"status": "Accepted", "currentTime": time.Now().UTC().Format(time.RFC3339), "interval": 60}
+				result = map[string]interface{}{"status": "Accepted", "currentTime": time.Now().UTC().Format(time.RFC3339), "interval": interval}
 			case "StartTransaction":
 				result = map[string]interface{}{"transactionId": 42, "idTagInfo": map[string]string{"status": "Accepted"}}
 			}
@@ -101,6 +105,13 @@ func (f *CSMS) URL(userinfo string) string {
 		u = strings.Replace(u, "ws://", "ws://"+userinfo+"@", 1)
 	}
 	return u + "/ocpp"
+}
+
+// SetHeartbeatInterval sets the interval the BootNotification answer gives.
+func (f *CSMS) SetHeartbeatInterval(s int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.interval = s
 }
 
 // SetClosed makes the Central System refuse connections, as one that is down.
@@ -155,6 +166,13 @@ func (f *CSMS) Actions() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.actions...)
+}
+
+// Connections counts the charge point's connections so far.
+func (f *CSMS) Connections() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.paths)
 }
 
 // Paths lists the request path of each connection.
